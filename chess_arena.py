@@ -13,6 +13,8 @@ Full UCI engine support, complete chess rule accuracy:
   • Robust UCI communication with eval/depth display per engine
   • Material count tracker
   • PGN export
+  • FIXED: Persistent SQLite database (no more resets)
+  • NEW: Search in Statistics and Game History windows
 """
 
 import tkinter as tk
@@ -69,6 +71,18 @@ def normalize_engine_name(name):
         if name.endswith(suffix):
             name = name[:-len(suffix)].strip()
     return name.strip()
+
+
+def get_db_path():
+    """
+    Return a STABLE, persistent path for the SQLite database.
+    Uses the user's home directory so it survives restarts and
+    never resets even if the script is moved or run from a different cwd.
+    """
+    home = os.path.expanduser("~")
+    db_dir = os.path.join(home, ".chess_arena")
+    os.makedirs(db_dir, exist_ok=True)
+    return os.path.join(db_dir, "chess_arena.db")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -669,10 +683,68 @@ def ask_promotion(root, color):
         btn.pack()
         tk.Label(f, text=name, bg=BG, fg="#888", font=('Segoe UI', 8)).pack()
 
-    # Default to queen if dialog is closed
     dialog.protocol("WM_DELETE_WINDOW", lambda: choose('q'))
     root.wait_window(dialog)
     return result[0] or 'q'
+
+
+# ═══════════════════════════════════════════════════════════
+#  Search Bar helper widget
+# ═══════════════════════════════════════════════════════════
+
+def make_search_bar(parent, on_search_cb, placeholder="🔍 Search…"):
+    """Returns (frame, StringVar) for a live search bar."""
+    frame = tk.Frame(parent, bg=PANEL_BG)
+    var = tk.StringVar()
+
+    tk.Label(frame, text="🔍", bg=PANEL_BG, fg=ACCENT,
+             font=('Segoe UI', 11)).pack(side='left', padx=(8, 2))
+
+    entry = tk.Entry(frame, textvariable=var, bg=LOG_BG, fg=TEXT,
+                     insertbackground=TEXT, font=('Segoe UI', 10),
+                     relief='flat', highlightthickness=1,
+                     highlightcolor=ACCENT, highlightbackground='#333')
+    entry.pack(side='left', fill='x', expand=True, ipady=5, padx=(0, 4))
+
+    # Placeholder
+    entry.insert(0, placeholder)
+    entry.config(fg='#666')
+
+    def on_focus_in(e):
+        if entry.get() == placeholder:
+            entry.delete(0, 'end')
+            entry.config(fg=TEXT)
+
+    def on_focus_out(e):
+        if not entry.get():
+            entry.insert(0, placeholder)
+            entry.config(fg='#666')
+
+    entry.bind('<FocusIn>', on_focus_in)
+    entry.bind('<FocusOut>', on_focus_out)
+
+    def clear_search():
+        entry.delete(0, 'end')
+        entry.insert(0, placeholder)
+        entry.config(fg='#666')
+        on_search_cb('')
+
+    clear_btn = tk.Button(frame, text='✕', command=clear_search,
+                          bg=PANEL_BG, fg='#666', relief='flat',
+                          font=('Segoe UI', 9), cursor='hand2',
+                          activebackground=PANEL_BG, activeforeground=ACCENT,
+                          padx=4)
+    clear_btn.pack(side='left', padx=(0, 4))
+
+    def _on_var_change(*_):
+        val = var.get()
+        if val == placeholder:
+            on_search_cb('')
+        else:
+            on_search_cb(val)
+
+    var.trace_add('write', _on_var_change)
+    return frame, var
 
 
 # ═══════════════════════════════════════════════════════════
@@ -708,7 +780,6 @@ class ChessGUI:
         self.flipped=False
         self._pending_b=None
         self.board_lock = threading.Lock()
-        # Flag: True while the engine thread is running (human must wait)
         self._engine_thinking = False
 
         self.e1_eval =tk.StringVar(value='—')
@@ -716,12 +787,13 @@ class ChessGUI:
         self.e1_depth=tk.StringVar(value='—')
         self.e2_depth=tk.StringVar(value='—')
 
-        self.db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chess_arena.db")
+        # ── FIXED: use stable home-dir path so DB never resets ──
+        self.db_path = get_db_path()
         self._init_database()
 
         self._build_ui()
         self._draw_board()
-        self._status("Load two engine .exe files, then press ▶ Start")
+        self._status(f"DB: {self.db_path} | Load engines and press ▶ Start")
 
     def _on_closing(self):
         if self.game_running:
@@ -733,7 +805,10 @@ class ChessGUI:
     # ─── Database methods ─────────────────────────────────────────────────────
 
     def _init_database(self):
+        """Initialize DB with WAL mode for better concurrency / no corruption."""
         conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS games (
@@ -755,6 +830,7 @@ class ChessGUI:
     def _save_game_to_db(self, white_name, black_name, result, reason, pgn, duration_sec):
         try:
             conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
             date_str = datetime.now().strftime("%Y.%m.%d")
             time_str = datetime.now().strftime("%H:%M:%S")
@@ -770,7 +846,7 @@ class ChessGUI:
         except Exception as e:
             print(f"Database error: {e}")
 
-    def _get_engine_stats(self):
+    def _get_engine_stats(self, search_query=''):
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -779,6 +855,12 @@ class ChessGUI:
             cursor.execute('SELECT DISTINCT black_engine FROM games')
             blacks = {normalize_engine_name(r[0]) for r in cursor.fetchall()}
             engines = sorted(whites | blacks)
+
+            # Apply search filter
+            if search_query:
+                q = search_query.lower()
+                engines = [e for e in engines if q in e.lower()]
+
             stats = []
             for engine in engines:
                 cursor.execute('SELECT COUNT(*) FROM games WHERE white_engine = ? OR black_engine = ?', (engine, engine))
@@ -800,7 +882,7 @@ class ChessGUI:
             print(f"Database error: {e}")
             return []
 
-    def _get_all_games(self, filter_engine=None):
+    def _get_all_games(self, filter_engine=None, search_query=''):
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -813,6 +895,16 @@ class ChessGUI:
                     FROM games ORDER BY id DESC''')
             games = cursor.fetchall()
             conn.close()
+
+            # Client-side search filter (covers all visible columns)
+            if search_query:
+                q = search_query.lower()
+                filtered = []
+                for g in games:
+                    haystack = ' '.join(str(v) for v in g).lower()
+                    if q in haystack:
+                        filtered.append(g)
+                return filtered
             return games
         except Exception as e:
             print(f"Database error: {e}")
@@ -830,118 +922,216 @@ class ChessGUI:
             print(f"Database error: {e}")
             return None
 
+    # ─── Statistics window with search ────────────────────────────────────────
+
     def _show_statistics(self):
         stats_window = tk.Toplevel(self.root)
         stats_window.title("Engine Statistics")
         stats_window.configure(bg=BG)
-        stats_window.geometry("700x500")
+        stats_window.geometry("720x560")
+
         tk.Label(stats_window, text="📊 ENGINE STATISTICS", bg=BG, fg=ACCENT,
-                 font=('Segoe UI', 16, 'bold')).pack(pady=10)
-        tk.Label(stats_window, text=f"Database: {self.db_path}", bg=BG, fg="#888",
-                 font=('Consolas', 8)).pack(pady=(0, 5))
+                 font=('Segoe UI', 16, 'bold')).pack(pady=(12, 2))
+        tk.Label(stats_window, text=f"📁 {self.db_path}", bg=BG, fg="#555",
+                 font=('Consolas', 8), wraplength=700).pack(pady=(0, 6))
+
+        # ── Search bar ──
+        search_frame = tk.Frame(stats_window, bg=BG)
+        search_frame.pack(fill='x', padx=20, pady=(0, 6))
+
+        all_stats = [None]  # mutable container so inner func can update
+        tree_ref  = [None]
+
+        def refresh_stats(query=''):
+            stats = self._get_engine_stats(search_query=query)
+            all_stats[0] = stats
+            tree = tree_ref[0]
+            if tree is None:
+                return
+            for row in tree.get_children():
+                tree.delete(row)
+            for stat in stats:
+                tree.insert('', 'end', values=(
+                    stat['engine'], stat['matches'], stat['wins'],
+                    stat['draws'], stat['loses'], f"{stat['win_rate']:.1f}%"))
+            count_lbl.config(text=f"{len(stats)} engine(s) shown")
+
+        sb_frame, _ = make_search_bar(search_frame, refresh_stats,
+                                       placeholder="🔍 Filter engines…")
+        sb_frame.pack(fill='x')
+
         tree_frame = tk.Frame(stats_window, bg=BG)
-        tree_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        tree_frame.pack(fill='both', expand=True, padx=20, pady=(0, 4))
+
         scrollbar = tk.Scrollbar(tree_frame)
         scrollbar.pack(side='right', fill='y')
+
         columns = ('Engine', 'Matches', 'Win', 'Draw', 'Lose', 'WinRate%')
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings', yscrollcommand=scrollbar.set)
+        tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                            yscrollcommand=scrollbar.set)
         scrollbar.config(command=tree.yview)
-        tree.heading('Engine', text='Engine')
-        tree.heading('Matches', text='Matches')
-        tree.heading('Win', text='Win')
-        tree.heading('Draw', text='Draw')
-        tree.heading('Lose', text='Lose')
+        tree_ref[0] = tree
+
+        tree.heading('Engine',   text='Engine')
+        tree.heading('Matches',  text='Matches')
+        tree.heading('Win',      text='Win')
+        tree.heading('Draw',     text='Draw')
+        tree.heading('Lose',     text='Lose')
         tree.heading('WinRate%', text='WinRate%')
-        tree.column('Engine', width=250)
-        tree.column('Matches', width=80, anchor='center')
-        tree.column('Win', width=60, anchor='center')
-        tree.column('Draw', width=60, anchor='center')
-        tree.column('Lose', width=60, anchor='center')
+        tree.column('Engine',   width=260)
+        tree.column('Matches',  width=75, anchor='center')
+        tree.column('Win',      width=55, anchor='center')
+        tree.column('Draw',     width=55, anchor='center')
+        tree.column('Lose',     width=55, anchor='center')
         tree.column('WinRate%', width=90, anchor='center')
+
         style = ttk.Style()
         style.theme_use('clam')
-        style.configure('Treeview', background=LOG_BG, foreground=TEXT, fieldbackground=LOG_BG, borderwidth=0)
+        style.configure('Treeview', background=LOG_BG, foreground=TEXT,
+                        fieldbackground=LOG_BG, borderwidth=0)
         style.configure('Treeview.Heading', background=BTN_BG, foreground=TEXT, borderwidth=1)
         style.map('Treeview', background=[('selected', ACCENT)])
         tree.pack(fill='both', expand=True)
-        stats = self._get_engine_stats()
-        for stat in stats:
-            tree.insert('', 'end', values=(stat['engine'], stat['matches'], stat['wins'],
-                                           stat['draws'], stat['loses'], f"{stat['win_rate']:.1f}%"))
-        tip = tk.Label(stats_window, text="💡 Double-click an engine to view its game history",
-                       bg=BG, fg="#666", font=('Segoe UI', 9))
+
+        count_lbl = tk.Label(stats_window, text="", bg=BG, fg="#555",
+                             font=('Segoe UI', 9))
+        count_lbl.pack(pady=(0, 2))
+
+        tip = tk.Label(stats_window,
+                       text="💡 Double-click an engine row to view its game history",
+                       bg=BG, fg="#555", font=('Segoe UI', 9))
         tip.pack(pady=(0, 4))
+
         def on_engine_double_click(event):
             selected = tree.selection()
             if not selected: return
             item = tree.item(selected[0])
             engine_name = item['values'][0]
             self._show_game_history(filter_engine=engine_name)
+
         tree.bind('<Double-1>', on_engine_double_click)
+
         btn_frame = tk.Frame(stats_window, bg=BG)
-        btn_frame.pack(fill='x', padx=20, pady=10)
-        tk.Button(btn_frame, text="View All Game History", command=lambda: self._show_game_history(),
-                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+        btn_frame.pack(fill='x', padx=20, pady=(0, 12))
+
+        tk.Button(btn_frame, text="View All Game History",
+                  command=lambda: self._show_game_history(),
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+
+        tk.Button(btn_frame, text="Refresh",
+                  command=lambda: refresh_stats(''),
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+
         tk.Button(btn_frame, text="Close", command=stats_window.destroy,
-                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
+
+        # Initial load
+        refresh_stats('')
+
+    # ─── Game history window with search ─────────────────────────────────────
 
     def _show_game_history(self, filter_engine=None):
         history_window = tk.Toplevel(self.root)
-        if filter_engine:
-            norm_name = normalize_engine_name(filter_engine)
-            history_window.title(f"Game History — {norm_name}")
-        else:
-            history_window.title("Game History")
+        norm_filter = normalize_engine_name(filter_engine) if filter_engine else None
+        history_window.title(f"Game History{' — ' + norm_filter if norm_filter else ''}")
         history_window.configure(bg=BG)
-        history_window.geometry("900x600")
+        history_window.geometry("960x640")
+
+        # Header
         header_frame = tk.Frame(history_window, bg=BG)
-        header_frame.pack(fill='x', padx=20, pady=(10, 0))
+        header_frame.pack(fill='x', padx=20, pady=(12, 0))
         tk.Label(header_frame, text="📜 GAME HISTORY", bg=BG, fg=ACCENT,
                  font=('Segoe UI', 16, 'bold')).pack(side='left')
-        if filter_engine:
-            norm_name = normalize_engine_name(filter_engine)
-            tk.Label(header_frame, text=f"  ·  Filtered: {norm_name}", bg=BG, fg="#FFD700",
+        if norm_filter:
+            tk.Label(header_frame, text=f"  ·  {norm_filter}", bg=BG, fg="#FFD700",
                      font=('Segoe UI', 11)).pack(side='left')
             tk.Button(header_frame, text="✕ Clear Filter",
-                      command=lambda: [history_window.destroy(), self._show_game_history()],
+                      command=lambda: [history_window.destroy(),
+                                       self._show_game_history()],
                       bg=BTN_BG, fg=TEXT, font=('Segoe UI', 9), padx=10, pady=4,
                       cursor='hand2', relief='flat').pack(side='right')
+
+        # ── Search bar ──
+        search_container = tk.Frame(history_window, bg=BG)
+        search_container.pack(fill='x', padx=20, pady=(8, 4))
+
+        all_games_cache = [None]
+        tree_ref2       = [None]
+        count_lbl2      = [None]
+
+        def refresh_history(query=''):
+            games = self._get_all_games(filter_engine=filter_engine,
+                                        search_query=query)
+            all_games_cache[0] = games
+            tree = tree_ref2[0]
+            if tree is None:
+                return
+            for row in tree.get_children():
+                tree.delete(row)
+            for game in games:
+                game_id, white, black, result, reason, date, time_str, moves, duration = game
+                duration_str = f"{duration//60}m {duration%60}s" if duration else "N/A"
+                tree.insert('', 'end', values=(
+                    game_id, date, time_str, white, black,
+                    result, reason, moves or 0, duration_str))
+            if count_lbl2[0]:
+                count_lbl2[0].config(text=f"{len(games)} game(s) shown")
+
+        sb_frame2, _ = make_search_bar(search_container, refresh_history,
+                                        placeholder="🔍 Search by engine, result, reason, date…")
+        sb_frame2.pack(fill='x')
+
+        # Tree
         tree_frame = tk.Frame(history_window, bg=BG)
-        tree_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        tree_frame.pack(fill='both', expand=True, padx=20, pady=(4, 0))
         scrollbar = tk.Scrollbar(tree_frame)
         scrollbar.pack(side='right', fill='y')
-        columns = ('ID', 'Date', 'Time', 'White', 'Black', 'Result', 'Reason', 'Moves', 'Duration')
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings', yscrollcommand=scrollbar.set)
+
+        columns = ('ID', 'Date', 'Time', 'White', 'Black',
+                   'Result', 'Reason', 'Moves', 'Duration')
+        tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                            yscrollcommand=scrollbar.set)
         scrollbar.config(command=tree.yview)
+        tree_ref2[0] = tree
+
         for col, w in [('ID',40),('Date',80),('Time',70),('White',150),('Black',150),
                        ('Result',60),('Reason',150),('Moves',50),('Duration',80)]:
             tree.heading(col, text=col)
             anchor = 'center' if col not in ('White','Black','Reason') else 'w'
             tree.column(col, width=w, anchor=anchor)
         tree.pack(fill='both', expand=True)
-        games = self._get_all_games(filter_engine=filter_engine)
-        for game in games:
-            game_id, white, black, result, reason, date, time_str, moves, duration = game
-            duration_str = f"{duration//60}m {duration%60}s" if duration else "N/A"
-            tree.insert('', 'end', values=(game_id, date, time_str, white, black, result, reason, moves, duration_str))
+
+        count_lbl2[0] = tk.Label(history_window, text="", bg=BG, fg="#555",
+                                  font=('Segoe UI', 9))
+        count_lbl2[0].pack(pady=(2, 0))
+
         tk.Label(history_window,
-                 text="💡 Double-click a row to view its PGN   |   Click a White/Black engine cell to filter",
-                 bg=BG, fg="#555", font=('Segoe UI', 8)).pack(pady=(0, 4))
+                 text="💡 Double-click a row to view PGN   |   Click White/Black cell to filter by engine",
+                 bg=BG, fg="#444", font=('Segoe UI', 8)).pack(pady=(0, 4))
+
         def view_pgn(event=None):
             selected = tree.selection()
             if not selected:
-                if event is None: messagebox.showinfo("No Selection", "Please select a game to view.")
+                if event is None:
+                    messagebox.showinfo("No Selection", "Please select a game.")
                 return
             item = tree.item(selected[0])
             game_id = item['values'][0]
             pgn = self._get_game_pgn(game_id)
-            if pgn: self._show_pgn_viewer(pgn, item['values'], games, tree)
-            else: messagebox.showerror("Error", "Could not load PGN for this game.")
+            if pgn:
+                self._show_pgn_viewer(pgn, item['values'],
+                                      all_games_cache[0] or [], tree)
+            else:
+                messagebox.showerror("Error", "Could not load PGN.")
+
         def _on_tree_click(event, double=False):
             region = tree.identify_region(event.x, event.y)
             if region != 'cell': return
-            col_id = tree.identify_column(event.x)
-            row_id = tree.identify_row(event.y)
+            col_id  = tree.identify_column(event.x)
+            row_id  = tree.identify_row(event.y)
             if not row_id: return
             col_index = int(col_id.replace('#', '')) - 1
             item = tree.item(row_id)
@@ -949,8 +1139,11 @@ class ChessGUI:
             if double:
                 game_id = values[0]
                 pgn = self._get_game_pgn(game_id)
-                if pgn: self._show_pgn_viewer(pgn, values, games, tree)
-                else: messagebox.showerror("Error", "Could not load PGN.")
+                if pgn:
+                    self._show_pgn_viewer(pgn, values,
+                                          all_games_cache[0] or [], tree)
+                else:
+                    messagebox.showerror("Error", "Could not load PGN.")
             else:
                 if col_index == 3:
                     history_window.destroy()
@@ -958,18 +1151,37 @@ class ChessGUI:
                 elif col_index == 4:
                     history_window.destroy()
                     self._show_game_history(filter_engine=values[4])
-        tree.bind('<Button-1>', lambda e: _on_tree_click(e, double=False))
-        tree.bind('<Double-1>', lambda e: _on_tree_click(e, double=True))
+
+        tree.bind('<Button-1>',  lambda e: _on_tree_click(e, double=False))
+        tree.bind('<Double-1>',  lambda e: _on_tree_click(e, double=True))
+
         btn_frame = tk.Frame(history_window, bg=BG)
-        btn_frame.pack(fill='x', padx=20, pady=10)
-        tk.Button(btn_frame, text="View PGN", command=view_pgn, bg=ACCENT, fg=TEXT,
-                  font=('Segoe UI', 10, 'bold'), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
-        if filter_engine:
+        btn_frame.pack(fill='x', padx=20, pady=(4, 12))
+
+        tk.Button(btn_frame, text="View PGN", command=view_pgn,
+                  bg=ACCENT, fg=TEXT, font=('Segoe UI', 10, 'bold'),
+                  padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+
+        if norm_filter:
             tk.Button(btn_frame, text="Show All Games",
-                      command=lambda: [history_window.destroy(), self._show_game_history()],
-                      bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+                      command=lambda: [history_window.destroy(),
+                                       self._show_game_history()],
+                      bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                      padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+
+        tk.Button(btn_frame, text="Refresh",
+                  command=lambda: refresh_history(''),
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+
         tk.Button(btn_frame, text="Close", command=history_window.destroy,
-                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
+
+        # Initial load
+        refresh_history('')
+
+    # ─── PGN viewer (unchanged except minor cleanup) ──────────────────────────
 
     def _show_pgn_viewer(self, pgn, game_info, all_games, tree_ref=None):
         pgn_window = tk.Toplevel(self.root)
@@ -982,6 +1194,7 @@ class ChessGUI:
             if game[0] == current_game_id:
                 current_index = idx
                 break
+
         def load_game(direction):
             if current_index is None: return
             new_index = current_index + direction
@@ -994,22 +1207,27 @@ class ChessGUI:
                     duration_str = f"{duration//60}m {duration%60}s" if duration else "N/A"
                     new_game_info = (game_id, date, time_str, white, black, result, reason, moves, duration_str)
                     self._show_pgn_viewer(new_pgn, new_game_info, all_games, tree_ref)
+
         top_nav = tk.Frame(pgn_window, bg=PANEL_BG)
         top_nav.pack(fill='x', padx=10, pady=(10, 5))
         tk.Button(top_nav, text="◀ Previous Game", command=lambda: load_game(-1),
                   bg=BTN_BG, fg=TEXT, font=('Segoe UI', 9, 'bold'), padx=10, pady=5,
                   cursor='hand2', relief='flat',
                   state='normal' if current_index and current_index > 0 else 'disabled').pack(side='left', padx=5)
-        tk.Label(top_nav, text=f"Game {current_index + 1 if current_index is not None else '?'} of {len(all_games)}",
+        tk.Label(top_nav,
+                 text=f"Game {current_index + 1 if current_index is not None else '?'} of {len(all_games)}",
                  bg=PANEL_BG, fg=ACCENT, font=('Segoe UI', 10, 'bold')).pack(side='left', expand=True)
         tk.Button(top_nav, text="Next Game ▶", command=lambda: load_game(1),
                   bg=BTN_BG, fg=TEXT, font=('Segoe UI', 9, 'bold'), padx=10, pady=5,
                   cursor='hand2', relief='flat',
                   state='normal' if current_index is not None and current_index < len(all_games) - 1 else 'disabled').pack(side='right', padx=5)
+
         main_container = tk.Frame(pgn_window, bg=BG)
         main_container.pack(fill='both', expand=True, padx=10, pady=5)
+
         left_frame = tk.Frame(main_container, bg=BG)
         left_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
+
         info_frame = tk.Frame(left_frame, bg=PANEL_BG)
         info_frame.pack(fill='x', pady=(0, 10))
         tk.Label(info_frame, text=f"Game #{game_info[0]} - {game_info[1]} {game_info[2]}",
@@ -1020,6 +1238,7 @@ class ChessGUI:
                  font=('Segoe UI', 10)).pack(anchor='w', padx=10)
         tk.Label(info_frame, text=f"Result: {game_info[5]} - {game_info[6]}", bg=PANEL_BG, fg=TEXT,
                  font=('Segoe UI', 10)).pack(anchor='w', padx=10, pady=(0, 5))
+
         board_frame = tk.Frame(left_frame, bg=BG)
         board_frame.pack(pady=10)
         replay_board = Board()
@@ -1030,44 +1249,49 @@ class ChessGUI:
         replay_canvas.pack()
         moves_list = self._parse_pgn_moves(pgn)
         current_move_index = [0]
+
         def draw_replay_board(highlight_move=None):
             replay_canvas.delete('all')
             lm_from = lm_to = None
             if highlight_move and len(highlight_move) >= 4:
                 lm_from = (8-int(highlight_move[1]), ord(highlight_move[0])-ord('a'))
-                lm_to = (8-int(highlight_move[3]), ord(highlight_move[2])-ord('a'))
+                lm_to   = (8-int(highlight_move[3]), ord(highlight_move[2])-ord('a'))
             for row in range(8):
                 for col in range(8):
                     light = (row + col) % 2 == 0
                     color = LIGHT_SQ if light else DARK_SQ
                     if lm_from and (row, col) == lm_from: color = LAST_FROM
-                    elif lm_to and (row, col) == lm_to: color = LAST_TO
+                    elif lm_to and (row, col) == lm_to:  color = LAST_TO
                     x1, y1 = col * replay_size, row * replay_size
                     x2, y2 = x1 + replay_size, y1 + replay_size
                     replay_canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline='')
                     pc = replay_board.get(row, col)
                     if pc and pc != '.':
                         sym = UNICODE.get(pc, pc)
-                        fg = '#F5F5F5' if pc.isupper() else '#1A1A1A'
-                        sh = '#000000' if pc.isupper() else '#888888'
+                        fg  = '#F5F5F5' if pc.isupper() else '#1A1A1A'
+                        sh  = '#000000' if pc.isupper() else '#888888'
                         fsz = int(replay_size * 0.60)
                         cx, cy = x1 + replay_size//2, y1 + replay_size//2
                         replay_canvas.create_text(cx+1, cy+2, text=sym, font=('Segoe UI', fsz), fill=sh)
-                        replay_canvas.create_text(cx, cy, text=sym, font=('Segoe UI', fsz), fill=fg)
+                        replay_canvas.create_text(cx,   cy,   text=sym, font=('Segoe UI', fsz), fill=fg)
             replay_canvas.create_rectangle(0, 0, replay_size*8, replay_size*8, outline='#555', width=1)
+
         def update_move_label():
-            total = len(moves_list)
+            total   = len(moves_list)
             current = current_move_index[0]
-            if current == 0: move_label.config(text="Start position")
+            if current == 0:
+                move_label.config(text="Start position")
             elif current < total:
-                side = "White" if current % 2 == 1 else "Black"
+                side     = "White" if current % 2 == 1 else "Black"
                 move_num = (current + 1) // 2 + 1
                 move_label.config(text=f"Move {move_num}: {side} - {moves_list[current-1]}")
             else:
-                move_label.config(text=f"End of game")
+                move_label.config(text="End of game")
+
         def go_to_start():
             replay_board.reset(); current_move_index[0] = 0
             draw_replay_board(); update_move_label()
+
         def go_to_end():
             replay_board.reset()
             for move in moves_list:
@@ -1076,6 +1300,7 @@ class ChessGUI:
             current_move_index[0] = len(moves_list)
             last_move = moves_list[-1] if moves_list else None
             draw_replay_board(last_move); update_move_label()
+
         def prev_move():
             if current_move_index[0] > 0:
                 replay_board.reset(); current_move_index[0] -= 1
@@ -1084,6 +1309,7 @@ class ChessGUI:
                     except: break
                 last_move = moves_list[current_move_index[0]-1] if current_move_index[0] > 0 else None
                 draw_replay_board(last_move); update_move_label()
+
         def next_move():
             if current_move_index[0] < len(moves_list):
                 try:
@@ -1093,9 +1319,11 @@ class ChessGUI:
                     draw_replay_board(move); update_move_label()
                 except Exception as e:
                     messagebox.showerror("Error", f"Invalid move: {e}")
+
         move_label = tk.Label(left_frame, text="Start position", bg=BG, fg=ACCENT,
                               font=('Segoe UI', 11, 'bold'))
         move_label.pack(pady=10)
+
         nav_frame = tk.Frame(left_frame, bg=BG)
         nav_frame.pack(pady=10)
         for text, cmd in [("⏮ Start", go_to_start), ("◀ Prev", prev_move),
@@ -1103,51 +1331,65 @@ class ChessGUI:
             tk.Button(nav_frame, text=text, command=cmd, bg=BTN_BG, fg=TEXT,
                       font=('Segoe UI', 10, 'bold'), padx=15, pady=8,
                       cursor='hand2', relief='flat').pack(side='left', padx=5)
+
         def on_key(event):
-            if event.keysym == 'Left': prev_move()
+            if   event.keysym == 'Left':  prev_move()
             elif event.keysym == 'Right': next_move()
-            elif event.keysym == 'Home': go_to_start()
-            elif event.keysym == 'End': go_to_end()
+            elif event.keysym == 'Home':  go_to_start()
+            elif event.keysym == 'End':   go_to_end()
             elif event.keysym == 'Prior': load_game(-1)
-            elif event.keysym == 'Next': load_game(1)
-        pgn_window.bind('<Left>', on_key)
+            elif event.keysym == 'Next':  load_game(1)
+
+        pgn_window.bind('<Left>',  on_key)
         pgn_window.bind('<Right>', on_key)
-        pgn_window.bind('<Home>', on_key)
-        pgn_window.bind('<End>', on_key)
+        pgn_window.bind('<Home>',  on_key)
+        pgn_window.bind('<End>',   on_key)
         pgn_window.bind('<Prior>', on_key)
-        pgn_window.bind('<Next>', on_key)
+        pgn_window.bind('<Next>',  on_key)
+
         right_frame = tk.Frame(main_container, bg=BG)
         right_frame.pack(side='right', fill='both', expand=True)
         tk.Label(right_frame, text="PGN Notation", bg=BG, fg=ACCENT,
                  font=('Segoe UI', 12, 'bold')).pack(pady=(0, 5))
-        text_frame = tk.Frame(right_frame, bg=LOG_BG, highlightthickness=1, highlightbackground='#333')
+        text_frame = tk.Frame(right_frame, bg=LOG_BG, highlightthickness=1,
+                               highlightbackground='#333')
         text_frame.pack(fill='both', expand=True, pady=(0, 10))
-        pgn_text = scrolledtext.ScrolledText(text_frame, bg=LOG_BG, fg=TEXT,
-                                              font=('Consolas', 10), relief='flat',
-                                              padx=10, pady=10, wrap='word')
+        pgn_text = scrolledtext.ScrolledText(
+            text_frame, bg=LOG_BG, fg=TEXT,
+            font=('Consolas', 10), relief='flat',
+            padx=10, pady=10, wrap='word')
         pgn_text.pack(fill='both', expand=True)
         pgn_text.insert('1.0', pgn)
         pgn_text.config(state='disabled')
-        tk.Label(right_frame, text="⌨ Move: ←→ | Start/End: Home/End | Game: PgUp/PgDn",
+
+        tk.Label(right_frame,
+                 text="⌨ Move: ←→ | Start/End: Home/End | Game: PgUp/PgDn",
                  bg=BG, fg="#666", font=('Segoe UI', 8)).pack(pady=5)
-        btn_frame = tk.Frame(right_frame, bg=BG)
-        btn_frame.pack(fill='x', pady=(0, 10))
+
+        btn_frame2 = tk.Frame(right_frame, bg=BG)
+        btn_frame2.pack(fill='x', pady=(0, 10))
+
         def copy_pgn():
             pgn_window.clipboard_clear()
             pgn_window.clipboard_append(pgn)
             messagebox.showinfo("Copied", "PGN copied to clipboard!")
+
         def export_pgn():
-            path = filedialog.asksaveasfilename(defaultextension=".pgn",
-                filetypes=[("PGN", "*.pgn"), ("All", "*.*")], title="Export PGN")
+            path = filedialog.asksaveasfilename(
+                defaultextension=".pgn",
+                filetypes=[("PGN", "*.pgn"), ("All", "*.*")],
+                title="Export PGN")
             if path:
                 with open(path, 'w') as f: f.write(pgn)
                 messagebox.showinfo("Saved", f"PGN exported to:\n{path}")
-        tk.Button(btn_frame, text="Copy PGN", command=copy_pgn, bg=BTN_BG, fg=TEXT,
+
+        tk.Button(btn_frame2, text="Copy PGN", command=copy_pgn, bg=BTN_BG, fg=TEXT,
                   font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
-        tk.Button(btn_frame, text="Export PGN", command=export_pgn, bg=BTN_BG, fg=TEXT,
+        tk.Button(btn_frame2, text="Export PGN", command=export_pgn, bg=BTN_BG, fg=TEXT,
                   font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
-        tk.Button(btn_frame, text="Close", command=pgn_window.destroy, bg=BTN_BG, fg=TEXT,
+        tk.Button(btn_frame2, text="Close", command=pgn_window.destroy, bg=BTN_BG, fg=TEXT,
                   font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
+
         draw_replay_board()
         update_move_label()
 
@@ -1439,7 +1681,6 @@ class ChessGUI:
             lm_from=(8-int(self.last_move[1]),ord(self.last_move[0])-ord('a'))
             lm_to  =(8-int(self.last_move[3]),ord(self.last_move[2])-ord('a'))
 
-        # Legal destination dots for selected human piece
         legal_dests = set()
         if self.play_mode.get() == "human_vs_engine" and self.selected_square:
             sr, sc = self.selected_square
@@ -1468,7 +1709,6 @@ class ChessGUI:
                     fsz=int(sz*0.60); cx,cy=x1+sz//2,y1+sz//2
                     self.canvas.create_text(cx+1,cy+2,text=sym,font=('Segoe UI',fsz),fill=sh)
                     self.canvas.create_text(cx,  cy,  text=sym,font=('Segoe UI',fsz),fill=fg)
-                # Legal-move indicator dots
                 if (br, bc) in legal_dests:
                     cx, cy = x1 + sz//2, y1 + sz//2
                     if pc and pc != '.':
@@ -1486,22 +1726,15 @@ class ChessGUI:
             self.check_lbl.config(text="")
         self._update_banners()
 
-    # ─── FIXED: Board click handler ───────────────────────────────────────────
     def _on_board_click(self, event):
-        """Handle human player clicks. Fixed to strictly enforce legal moves only."""
-        if self.play_mode.get() != "human_vs_engine":
-            return
-        if not self.game_running:
-            return
-        # Block clicks while engine is thinking
-        if self._engine_thinking:
-            return
+        if self.play_mode.get() != "human_vs_engine": return
+        if not self.game_running: return
+        if self._engine_thinking: return
 
         sz = self.sq_size
         col = event.x // sz
         row = event.y // sz
-        if not (0 <= row < 8 and 0 <= col < 8):
-            return
+        if not (0 <= row < 8 and 0 <= col < 8): return
 
         if self.flipped:
             br, bc = 7 - row, 7 - col
@@ -1511,7 +1744,6 @@ class ChessGUI:
         human_color = self.player_color.get()
 
         with self.board_lock:
-            # Verify it is actually the human's turn
             if (human_color == "white" and self.board.turn != 'w') or \
                (human_color == "black" and self.board.turn != 'b'):
                 return
@@ -1523,7 +1755,6 @@ class ChessGUI:
                  (human_color == "black" and piece_at_click.islower()))
             )
 
-            # ── No piece selected yet ─────────────────────────────────────────
             if self.selected_square is None:
                 if is_own_piece:
                     self.selected_square = (br, bc)
@@ -1532,47 +1763,35 @@ class ChessGUI:
 
             from_r, from_c = self.selected_square
 
-            # ── Clicked the same square → deselect ───────────────────────────
             if (br, bc) == (from_r, from_c):
                 self.selected_square = None
                 self.root.after(0, self._draw_board)
                 return
 
-            # ── Clicked another own piece → re-select ────────────────────────
             if is_own_piece:
                 self.selected_square = (br, bc)
                 self.root.after(0, self._draw_board)
                 return
 
-            # ── Attempt move ──────────────────────────────────────────────────
             to_r, to_c = br, bc
             legal_moves = self.board.legal_moves()
 
-            # Collect all legal moves from the selected square to the destination
             matching_moves = [m for m in legal_moves
                               if m[0] == from_r and m[1] == from_c
                               and m[2] == to_r and m[3] == to_c]
 
             if not matching_moves:
-                # Not a legal destination — keep selection, let player try again
-                # (do NOT deselect — makes UX smoother)
                 self.root.after(0, self._draw_board)
                 return
 
-            # ── Handle promotion ──────────────────────────────────────────────
             if any(m[4] for m in matching_moves):
-                # This is a pawn promotion move — ask the player
                 promo_piece = None
                 self.selected_square = None
                 self.root.after(0, self._draw_board)
-                # Must run promotion dialog on main thread — we're already on it
-                # (canvas bind callbacks run on main thread)
                 promo_piece = ask_promotion(self.root, 'w' if human_color == 'white' else 'b')
                 promo_piece = promo_piece.lower()
-                # Find the specific legal move with chosen promotion
                 move_tuple = next((m for m in matching_moves if m[4] == promo_piece), None)
                 if move_tuple is None:
-                    # Fallback to queen if somehow not found
                     move_tuple = next((m for m in matching_moves if m[4] == 'q'), matching_moves[0])
                 uci = (f"{chr(ord('a')+from_c)}{8-from_r}"
                        f"{chr(ord('a')+to_c)}{8-to_r}{move_tuple[4]}")
@@ -1582,7 +1801,6 @@ class ChessGUI:
 
             self.selected_square = None
 
-            # Apply the move while holding the lock
             try:
                 san, cap = self.board.apply_uci(uci)
             except ValueError as e:
@@ -1594,7 +1812,6 @@ class ChessGUI:
             move_num = (len(self.board.move_history) + 1) // 2
             over, result, reason, winner_color = self.board.game_result()
 
-        # ── Lock released — update GUI ────────────────────────────────────────
         self.root.after(0, self._draw_board)
         self.root.after(0, self._update_info)
 
@@ -1737,29 +1954,21 @@ class ChessGUI:
             messagebox.showerror("Engine Error", str(e)); return False
 
     def _start_engine_turn(self):
-        """Launch a single-shot engine thread. Safe to call from main thread."""
-        if not self.game_running:
-            return
+        if not self.game_running: return
         self._engine_thinking = True
         self.game_thread = threading.Thread(target=self._engine_move_thread, daemon=True)
         self.game_thread.start()
 
     def _engine_move_thread(self):
-        """
-        Single-shot: make exactly ONE engine move, then clear the thinking flag.
-        All GUI updates go through root.after.
-        """
         try:
             self._do_engine_move()
         finally:
             self._engine_thinking = False
 
     def _do_engine_move(self):
-        """Core engine move logic for human-vs-engine mode."""
         while self.game_paused and self.game_running:
             time.sleep(0.1)
-        if not self.game_running:
-            return
+        if not self.game_running: return
 
         engine_color = 'black' if self.player_color.get() == 'white' else 'white'
         engine_turn  = 'b' if engine_color == 'black' else 'w'
@@ -1774,19 +1983,15 @@ class ChessGUI:
         if not engine or not engine.alive:
             winner_name = self.player_name.get()
             res = '1-0' if self.player_color.get() == 'white' else '0-1'
-            self.root.after(0, lambda: self._end_game(
-                res, f"{name}'s engine process died", winner_name))
+            self.root.after(0, lambda: self._end_game(res, f"{name}'s engine process died", winner_name))
             return
 
         with self.board_lock:
-            if self.board.turn != engine_turn:
-                return
+            if self.board.turn != engine_turn: return
             mvs = self.board.uci_moves_str()
 
         movetime = self.movetime.get()
-
-        def on_info(info):
-            self.root.after(0, lambda: self._show_eval(engine, side))
+        def on_info(info): self.root.after(0, lambda: self._show_eval(engine, side))
 
         try:
             uci = engine.get_best_move(mvs, movetime, on_info=on_info)
@@ -1794,24 +1999,19 @@ class ChessGUI:
             self.root.after(0, self._log_eng, f"[ERR] {ex}", tag)
             uci = None
 
-        if not self.game_running:
-            return
+        if not self.game_running: return
 
         if not uci:
             winner_name = self.player_name.get()
             res = '1-0' if self.player_color.get() == 'white' else '0-1'
-            self.root.after(0, lambda: self._end_game(
-                res, f"{name} returned no move", winner_name))
+            self.root.after(0, lambda: self._end_game(res, f"{name} returned no move", winner_name))
             return
 
         self.root.after(0, self._log_eng, f"[{tag}] bestmove {uci}", tag)
 
         with self.board_lock:
-            if not self.game_running:
-                return
-            # Extra safety: verify it is still the engine's turn
-            if self.board.turn != engine_turn:
-                return
+            if not self.game_running: return
+            if self.board.turn != engine_turn: return
             try:
                 san, cap = self.board.apply_uci(uci)
             except ValueError as ex:
@@ -1827,7 +2027,6 @@ class ChessGUI:
             over, result, reason, winner_color = self.board.game_result()
             in_check = self.board.in_check()
 
-        # GUI updates
         self.root.after(0, self._draw_board)
         self.root.after(0, self._update_info)
 
