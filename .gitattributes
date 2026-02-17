@@ -1,0 +1,2 @@
+Engines/lucas/stockfish/*.nnue filter=lfs diff=lfs merge=lfs -text
+Engines/tarrasch/stockfish-windows-x86-64-avx2/*.exe filter=lfs diff=lfs merge=lfs -text
