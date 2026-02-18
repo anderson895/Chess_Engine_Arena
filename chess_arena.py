@@ -930,19 +930,12 @@ def make_search_bar(parent, on_search_cb, placeholder="🔍 Search…"):
 # ═══════════════════════════════════════════════════════════
 
 class LoadingScreen:
-    """
-    Full-window splash shown while openings CSV and analyzer engine
-    are being loaded in background threads.  The main ChessGUI is
-    created (and the splash destroyed) only after BOTH finish.
-    """
-
     def __init__(self, root):
         self.root = root
         self.root.title("♟  Chess Engine Arena — Starting…")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
 
-        # Center window
         w, h = 520, 360
         sw = root.winfo_screenwidth()
         sh = root.winfo_screenheight()
@@ -958,8 +951,6 @@ class LoadingScreen:
         self._build()
         self._start_loading()
 
-    # ── UI ────────────────────────────────────────────────────────────────────
-
     def _build(self):
         outer = tk.Frame(self.root, bg=BG)
         outer.pack(fill='both', expand=True, padx=40, pady=30)
@@ -972,7 +963,6 @@ class LoadingScreen:
 
         tk.Frame(outer, bg=ACCENT, height=2).pack(fill='x', pady=(12, 20))
 
-        # ── Opening bar ──
         row1 = tk.Frame(outer, bg=BG)
         row1.pack(fill='x', pady=(0, 10))
         tk.Label(row1, text="📖  Openings CSV", bg=BG, fg="#AAA",
@@ -984,7 +974,6 @@ class LoadingScreen:
                                    font=('Consolas', 9), width=16, anchor='w')
         self._open_lbl.pack(side='left')
 
-        # ── Analyzer bar ──
         row2 = tk.Frame(outer, bg=BG)
         row2.pack(fill='x', pady=(0, 10))
         tk.Label(row2, text="🔍  Analyzer Engine", bg=BG, fg="#AAA",
@@ -996,12 +985,10 @@ class LoadingScreen:
                                    font=('Consolas', 9), width=16, anchor='w')
         self._anal_lbl.pack(side='left')
 
-        # ── Status text ──
         self._status_var = tk.StringVar(value="Initialising…")
         tk.Label(outer, textvariable=self._status_var, bg=BG, fg="#555",
                  font=('Segoe UI', 9), anchor='center').pack(pady=(16, 0))
 
-        # Style the progress bars
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('TProgressbar', troughcolor=LOG_BG,
@@ -1010,8 +997,6 @@ class LoadingScreen:
         self._open_bar.start(12)
         self._anal_bar.start(12)
 
-    # ── Background loading ────────────────────────────────────────────────────
-
     def _start_loading(self):
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1019,7 +1004,6 @@ class LoadingScreen:
             script_dir = os.getcwd()
         cwd = os.getcwd()
 
-        # Build CSV candidates
         csv_candidates = []
         for base in [cwd, script_dir]:
             for sub in ["opening", "openings", ""]:
@@ -1027,7 +1011,6 @@ class LoadingScreen:
                     p = os.path.join(base, sub, fname) if sub else os.path.join(base, fname)
                     csv_candidates.append(p)
 
-        # Build analyzer candidates
         anal_candidates = []
         for base in [script_dir, cwd]:
             for sub in ["analyzer", "stockfish", "engine", "."]:
@@ -1059,7 +1042,6 @@ class LoadingScreen:
                     self._openings_done = True
                     self.root.after(0, self._check_done)
                     return
-        # Not found / empty
         self.root.after(0, lambda: (
             self._open_bar.stop(),
             self._open_lbl.config(text="⚠ Not found", fg="#FF8800"),
@@ -1111,14 +1093,12 @@ class LoadingScreen:
         self.root.after(700, self._launch_main)
 
     def _launch_main(self):
-        # Destroy loading widgets
         for w in self.root.winfo_children():
             w.destroy()
 
-        # Reconfigure root for the full arena
         self.root.resizable(True, True)
         self.root.minsize(1120, 860)
-        self.root.geometry("")   # let ChessGUI size itself
+        self.root.geometry("")
 
         ChessGUI(self.root,
                  preloaded_book=self._opening_book,
@@ -1147,13 +1127,11 @@ class ChessGUI:
         self.board=Board()
         self.engine1=None; self.engine2=None
 
-        # ── Analyzer engine ──────────────────────────────────────────────────
         self._analyzer_lock = threading.Lock()
         self._last_eval_cp  = None
         self._last_quality  = None
         self._move_qualities = []
 
-        # Use preloaded opening book from LoadingScreen
         if preloaded_book and preloaded_book.loaded:
             self.opening_book      = preloaded_book
             self._opening_csv_path = preloaded_book_path
@@ -1161,7 +1139,6 @@ class ChessGUI:
             self.opening_book      = OpeningBook()
             self._opening_csv_path = None
 
-        # Use preloaded analyzer from LoadingScreen
         self._analyzer_path = preloaded_analyzer_path
         if preloaded_analyzer and preloaded_analyzer.alive:
             self.analyzer = preloaded_analyzer
@@ -1194,7 +1171,6 @@ class ChessGUI:
 
         self._eval_bar_cp = 0
 
-        # Opening display
         self.opening_var = tk.StringVar(value="")
         self.current_opening_name = None
 
@@ -1205,7 +1181,6 @@ class ChessGUI:
         self._draw_board()
         self._reset_opening()
 
-        # Update labels now that everything is preloaded
         self._update_book_lbl()
         self._update_analyzer_lbl()
         if self.opening_book and self.opening_book.loaded:
@@ -1312,8 +1287,6 @@ class ChessGUI:
     def _on_quality_result(self, quality, cp_after, san):
         self._draw_eval_bar(cp_after)
         self._update_quality_display(quality, san)
-        # NOTE: _annotate_last_move intentionally NOT called here
-        #       (move quality badges removed from game log per user request)
 
     def _update_quality_display(self, quality, san):
         if quality is None:
@@ -1403,7 +1376,6 @@ class ChessGUI:
             messagebox.showerror("Error", f"Could not start analyzer:\n{path}")
 
     def _start_analyzer(self):
-        """Start analyzer synchronously (called only from browse button)."""
         if not self._analyzer_path:
             return
         try:
@@ -1545,7 +1517,7 @@ class ChessGUI:
         stats_window = tk.Toplevel(self.root)
         stats_window.title("Engine Statistics")
         stats_window.configure(bg=BG)
-        stats_window.geometry("720x560")
+        stats_window.geometry("720x580")
 
         tk.Label(stats_window, text="📊 ENGINE STATISTICS", bg=BG, fg=ACCENT,
                  font=('Segoe UI', 16, 'bold')).pack(pady=(12, 2))
@@ -1557,17 +1529,79 @@ class ChessGUI:
 
         all_stats = [None]
         tree_ref  = [None]
+        # sort_state tracks current sort column and direction
+        sort_state = {'col': None, 'reverse': False}
 
-        def refresh_stats(query=''):
-            stats = self._get_engine_stats(search_query=query)
-            all_stats[0] = stats
+        # Column metadata: name -> (stat_dict_key, type)
+        COL_META = {
+            'Engine':   ('engine',   str),
+            'Matches':  ('matches',  int),
+            'Win':      ('wins',     int),
+            'Draw':     ('draws',    int),
+            'Lose':     ('loses',    int),
+            'WinRate%': ('win_rate', float),
+        }
+        BASE_LABELS = {c: c for c in COL_META}
+
+        def _render_rows(stats):
+            """Clear tree and re-insert rows from stats list."""
             tree = tree_ref[0]
-            if tree is None: return
-            for row in tree.get_children(): tree.delete(row)
+            if tree is None:
+                return
+            for row in tree.get_children():
+                tree.delete(row)
             for stat in stats:
                 tree.insert('', 'end', values=(
                     stat['engine'], stat['matches'], stat['wins'],
                     stat['draws'], stat['loses'], f"{stat['win_rate']:.1f}%"))
+
+        def _update_headings():
+            """Redraw all column headings, adding ▲/▼ to the active sort column."""
+            tree = tree_ref[0]
+            if tree is None:
+                return
+            columns = ('Engine', 'Matches', 'Win', 'Draw', 'Lose', 'WinRate%')
+            for col in columns:
+                label = BASE_LABELS[col]
+                if col == sort_state['col']:
+                    label += ' \u25bc' if sort_state['reverse'] else ' \u25b2'
+                tree.heading(col, text=label,
+                             command=lambda c=col: sort_by_column(c))
+
+        def sort_by_column(col):
+            """Sort the stats table by the given column, toggling direction."""
+            stats = all_stats[0]
+            if not stats:
+                return
+            # Toggle direction if same column clicked again
+            if sort_state['col'] == col:
+                sort_state['reverse'] = not sort_state['reverse']
+            else:
+                sort_state['col'] = col
+                sort_state['reverse'] = False  # first click = ascending
+
+            key_name, key_type = COL_META[col]
+            sorted_stats = sorted(
+                stats,
+                key=lambda x: x[key_name],
+                reverse=sort_state['reverse']
+            )
+            all_stats[0] = sorted_stats
+            _render_rows(sorted_stats)
+            _update_headings()
+            count_lbl.config(text=f"{len(sorted_stats)} engine(s) shown")
+
+        def refresh_stats(query=''):
+            stats = self._get_engine_stats(search_query=query)
+            all_stats[0] = stats
+            # Re-apply current sort if one is active
+            if sort_state['col']:
+                key_name, _ = COL_META[sort_state['col']]
+                stats = sorted(stats, key=lambda x: x[key_name],
+                               reverse=sort_state['reverse'])
+                all_stats[0] = stats
+            _render_rows(stats)
+            _update_headings()
             count_lbl.config(text=f"{len(stats)} engine(s) shown")
 
         sb_frame, _ = make_search_bar(search_frame, refresh_stats, placeholder="🔍 Filter engines…")
@@ -1579,36 +1613,41 @@ class ChessGUI:
         scrollbar.pack(side='right', fill='y')
 
         columns = ('Engine', 'Matches', 'Win', 'Draw', 'Lose', 'WinRate%')
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings', yscrollcommand=scrollbar.set)
+        tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                            yscrollcommand=scrollbar.set)
         scrollbar.config(command=tree.yview)
         tree_ref[0] = tree
 
-        tree.heading('Engine',   text='Engine')
-        tree.heading('Matches',  text='Matches')
-        tree.heading('Win',      text='Win')
-        tree.heading('Draw',     text='Draw')
-        tree.heading('Lose',     text='Lose')
-        tree.heading('WinRate%', text='WinRate%')
+        # Set up column widths and initial headings (with sort commands)
         tree.column('Engine',   width=260)
-        tree.column('Matches',  width=75, anchor='center')
-        tree.column('Win',      width=55, anchor='center')
-        tree.column('Draw',     width=55, anchor='center')
-        tree.column('Lose',     width=55, anchor='center')
-        tree.column('WinRate%', width=90, anchor='center')
+        tree.column('Matches',  width=75,  anchor='center')
+        tree.column('Win',      width=55,  anchor='center')
+        tree.column('Draw',     width=55,  anchor='center')
+        tree.column('Lose',     width=55,  anchor='center')
+        tree.column('WinRate%', width=90,  anchor='center')
+
+        # Initial headings — commands assigned here and refreshed by _update_headings
+        for col in columns:
+            tree.heading(col, text=col, command=lambda c=col: sort_by_column(c))
 
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('Treeview', background=LOG_BG, foreground=TEXT,
                         fieldbackground=LOG_BG, borderwidth=0)
-        style.configure('Treeview.Heading', background=BTN_BG, foreground=TEXT, borderwidth=1)
+        style.configure('Treeview.Heading', background=BTN_BG, foreground=TEXT,
+                        borderwidth=1, font=('Segoe UI', 9, 'bold'))
         style.map('Treeview', background=[('selected', ACCENT)])
+        style.map('Treeview.Heading', background=[('active', ACCENT)])
         tree.pack(fill='both', expand=True)
 
-        count_lbl = tk.Label(stats_window, text="", bg=BG, fg="#555", font=('Segoe UI', 9))
+        count_lbl = tk.Label(stats_window, text="", bg=BG, fg="#555",
+                             font=('Segoe UI', 9))
         count_lbl.pack(pady=(0, 2))
 
-        tip = tk.Label(stats_window, text="💡 Double-click an engine row to view its game history",
-                       bg=BG, fg="#555", font=('Segoe UI', 9))
+        tip = tk.Label(
+            stats_window,
+            text="💡 Click a column header to sort  ·  Double-click a row to view game history",
+            bg=BG, fg="#555", font=('Segoe UI', 9))
         tip.pack(pady=(0, 4))
 
         def on_engine_double_click(event):
@@ -1622,12 +1661,31 @@ class ChessGUI:
 
         btn_frame = tk.Frame(stats_window, bg=BG)
         btn_frame.pack(fill='x', padx=20, pady=(0, 12))
-        tk.Button(btn_frame, text="View All Game History", command=lambda: self._show_game_history(),
-                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
-        tk.Button(btn_frame, text="Refresh", command=lambda: refresh_stats(''),
-                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
-        tk.Button(btn_frame, text="Close", command=stats_window.destroy,
-                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10), padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
+
+        # Quick-sort shortcut buttons
+        shortcuts = tk.Frame(btn_frame, bg=BG)
+        shortcuts.pack(side='left')
+        tk.Label(shortcuts, text="Sort by:", bg=BG, fg="#888",
+                 font=('Segoe UI', 8)).pack(side='left', padx=(0, 4))
+        for label, col in [("Matches", "Matches"), ("Wins", "Win"),
+                           ("Win%", "WinRate%")]:
+            tk.Button(shortcuts, text=label,
+                      command=lambda c=col: sort_by_column(c),
+                      bg=BTN_BG, fg=TEXT, font=('Segoe UI', 8),
+                      padx=8, pady=4, cursor='hand2', relief='flat').pack(side='left', padx=2)
+
+        tk.Button(btn_frame, text="View All Game History",
+                  command=lambda: self._show_game_history(),
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='left', padx=(10, 5))
+        tk.Button(btn_frame, text="Refresh",
+                  command=lambda: refresh_stats(''),
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Close",
+                  command=stats_window.destroy,
+                  bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+                  padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
 
         refresh_stats('')
 
@@ -2111,13 +2169,11 @@ class ChessGUI:
                               font=('Consolas',9),anchor='center')
         self.mat_lbl.pack(fill='x',padx=10)
         tk.Frame(p,bg='#2a2a4a',height=1).pack(fill='x',padx=10,pady=4)
-        # Opening book status
         self.book_lbl = tk.Label(p, text="", bg=PANEL_BG, fg="#00BFFF",
                                   font=('Segoe UI', 7), anchor='w', wraplength=240)
         self.book_lbl.pack(fill='x', padx=10)
         self._btn(p, "📂  Load Openings CSV", self._browse_csv, small=True).pack(fill='x', padx=10, pady=2)
         self._update_book_lbl()
-        # Analyzer status
         tk.Frame(p,bg='#2a2a4a',height=1).pack(fill='x',padx=10,pady=4)
         self._lbl(p,"🔍 ANALYZER (Stockfish)",8,bold=True,fg=ACCENT).pack(fill='x',padx=10)
         self.analyzer_lbl = tk.Label(p, text="⚠ No analyzer", bg=PANEL_BG, fg="#FF8800",

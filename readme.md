@@ -177,4 +177,4 @@ pyinstaller ChessEngineArena.spec
 ## Full Build Command (copy-paste)
 
 Windows CMD:
-pyinstaller --onefile --windowed --icon=logo.ico --name="ChessEngineArena" --add-data="opening;opening" --add-data="analyzer;analyzer" --add-data="logo.ico;." chess_arena.py
+pyinstaller --onefile --windowed --icon=assets/logo.ico --name="ChessEngineArena" --add-data="opening;opening" --add-data="analyzer;analyzer" --add-data="assets/logo.ico;assets" chess_arena.py
