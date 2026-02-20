@@ -49,16 +49,14 @@ QUALITY_COLORS = {
 
 # ── Rank tiers ────────────────────────────────────────────
 RANK_TIERS = [
-    (4000, "💀 Super Engine", "#FF0000"),                 # top ultra engine
-    (3000, "🌌 Super Grandmaster", "#FF4500"),       # elite engines
-    (2800, "👑 Grandmaster", "#FFD700"),             # normal top engines
-    (2600, "💎 Master", "#00CFFF"),                  # strong engines
-    (2400, "🏆 Expert", "#FF6B35"),                  # above-average engines
-    (2200, "⚡ Advanced", "#A0E040"),                # intermediate-strong
-    (2000, "🔥 Intermediate", "#FF8C42"),            # mid-level
-    (1800, "🤖 Developing", "#C8A2C8"),             # AI/learning engine
-    (1600, "🎯 Beginner", "#87CEEB"),                # beginner engines
-    (0, "🌱 Novice", "#90EE90"),                     # very low-level
+    (2900, "💻 Super Computer",  "#FF0000"),
+    (2700, "🌟 Super GM",        "#FFE600"),
+    (2400, "🏆 GM",              "#57FF35"),
+    (2000, "📘 IM",              "#42FF8A"),
+    (1800, "🎯 FM",              "#4274FF"),
+    (1600, "📝 Candidate",       "#CF87EB"),
+    (1400, "🔰 Beta",            "#AAAAAA"),
+    (   0, "❓ Unrated",          "#DBDBDB"),
 ]
 
 ROOK_D   = [(1,0),(-1,0),(0,1),(0,-1)]
@@ -1818,10 +1816,9 @@ class ChessGUI:
                 tree.delete(item)
 
             for rank, row in enumerate(rows, 1):
-                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"#{rank}")
                 tree.insert('', 'end',
                     values=(
-                        medal,
+                        f"#{rank}",
                         row['engine'],
                         row['elo'],
                         row['tier'],
