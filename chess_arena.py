@@ -49,7 +49,7 @@ QUALITY_COLORS = {
 
 # ── Rank tiers ────────────────────────────────────────────
 RANK_TIERS = [
-    (4000, "💀 Immortal", "#FF0000"),                 # top ultra engine
+    (4000, "💀 Super Engine", "#FF0000"),                 # top ultra engine
     (3000, "🌌 Super Grandmaster", "#FF4500"),       # elite engines
     (2800, "👑 Grandmaster", "#FFD700"),             # normal top engines
     (2600, "💎 Master", "#00CFFF"),                  # strong engines
