@@ -876,6 +876,49 @@ class TournamentRunner:
         else:
             self.on_status("Tournament paused / stopped.")
 
+    # ── FIXED: _lookup_opening — unified opening lookup using OpeningBook.lookup() ──
+
+    def _lookup_opening(self, book, board):
+        """
+        Look up the current position in the opening book.
+        Supports OpeningBook (lookup method returning (eco, name) tuple)
+        and legacy book objects with get_opening_name / get_move methods.
+
+        Returns the opening name string, or None if not found.
+        """
+        if book is None:
+            return None
+
+        # ── Primary: OpeningBook.lookup(list) → (eco, name) ──────────────────
+        if hasattr(book, 'lookup'):
+            try:
+                uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
+                played  = uci_str.split() if uci_str else []
+                result  = book.lookup(played)
+                # lookup() returns (eco, name) tuple
+                if isinstance(result, (list, tuple)) and len(result) == 2:
+                    eco, name = result
+                    if name:
+                        return str(name)
+                elif isinstance(result, str) and result:
+                    return result
+            except Exception as e:
+                print(f"[OpeningBook.lookup] error: {e}")
+            return None
+
+        # ── Fallback: get_opening_name(str) ──────────────────────────────────
+        if hasattr(book, 'get_opening_name'):
+            try:
+                uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
+                name = book.get_opening_name(uci_str)
+                if name:
+                    return str(name)
+            except Exception as e:
+                print(f"[book.get_opening_name] error: {e}")
+            return None
+
+        return None
+
     def _play_game(self, game: TournamentGame):
         game.status = "running"
         self.on_game_start(game)
@@ -944,6 +987,7 @@ class TournamentRunner:
             except Exception:
                 legal_ucis = None
 
+            # ── Book probe ────────────────────────────────────────────────────
             if book is not None and book_moves_used < MAX_BOOK_MOVES:
                 raw = self._book_probe(book, board)
                 if raw:
@@ -951,13 +995,6 @@ class TournamentRunner:
                     if legal_ucis is None or raw_norm in legal_ucis:
                         uci = raw_norm
                         book_moves_used += 1
-                        if hasattr(book, 'get_opening_name'):
-                            try:
-                                oname = book.get_opening_name(board.uci_moves_str())
-                                if oname:
-                                    opening_name = oname
-                            except Exception:
-                                pass
 
             if not uci:
                 mvs = board.uci_moves_str()
@@ -993,6 +1030,14 @@ class TournamentRunner:
 
             last_move = uci
 
+            # ── FIX: Always look up opening after every move ──────────────────
+            # Uses OpeningBook.lookup(list) correctly — not get_opening_name()
+            if book is not None:
+                found_name = self._lookup_opening(book, board)
+                if found_name:
+                    opening_name = found_name
+
+            # ── Analyzer eval ─────────────────────────────────────────────────
             cp_val   = None
             mate_val = None
             if self._analyzer:
@@ -1035,6 +1080,13 @@ class TournamentRunner:
         self.on_game_end(game)
 
     def _book_probe(self, book, board):
+        """
+        Probe the opening book for a move in the current position.
+        Returns a UCI string or None.
+
+        Supports OpeningBook (which has a .lookup() method returning (eco, name))
+        as well as legacy book objects with get_move / probe / lookup / get.
+        """
         import re
         _UCI_RE = re.compile(r'^[a-h][1-8][a-h][1-8][qrbnQRBN]?$')
 
@@ -1044,24 +1096,27 @@ class TournamentRunner:
             raw = raw.strip().lower().split()[0]
             return raw if _UCI_RE.match(raw) else None
 
+        # ── OpeningBook via lookup() returns (eco, name), not a move ─────────
+        # So we cannot use .lookup() for move probing.
+        # OpeningBook does NOT provide move suggestions — only name lookup.
+        # For move probing we use get_move / probe / get if available.
+
         try:
             if hasattr(book, 'get_move'):
-                return _clean(book.get_move(board.uci_moves_str()))
+                uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
+                return _clean(book.get_move(uci_str))
+
             if hasattr(book, 'probe') and hasattr(board, 'to_fen'):
                 return _clean(book.probe(board.to_fen()))
-            if hasattr(book, 'lookup'):
-                moves = board.uci_moves_str().split() if board.uci_moves_str() else []
-                result = book.lookup(moves)
-                if isinstance(result, (list, tuple)) and len(result) == 2:
-                    candidate = result[0]
-                    if isinstance(candidate, str) and not _UCI_RE.match(candidate):
-                        return None
-                return _clean(result) if isinstance(result, str) else None
+
             if hasattr(book, 'get'):
-                moves = board.uci_moves_str().split() if board.uci_moves_str() else []
+                uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
+                moves = uci_str.split() if uci_str else []
                 return _clean(book.get(moves))
+
         except Exception:
             pass
+
         return None
 
     def _abort_game(self, game, reason):
@@ -1381,6 +1436,7 @@ class TournamentSetupDialog:
             return f"✓  {os.path.basename(b.filename)}"
         if hasattr(b, '_path'):
             return f"✓  {os.path.basename(b._path)}"
+        # OpeningBook stores entries in _entries
         n = getattr(b, '_entries', None)
         count = f" ({len(n)} openings)" if n is not None else ""
         return f"✓  Opening book loaded{count}"
@@ -2110,6 +2166,7 @@ class TournamentWindow:
         self.opening_lbl.config(text="")
         self._live_evals = []
         self._current_opening_in_log = False
+        self._last_opening_in_log    = None
         self.live_eval_graph.set_evals([])
         self.move_log.config(state='normal')
         self.move_log.delete('1.0', 'end')
@@ -2132,6 +2189,7 @@ class TournamentWindow:
         if eval_cp is not None:
             self._live_evals.append(eval_cp)
             self.live_eval_graph.set_evals(self._live_evals)
+        # ── FIX: update opening label and log whenever opening_name arrives ──
         if opening_name:
             self.opening_lbl.config(text=f"📖  {opening_name}")
             if not getattr(self, '_current_opening_in_log', False):
@@ -2467,21 +2525,16 @@ class TournamentWindow:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Tournament Manager
-#  Keeps a live registry of all Tournament objects in the current session.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentManager:
     """
     Central registry for all Tournament objects created in this session.
-    Pass a single shared instance to every open_tournament() / open_tournament_list()
-    call so the list window always reflects the full picture.
     """
 
     def __init__(self):
-        self._entries: list[dict]          = []   # metadata dicts, newest first
-        self._windows: dict[str, object]   = {}   # tournament_id → TournamentWindow
-
-    # ── Registration ──────────────────────────────────────────────────────────
+        self._entries: list[dict]          = []
+        self._windows: dict[str, object]   = {}
 
     def register(self, tournament: Tournament,
                  win: "TournamentWindow | None" = None) -> None:
@@ -2496,21 +2549,16 @@ class TournamentManager:
             self._windows[tournament.tournament_id] = win
 
     def update(self, tournament: Tournament) -> None:
-        """Refresh metadata snapshot (call after each round / game end)."""
         self.register(tournament)
 
     def set_window(self, tid: str, win: "TournamentWindow") -> None:
         self._windows[tid] = win
-
-    # ── Query ─────────────────────────────────────────────────────────────────
 
     def get_all(self) -> list[dict]:
         return list(self._entries)
 
     def get_window(self, tid: str) -> "TournamentWindow | None":
         return self._windows.get(tid)
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _make_entry(t: Tournament) -> dict:
@@ -2530,14 +2578,6 @@ class TournamentManager:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentListWindow:
-    """
-    Persistent session overview window.
-
-    Shows every tournament created since the app launched, lets the user jump
-    to any tournament window, start new ones, browse game history, and export
-    all PGNs in one shot.
-    """
-
     _COL_W = {
         '#': 34, 'Name': 200, 'Format': 100, 'Players': 62,
         'Rounds': 58, 'Games': 58, 'Status': 80,
@@ -2561,15 +2601,13 @@ class TournamentListWindow:
         self.win.resizable(True, True)
         self.win.minsize(720, 380)
 
-        self._id_map:    dict[str, str] = {}   # treeview iid → tournament_id
+        self._id_map:    dict[str, str] = {}
         self._sort_col:  str | None     = None
         self._sort_rev:  bool           = False
 
         self._build()
         self._refresh()
         self._poll()
-
-    # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
         self._build_header()
@@ -2582,7 +2620,6 @@ class TournamentListWindow:
                        highlightthickness=1, highlightbackground="#333")
         hdr.pack(fill='x')
 
-        # Left: icon + title
         lf = tk.Frame(hdr, bg=PANEL_BG)
         lf.pack(side='left', padx=(12, 0), pady=8)
         tk.Label(lf, text="🏆", bg=PANEL_BG, fg=ACCENT,
@@ -2595,7 +2632,6 @@ class TournamentListWindow:
                  bg=PANEL_BG, fg="#555",
                  font=('Segoe UI', 8)).pack(anchor='w')
 
-        # Right: action buttons
         btn = dict(bg=BTN_BG, fg=TEXT, relief='flat',
                    font=('Segoe UI', 9), padx=10, pady=6, cursor='hand2')
         tk.Button(hdr, text="✕  Close",
@@ -2623,7 +2659,6 @@ class TournamentListWindow:
         frow = tk.Frame(self.win, bg=BG)
         frow.pack(fill='x', padx=10, pady=(6, 2))
 
-        # Text search
         tk.Label(frow, text="Search:", bg=BG, fg="#888",
                  font=('Segoe UI', 8)).pack(side='left')
         self._filter_var = tk.StringVar()
@@ -2633,7 +2668,6 @@ class TournamentListWindow:
                  width=20, relief='flat',
                  insertbackground=TEXT).pack(side='left', padx=(4, 16), ipady=3)
 
-        # Format filter
         tk.Label(frow, text="Format:", bg=BG, fg="#888",
                  font=('Segoe UI', 8)).pack(side='left')
         self._fmt_filter = tk.StringVar(value="All")
@@ -2647,7 +2681,6 @@ class TournamentListWindow:
                            command=self._refresh
                            ).pack(side='left', padx=2)
 
-        # Status filter
         tk.Label(frow, text="  Status:", bg=BG, fg="#888",
                  font=('Segoe UI', 8)).pack(side='left', padx=(10, 0))
         self._status_filter = tk.StringVar(value="All")
@@ -2703,8 +2736,6 @@ class TournamentListWindow:
                  font=('Consolas', 8), anchor='w',
                  padx=10, pady=4).pack(side='left')
 
-    # ── Data helpers ──────────────────────────────────────────────────────────
-
     @staticmethod
     def _t_status(t: Tournament) -> str:
         if t.finished: return "Finished"
@@ -2715,8 +2746,6 @@ class TournamentListWindow:
     def _games_played(t: Tournament) -> int:
         return len(t.get_all_completed_games())
 
-    # ── Populate ──────────────────────────────────────────────────────────────
-
     def _refresh(self, *_):
         for iid in self.tree.get_children():
             self.tree.delete(iid)
@@ -2726,11 +2755,9 @@ class TournamentListWindow:
         fmt_flt = self._fmt_filter.get()
         st_flt  = self._status_filter.get()
 
-        # ── 1. In-memory tournaments (current session) ────────────────────
         entries = self.manager.get_all()
         in_memory_ids = {e["id"] for e in entries}
 
-        # ── 2. Database tournaments (past sessions) ───────────────────────
         db_rows = []
         if self.db is not None:
             try:
@@ -2738,7 +2765,6 @@ class TournamentListWindow:
             except Exception as e:
                 print(f"[TournamentListWindow] DB load error: {e}")
 
-        # Merge: DB records + in-memory (in-memory wins on conflict)
         display_rows = []
 
         for entry in entries:
@@ -2762,7 +2788,7 @@ class TournamentListWindow:
         for row in db_rows:
             tid = row.get("tournament_id", "")
             if tid in in_memory_ids:
-                continue  # already shown via live entry
+                continue
             display_rows.append({
                 "id":      tid,
                 "name":    row.get("tournament_name", "Unknown"),
@@ -2822,8 +2848,6 @@ class TournamentListWindow:
             f"{all_games} total games played"
         )
 
-    # ── Sorting ───────────────────────────────────────────────────────────────
-
     def _sort_by(self, col: str):
         if self._sort_col == col:
             self._sort_rev = not self._sort_rev
@@ -2838,8 +2862,6 @@ class TournamentListWindow:
         for idx, (_, k) in enumerate(rows):
             self.tree.move(k, '', idx)
 
-    # ── Selection helpers ─────────────────────────────────────────────────────
-
     def _selected_tournament(self) -> "Tournament | None":
         sel = self.tree.selection()
         if not sel:
@@ -2852,12 +2874,9 @@ class TournamentListWindow:
                 return e["obj"]
         return None
 
-    # ── Actions ───────────────────────────────────────────────────────────────
-
     def _open_selected(self):
         t = self._selected_tournament()
         if t is None:
-            # Try to load from DB (past session tournament)
             sel = self.tree.selection()
             if not sel:
                 messagebox.showinfo("No selection",
@@ -2882,12 +2901,7 @@ class TournamentListWindow:
         win = TournamentWindow(self.root, t, db=self.db, db_path=self.db_path)
         self.manager.set_window(t.tournament_id, win)
 
-
-
-
-
     def _open_db_tournament(self, tournament_id: str):
-        """Reconstruct and open a completed tournament from DB records."""
         if self.db is None:
             messagebox.showinfo("No Database",
                                 "No database connected — cannot load past tournament.",
@@ -2907,13 +2921,11 @@ class TournamentListWindow:
                                 parent=self.win)
             return
 
-        # ── Reconstruct Tournament object from DB rows ────────────────────
         first  = rows[0]
         t_name = first.get("tournament_name", "Unknown Tournament")
         t_fmt  = first.get("format", Tournament.FORMAT_SWISS)
         t_id   = first.get("tournament_id", tournament_id)
 
-        # Collect unique players (preserve insertion order = seed order)
         player_names = {}
         for row in rows:
             for key in ("white_engine", "black_engine"):
@@ -2936,7 +2948,6 @@ class TournamentListWindow:
         t.finished      = True
         t.current_round = max_round
 
-        # ── Rebuild TournamentGame objects ────────────────────────────────
         try:
             from board import Board as _Board
         except ImportError:
@@ -2947,7 +2958,6 @@ class TournamentListWindow:
 
         import re as _re
 
-        # Group rows by round for bracket reconstruction
         rounds_by_num: dict[int, list] = {}
         for row in rows:
             rnum = row.get("round_num", 1)
@@ -2971,7 +2981,6 @@ class TournamentListWindow:
             g.opening    = row.get("opening", "")
             g.status     = "done"
 
-            # Replay PGN to rebuild move_history
             if g.pgn and _Board is not None:
                 try:
                     b = _Board()
@@ -3004,7 +3013,6 @@ class TournamentListWindow:
                 except Exception:
                     g.move_history = []
 
-            # Update player records
             ws = g.white_score
             bs = g.black_score
             if ws is not None:
@@ -3013,13 +3021,10 @@ class TournamentListWindow:
 
             t.all_games.append(g)
 
-            # ── Rebuild _ko_round_games for bracket display ───────────────
             if t_fmt == Tournament.FORMAT_KNOCKOUT:
                 t._ko_round_games.setdefault(rnum, []).append(g)
 
-        # ── Rebuild knockout elimination/winner tracking from results ─────
         if t_fmt == Tournament.FORMAT_KNOCKOUT:
-            # Determine winners and losers per round in order
             eliminated_set = set()
             for rnum in sorted(rounds_by_num.keys()):
                 round_games = t._ko_round_games.get(rnum, [])
@@ -3035,31 +3040,25 @@ class TournamentListWindow:
                         eliminated_set.add(g.white.name)
                         t._ko_eliminated.append(g.white)
                     else:
-                        # Draw — treat black as eliminated (consistent with runner)
                         eliminated_set.add(g.black.name)
                         t._ko_eliminated.append(g.black)
 
-            # Survivors = players not eliminated
             t._ko_pending_winners = [
                 p for p in players if p.name not in eliminated_set
             ]
 
-        # Set round_games to last round
         t.round_games = t._ko_round_games.get(max_round, []) \
             if t_fmt == Tournament.FORMAT_KNOCKOUT \
             else [g for g in t.all_games if g.round_num == max_round]
 
-        # Determine winner from standings
         standings = t.get_standings()
         if standings:
             t.winner = standings[0]
 
-        # ── Open the window and draw bracket immediately ──────────────────
         win = TournamentWindow(self.root, t, db=self.db, db_path=self.db_path)
         self.manager.register(t, win)
         self._refresh()
 
-        # Draw bracket AFTER window is fully built and rendered
         if t_fmt == Tournament.FORMAT_KNOCKOUT:
             win.win.after(100, win._draw_bracket)
 
@@ -3073,7 +3072,6 @@ class TournamentListWindow:
         TournamentHistoryWindow(self.win, t)
 
     def _new_tournament(self):
-        """Open setup dialog, create tournament, register in manager, open window."""
         resolved_db = self.db
         if resolved_db is None and self.db_path is not None and Database is not None:
             resolved_db = Database(self.db_path)
@@ -3089,7 +3087,6 @@ class TournamentListWindow:
 
         win = TournamentWindow(self.root, t, db=resolved_db, db_path=self.db_path)
 
-        # Patch callbacks so the list updates as games/rounds finish
         _orig_start = win._cb_game_start
         _orig_round = win._cb_round_end
         _orig_end   = win._cb_tournament_end
@@ -3151,10 +3148,7 @@ class TournamentListWindow:
         except Exception as e:
             messagebox.showerror("Export failed", str(e), parent=self.win)
 
-    # ── Polling ───────────────────────────────────────────────────────────────
-
     def _poll(self):
-        """Auto-refresh every 3 s to pick up live progress from running tournaments."""
         if not self.win.winfo_exists():
             return
         self._refresh()
@@ -3162,7 +3156,7 @@ class TournamentListWindow:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Module-level default manager (so callers that ignore the manager arg still work)
+#  Module-level default manager
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _default_manager = TournamentManager()
@@ -3175,19 +3169,6 @@ _default_manager = TournamentManager()
 def open_tournament(root, db=None, db_path=None, analyzer=None,
                     opening_book=None,
                     manager: TournamentManager = None) -> "TournamentWindow | None":
-    """
-    Show the tournament setup dialog and open the tournament window.
-
-    Parameters
-    ----------
-    root          : tk root / parent window
-    db            : Database instance (preferred)
-    db_path       : str | None — fallback if db is None
-    analyzer      : AnalyzerEngine instance or path string
-    opening_book  : OpeningBook object
-    manager       : TournamentManager — pass a shared instance so the list
-                    window stays in sync; uses module-level default if omitted.
-    """
     if manager is None:
         manager = _default_manager
 
@@ -3206,7 +3187,6 @@ def open_tournament(root, db=None, db_path=None, analyzer=None,
 
     win = TournamentWindow(root, t, db=resolved_db, db_path=db_path)
 
-    # Patch callbacks so the manager stays up to date
     _orig_start = win._cb_game_start
     _orig_round = win._cb_round_end
     _orig_end   = win._cb_tournament_end
@@ -3234,21 +3214,6 @@ def open_tournament(root, db=None, db_path=None, analyzer=None,
 def open_tournament_list(root, db=None, db_path=None,
                          analyzer=None, opening_book=None,
                          manager: TournamentManager = None) -> TournamentListWindow:
-    """
-    Open (or reuse) the Tournament List window.
-
-    This is the recommended primary entry point for the tournament system.
-    The list window has its own "New Tournament" button; individual tournament
-    windows can still be opened directly via open_tournament().
-
-    Parameters
-    ----------
-    root          : tk root / parent window
-    db / db_path  : database connection / path
-    analyzer      : AnalyzerEngine instance or path
-    opening_book  : OpeningBook object
-    manager       : TournamentManager; uses module-level default if omitted.
-    """
     if manager is None:
         manager = _default_manager
 
