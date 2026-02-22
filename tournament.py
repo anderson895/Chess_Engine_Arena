@@ -2898,7 +2898,7 @@ class TournamentListWindow:
             rows = self.db.get_tournament_games(tournament_id=tournament_id)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load tournament:\n{e}",
-                                parent=self.win)
+                                 parent=self.win)
             return
 
         if not rows:
@@ -2908,12 +2908,12 @@ class TournamentListWindow:
             return
 
         # ── Reconstruct Tournament object from DB rows ────────────────────
-        first       = rows[0]
-        t_name      = first.get("tournament_name", "Unknown Tournament")
-        t_fmt       = first.get("format", Tournament.FORMAT_SWISS)
-        t_id        = first.get("tournament_id", tournament_id)
+        first  = rows[0]
+        t_name = first.get("tournament_name", "Unknown Tournament")
+        t_fmt  = first.get("format", Tournament.FORMAT_SWISS)
+        t_id   = first.get("tournament_id", tournament_id)
 
-        # Collect unique players
+        # Collect unique players (preserve insertion order = seed order)
         player_names = {}
         for row in rows:
             for key in ("white_engine", "black_engine"):
@@ -2922,20 +2922,36 @@ class TournamentListWindow:
                     player_names[name] = TournamentPlayer(name, "")
 
         players = list(player_names.values())
+        max_round = max((r.get("round_num", 1) for r in rows), default=1)
 
         t = Tournament(
             name        = t_name,
             fmt         = t_fmt,
             players     = players,
-            rounds      = max((r.get("round_num", 1) for r in rows), default=1),
+            rounds      = max_round,
             movetime_ms = 1000,
         )
         t.tournament_id = t_id
         t.started       = True
         t.finished      = True
+        t.current_round = max_round
 
         # ── Rebuild TournamentGame objects ────────────────────────────────
-        from board import Board as _Board
+        try:
+            from board import Board as _Board
+        except ImportError:
+            try:
+                from __main__ import Board as _Board
+            except ImportError:
+                _Board = None
+
+        import re as _re
+
+        # Group rows by round for bracket reconstruction
+        rounds_by_num: dict[int, list] = {}
+        for row in rows:
+            rnum = row.get("round_num", 1)
+            rounds_by_num.setdefault(rnum, []).append(row)
 
         for row in rows:
             wname = row.get("white_engine", "")
@@ -2956,21 +2972,17 @@ class TournamentListWindow:
             g.status     = "done"
 
             # Replay PGN to rebuild move_history
-            if g.pgn:
+            if g.pgn and _Board is not None:
                 try:
                     b = _Board()
-                    import re
-                    # Strip PGN headers
-                    body = re.sub(r'\[.*?\]\s*', '', g.pgn, flags=re.DOTALL)
-                    # Remove move numbers and result tokens
-                    body = re.sub(r'\d+\.+', '', body)
-                    body = re.sub(r'1-0|0-1|1/2-1/2|\*', '', body)
+                    body = _re.sub(r'\[.*?\]\s*', '', g.pgn, flags=_re.DOTALL)
+                    body = _re.sub(r'\d+\.+', '', body)
+                    body = _re.sub(r'1-0|0-1|1/2-1/2|\*', '', body)
                     tokens = body.split()
                     for san in tokens:
                         san = san.strip()
                         if not san:
                             continue
-                        # Find matching legal move
                         try:
                             legal = b.legal_moves()
                             matched = False
@@ -2979,8 +2991,8 @@ class TournamentListWindow:
                                 candidate_san = b._build_san(fr, fc, tr, tc, promo, legal)
                                 if candidate_san.rstrip('+#') == san.rstrip('+#'):
                                     uci = (f"{chr(ord('a')+fc)}{8-fr}"
-                                        f"{chr(ord('a')+tc)}{8-tr}"
-                                        + (promo.lower() if promo else ""))
+                                           f"{chr(ord('a')+tc)}{8-tr}"
+                                           + (promo.lower() if promo else ""))
                                     b.apply_uci(uci)
                                     matched = True
                                     break
@@ -3000,22 +3012,56 @@ class TournamentListWindow:
                 bp.record(bs, wname, 'b')
 
             t.all_games.append(g)
-            t.round_games = [gg for gg in t.all_games
-                            if gg.round_num == t.current_round]
 
-        # Set current_round to max round seen
-        if t.all_games:
-            t.current_round = max(g.round_num for g in t.all_games)
+            # ── Rebuild _ko_round_games for bracket display ───────────────
+            if t_fmt == Tournament.FORMAT_KNOCKOUT:
+                t._ko_round_games.setdefault(rnum, []).append(g)
+
+        # ── Rebuild knockout elimination/winner tracking from results ─────
+        if t_fmt == Tournament.FORMAT_KNOCKOUT:
+            # Determine winners and losers per round in order
+            eliminated_set = set()
+            for rnum in sorted(rounds_by_num.keys()):
+                round_games = t._ko_round_games.get(rnum, [])
+                for g in round_games:
+                    ws = g.white_score
+                    bs = g.black_score
+                    if ws is None:
+                        continue
+                    if ws > bs:
+                        eliminated_set.add(g.black.name)
+                        t._ko_eliminated.append(g.black)
+                    elif bs > ws:
+                        eliminated_set.add(g.white.name)
+                        t._ko_eliminated.append(g.white)
+                    else:
+                        # Draw — treat black as eliminated (consistent with runner)
+                        eliminated_set.add(g.black.name)
+                        t._ko_eliminated.append(g.black)
+
+            # Survivors = players not eliminated
+            t._ko_pending_winners = [
+                p for p in players if p.name not in eliminated_set
+            ]
+
+        # Set round_games to last round
+        t.round_games = t._ko_round_games.get(max_round, []) \
+            if t_fmt == Tournament.FORMAT_KNOCKOUT \
+            else [g for g in t.all_games if g.round_num == max_round]
 
         # Determine winner from standings
         standings = t.get_standings()
         if standings:
             t.winner = standings[0]
 
-        # ── Open the window ───────────────────────────────────────────────
+        # ── Open the window and draw bracket immediately ──────────────────
         win = TournamentWindow(self.root, t, db=self.db, db_path=self.db_path)
         self.manager.register(t, win)
         self._refresh()
+
+        # Draw bracket AFTER window is fully built and rendered
+        if t_fmt == Tournament.FORMAT_KNOCKOUT:
+            win.win.after(100, win._draw_bracket)
 
     def _open_history(self):
         t = self._selected_tournament()

@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['chess_arena.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=[('opening', 'opening'), ('analyzer', 'analyzer'), ('assets/logo.ico', 'assets')],
