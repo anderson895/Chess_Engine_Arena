@@ -54,543 +54,623 @@ Command: position startpos
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 759
+info string Aborting search: time limit 1: 1010
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove b1c3 ponder d7d5
+bestmove g1f3 ponder g8f6
 
-Command: position startpos moves b1c3 d7d5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1008
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d2d4 ponder g8f6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 609
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g1f3 ponder e7e6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5
+Command: position startpos moves g1f3 d7d5
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
 info string Aborting search: root time limit 1: 714
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove c1f4 ponder c5d4
+bestmove d2d4 ponder b8c6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-bestmove f3d4 ponder b8c6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 938
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d4f3 ponder d8b6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 601
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e2e3 ponder f8b4
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 766
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d1d4 ponder d8b6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 661
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d4a4 ponder e8g8
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Extending time (root gettingWorse): 1400
-info string Aborting search: time limit 1: 1001
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f1e2 ponder a7a6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1021
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove a4b3 ponder b7b5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 697
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove a2a3 ponder d7c5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1011
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f4e5 ponder d7e5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-bestmove f3e5 ponder d8c7
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1004
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e1g1 ponder d8c7
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1017
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f2f4 ponder b7b5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1009
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f1f3 ponder b7b5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 678
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e2d3 ponder d7c6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1005
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f4e5 ponder f6g4
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 847
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f3g3 ponder g4e5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 1009
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove a1f1 ponder f7f5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1012
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove b3b4 ponder f7f5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1008
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g1h1 ponder f8f7
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 882
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove b4h4 ponder c7e5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1005
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove h4f4 ponder d7e8
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1003
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d3e2 ponder d7e8
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1014
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f4h6 ponder g8h8
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1013
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove h6g5 ponder f6g6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Extending time (root gettingWorse): 2000
-info string Aborting search: time limit 1: 1007
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e3e4 ponder h7h6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1016
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g5h4 ponder d5e4
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-bestmove c3e4 ponder f6f8
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 807
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove h4e7 ponder c6e7
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1001
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e4c3 ponder e5e4
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1003
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g3e3 ponder g8h7
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 625
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove c3d5 ponder e6d5
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 635
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e3c3 ponder c8c3
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-bestmove b2c3 ponder d5e6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 866
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove h1g1 ponder d5c6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 868
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e2g4 ponder e4e3
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
 info string Aborting search: time limit 1: 1006
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove c3c4 ponder g8h7
+bestmove c1f4 ponder e7e6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 773
+info string Aborting search: root time limit 1: 997
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g4e2 ponder g7g5
+bestmove e2e3 ponder f8d6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 603
+info string Aborting search: time limit 1: 1011
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f1d1 ponder g8g7
+bestmove f4d6 ponder c7d6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: time limit 1: 1005
+info string Aborting search: time limit 1: 1012
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g1f1 ponder g7f6
+bestmove f1d3 ponder g8f6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 672
+info string Aborting search: root time limit 1: 710
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e2f3 ponder g7f6
+bestmove d3f5 ponder e6f5
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 633
+info string Aborting search: time limit 1: 1007
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d1d7 ponder g7g6
+bestmove b1d2 ponder b8c6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 686
+info string Aborting search: root time limit 1: 770
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g2f3 ponder e5c5
+bestmove e1g1 ponder b8c6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 651
+info string Aborting search: root time limit 1: 744
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d7d6 ponder f6g5
+bestmove c2c4 ponder f4e3
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+bestmove f2e3 ponder b8c6
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 601
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d1b3 ponder f8e8
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1007
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a1c1 ponder d6b4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 712
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b3b5 ponder a5c4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+bestmove d2c4 ponder d5c4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
 info string Aborting search: time limit 1: 1002
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f3g4 ponder f5g4
+bestmove f3e5 ponder d6d5
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Aborting search: root time limit 1: 762
+info string Aborting search: time limit 1: 1011
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d6h6 ponder e5c5
+bestmove b5c4 ponder d5c4
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Extending time (root gettingWorse): 2050
-info string Aborting search: time limit 1: 1009
+bestmove c1c4 ponder f6d5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1015
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f1e1 ponder e5a5
+bestmove f1c1 ponder c7c6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Extending time (root gettingWorse): 500
-info string Aborting search: time limit 1: 1007
+info string Aborting search: root time limit 1: 697
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e1e2 ponder e5f5
+bestmove c4a4 ponder a7a6
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
-info string Extending time (root gettingWorse): 16600
+info string Aborting search: root time limit 1: 772
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a4b4 ponder f6e4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
 info string Aborting search: time limit 1: 1013
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove h6g6 ponder g4h5
+bestmove g1f2 ponder f6e4
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1003
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove g6a6 ponder f2f1q
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: legalmove/mate found depth >= 8
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e2e3 ponder b7a6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: time limit 1: 1004
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e3d3 ponder b7a6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2 e3d3 f5f3
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: legalmove/mate found depth >= 8
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d3e4 ponder b7a6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2 e3d3 f5f3 d3e4 f3f4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 621
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e4d5 ponder f2d4
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2 e3d3 f5f3 d3e4 f3f4 e4d5 f2d4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: legalmove/mate found depth >= 8
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove d5e6 ponder b7a6
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2 e3d3 f5f3 d3e4 f3f4 e4d5 f2d4 d5e6 f4e4
-Command: go movetime 1000
-info string Fixed time per move: 1000 ms
-info string Search status is THINKING
-info string Aborting search: root time limit 1: 730
-================================================================
-getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove e6f7 ponder d4d7
-
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2 e3d3 f5f3 d3e4 f3f4 e4d5 f2d4 d5e6 f4e4 e6f7 d4d7
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
 info string Aborting search: root time limit 1: 613
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f7f6 ponder d7e7
+bestmove b4b3 ponder f6e4
 
-Command: position startpos moves b1c3 d7d5 d2d4 g8f6 g1f3 c7c5 c1f4 c5d4 f3d4 b8d7 d4f3 e7e6 e2e3 f8b4 d1d4 b4c5 d4a4 e8g8 f1e2 a7a6 a4b3 c5e7 a2a3 f6h5 f4e5 d7e5 f3e5 h5f6 e1g1 d8c7 f2f4 e7d6 f1f3 c8d7 e2d3 d6e5 f4e5 f6g4 f3g3 g4e5 a1f1 a8c8 b3b4 f7f5 g1h1 e5c6 b4h4 c7d8 h4f4 d8e7 d3e2 e6e5 f4h6 f8f6 h6g5 d7e6 e3e4 h7h6 g5h4 d5e4 c3e4 f6f8 h4e7 c6e7 e4c3 e5e4 g3e3 e7d5 c3d5 e6d5 e3c3 c8c3 b2c3 f5f4 h1g1 d5c6 e2g4 e4e3 c3c4 f8e8 g4e2 g7g5 f1d1 g8g7 g1f1 e8e5 e2f3 c6f3 d1d7 g7f6 g2f3 g5g4 d7d6 f6f5 f3g4 f5g4 d6h6 f4f3 f1e1 f3f2 e1e2 e5f5 h6g6 g4h5 g6a6 f2f1q e2e3 f1f2 e3d3 f5f3 d3e4 f3f4 e4d5 f2d4 d5e6 f4e4 e6f7 d4d7 f7f6 d7e7
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1010
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b3d3 ponder c5d4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1003
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d3d4 ponder d8e8
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 661
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove e5c4 ponder e8c8
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1003
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c1e1 ponder f6e4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 808
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove f2e2 ponder f7f5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1012
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a2a4 ponder e7c7
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1013
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c4a3 ponder h7h5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1006
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove e1d1 ponder b7b6
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1003
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a4a5 ponder g7h6
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 907
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d4b4 ponder f6g5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1013
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d1d5 ponder g5h6
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1010
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d5d1 ponder h5h4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1001
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b4b3 ponder h6h5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 761
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b3b4 ponder g5g4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 790
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d1d6 ponder g6g5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 651
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d6d5 ponder c7c1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1012
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d5c5 ponder c8c5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1001
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b4b7 ponder c5c1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1001
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b7a7 ponder c1g1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1014
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b2b4 ponder g1g2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 602
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove e2d3 ponder g2h2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1006
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a7a6 ponder h4h3
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2
 Command: go movetime 1000
 info string Fixed time per move: 1000 ms
 info string Search status is THINKING
 info string Aborting search: legalmove/mate found depth >= 8
 ================================================================
 getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
-bestmove f6f5 ponder e7e5
+bestmove d3c4 ponder h4h3
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 700
+info string Aborting search: root time limit 1: 806
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a6h6 ponder d2d6
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 4700
+info string Aborting search: time limit 1: 1004
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove e3f4 ponder g5f4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 657
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove h6g6 ponder g4f5
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1004
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a3b1 ponder h3h2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 10100
+info string Aborting search: time limit 1: 1001
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove g6g8 ponder b2b1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 2900
+info string Aborting search: time limit 1: 1004
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a5a6 ponder b1a1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 2750
+info string Aborting search: time limit 1: 1002
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a6a7 ponder h2h1q
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 666
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a7a8q ponder b1c1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 27000
+info string Extending time (root gettingWorse): 3700
+info string Aborting search: time limit 1: 1013
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c4c5 ponder f1f2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 14050
+info string Aborting search: time limit 1: 1015
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c5c6 ponder f2c2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 31050
+info string Aborting search: time limit 1: 1014
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c6d7 ponder c2d3
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Extending time (root gettingWorse): 59700
+info string Aborting search: time limit 1: 1002
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d7d6 ponder f5e6
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1012
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove d6c5 ponder e6e3
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1001
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c5b5 ponder e6c4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: time limit 1: 1015
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b5a5 ponder c1a1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: legalmove/mate found depth >= 8
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a5b6 ponder c4b4
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 679
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b6c7 ponder b4e7
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4 b6c7 b4e7
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 634
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c7b6 ponder a1b1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4 b6c7 b4e7 c7b6 a1b1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 727
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b6c6 ponder b1c1
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4 b6c7 b4e7 c7b6 a1b1 b6c6 b1c1
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 699
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove c6b5 ponder e7e2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4 b6c7 b4e7 c7b6 a1b1 b6c6 b1c1 c6b5 e7e2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 608
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b5a5 ponder e2a2
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4 b6c7 b4e7 c7b6 a1b1 b6c6 b1c1 c6b5 e7e2 b5a5 e2a2
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 682
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove a5b6 ponder a2b3
+
+Command: position startpos moves g1f3 d7d5 d2d4 c8f5 c1f4 e7e6 e2e3 f8d6 f4d6 d8d6 f1d3 g8f6 d3f5 e6f5 b1d2 e8g8 e1g1 f5f4 c2c4 f4e3 f2e3 b8c6 d1b3 a8e8 a1c1 c6a5 b3b5 a5c4 d2c4 d5c4 f3e5 d6d5 b5c4 d5c4 c1c4 e8e7 f1c1 c7c6 c4a4 a7a6 a4b4 g7g6 g1f2 c6c5 b4b3 f8d8 b3d3 c5d4 d3d4 d8e8 e5c4 e8c8 c1e1 f6e4 f2e2 f7f5 a2a4 e7c7 c4a3 h7h5 e1d1 g8g7 a4a5 g7f6 d4b4 f6g5 d1d5 g5h6 d5d1 h5h4 b4b3 h6g5 b3b4 g5g4 d1d6 g6g5 d6d5 c7c5 d5c5 c8c5 b4b7 c5c1 b7a7 c1g1 b2b4 g1g2 e2d3 g2h2 a7a6 h2d2 d3c4 h4h3 a6h6 f5f4 e3f4 g5f4 h6g6 e4g5 a3b1 d2b2 g6g8 b2b1 a5a6 h3h2 a6a7 h2h1q a7a8q h1f1 c4c5 f1f2 c5c6 f2c2 c6d7 c2f5 d7d6 f5e6 d6c5 b1c1 c5b5 e6c4 b5a5 c1a1 a5b6 c4b4 b6c7 b4e7 c7b6 a1b1 b6c6 b1c1 c6b5 e7e2 b5a5 e2a2 a5b6 a2b3
+Command: go movetime 1000
+info string Fixed time per move: 1000 ms
+info string Search status is THINKING
+info string Aborting search: root time limit 1: 663
+================================================================
+getBestMove: thread_id:0, num_sp:0 searching:0 stop:1 started:0 ended:0 nodes:0 numsplits:0
+bestmove b6a5 ponder c1a1
 
 Command: stop
 Command: quit

@@ -876,26 +876,14 @@ class TournamentRunner:
         else:
             self.on_status("Tournament paused / stopped.")
 
-    # ── FIXED: _lookup_opening — unified opening lookup using OpeningBook.lookup() ──
-
     def _lookup_opening(self, book, board):
-        """
-        Look up the current position in the opening book.
-        Supports OpeningBook (lookup method returning (eco, name) tuple)
-        and legacy book objects with get_opening_name / get_move methods.
-
-        Returns the opening name string, or None if not found.
-        """
         if book is None:
             return None
-
-        # ── Primary: OpeningBook.lookup(list) → (eco, name) ──────────────────
         if hasattr(book, 'lookup'):
             try:
                 uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
                 played  = uci_str.split() if uci_str else []
                 result  = book.lookup(played)
-                # lookup() returns (eco, name) tuple
                 if isinstance(result, (list, tuple)) and len(result) == 2:
                     eco, name = result
                     if name:
@@ -905,8 +893,6 @@ class TournamentRunner:
             except Exception as e:
                 print(f"[OpeningBook.lookup] error: {e}")
             return None
-
-        # ── Fallback: get_opening_name(str) ──────────────────────────────────
         if hasattr(book, 'get_opening_name'):
             try:
                 uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
@@ -916,7 +902,6 @@ class TournamentRunner:
             except Exception as e:
                 print(f"[book.get_opening_name] error: {e}")
             return None
-
         return None
 
     def _play_game(self, game: TournamentGame):
@@ -987,7 +972,6 @@ class TournamentRunner:
             except Exception:
                 legal_ucis = None
 
-            # ── Book probe ────────────────────────────────────────────────────
             if book is not None and book_moves_used < MAX_BOOK_MOVES:
                 raw = self._book_probe(book, board)
                 if raw:
@@ -1030,14 +1014,11 @@ class TournamentRunner:
 
             last_move = uci
 
-            # ── FIX: Always look up opening after every move ──────────────────
-            # Uses OpeningBook.lookup(list) correctly — not get_opening_name()
             if book is not None:
                 found_name = self._lookup_opening(book, board)
                 if found_name:
                     opening_name = found_name
 
-            # ── Analyzer eval ─────────────────────────────────────────────────
             cp_val   = None
             mate_val = None
             if self._analyzer:
@@ -1080,13 +1061,6 @@ class TournamentRunner:
         self.on_game_end(game)
 
     def _book_probe(self, book, board):
-        """
-        Probe the opening book for a move in the current position.
-        Returns a UCI string or None.
-
-        Supports OpeningBook (which has a .lookup() method returning (eco, name))
-        as well as legacy book objects with get_move / probe / lookup / get.
-        """
         import re
         _UCI_RE = re.compile(r'^[a-h][1-8][a-h][1-8][qrbnQRBN]?$')
 
@@ -1096,27 +1070,18 @@ class TournamentRunner:
             raw = raw.strip().lower().split()[0]
             return raw if _UCI_RE.match(raw) else None
 
-        # ── OpeningBook via lookup() returns (eco, name), not a move ─────────
-        # So we cannot use .lookup() for move probing.
-        # OpeningBook does NOT provide move suggestions — only name lookup.
-        # For move probing we use get_move / probe / get if available.
-
         try:
             if hasattr(book, 'get_move'):
                 uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
                 return _clean(book.get_move(uci_str))
-
             if hasattr(book, 'probe') and hasattr(board, 'to_fen'):
                 return _clean(book.probe(board.to_fen()))
-
             if hasattr(book, 'get'):
                 uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
                 moves = uci_str.split() if uci_str else []
                 return _clean(book.get(moves))
-
         except Exception:
             pass
-
         return None
 
     def _abort_game(self, game, reason):
@@ -1436,7 +1401,6 @@ class TournamentSetupDialog:
             return f"✓  {os.path.basename(b.filename)}"
         if hasattr(b, '_path'):
             return f"✓  {os.path.basename(b._path)}"
-        # OpeningBook stores entries in _entries
         n = getattr(b, '_entries', None)
         count = f" ({len(n)} openings)" if n is not None else ""
         return f"✓  Opening book loaded{count}"
@@ -1708,8 +1672,10 @@ class TournamentSetupDialog:
                 return p
         return None
 
+    # ── PATCH 1: Duplicate engine name validation ─────────────────────────────
     def _confirm(self):
         players = []
+        seen_names = {}
         for name_var, path_var, _ in self._entries:
             name = name_var.get().strip()
             path = path_var.get().strip()
@@ -1718,6 +1684,14 @@ class TournamentSetupDialog:
                 messagebox.showerror("Error",
                     f"Engine file not found:\n{path}", parent=self.dialog)
                 return
+            norm_name = normalize_engine_name(name).lower()
+            if norm_name in seen_names:
+                messagebox.showerror("Duplicate Engine Name",
+                    f"Duplicate engine name detected:\n\"{name}\"\n\n"
+                    f"Each engine must have a unique name.",
+                    parent=self.dialog)
+                return
+            seen_names[norm_name] = True
             players.append(TournamentPlayer(name, path))
 
         if len(players) < 2:
@@ -1749,6 +1723,293 @@ class TournamentSetupDialog:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Roster Dialog  (Add / Remove players from a running tournament)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RosterDialog:
+    """
+    Add new engine players or remove existing ones from a tournament
+    that has not yet finished.  Only players with 0 games played can
+    be safely removed without corrupting pairings / scores.
+    """
+
+    def __init__(self, parent, tournament: Tournament, on_change=None):
+        self.t         = tournament
+        self.on_change = on_change
+        self.win       = tk.Toplevel(parent)
+        self.win.title(f"👥 Roster — {tournament.name}")
+        self.win.configure(bg=BG)
+        self.win.geometry("680x580")
+        self.win.resizable(True, True)
+        self.win.minsize(540, 460)
+        self.win.transient(parent)
+        self.win.grab_set()
+        self._build()
+        self._refresh_list()
+
+    def _build(self):
+        # ── Header ────────────────────────────────────────────────────────────
+        hdr = tk.Frame(self.win, bg=PANEL_BG,
+                       highlightthickness=1, highlightbackground="#333")
+        hdr.pack(fill='x')
+        tk.Label(hdr, text="👥  Roster Management",
+                 bg=PANEL_BG, fg=ACCENT,
+                 font=('Segoe UI', 12, 'bold')).pack(side='left', padx=12, pady=8)
+        tk.Label(hdr, text=self.t.name, bg=PANEL_BG, fg="#666",
+                 font=('Segoe UI', 9)).pack(side='left')
+        tk.Button(hdr, text="✕ Close", command=self.win.destroy,
+                  bg=BTN_BG, fg=TEXT, relief='flat',
+                  font=('Segoe UI', 9), padx=8, pady=4,
+                  cursor='hand2').pack(side='right', padx=8, pady=6)
+        tk.Frame(self.win, bg=ACCENT, height=2).pack(fill='x')
+
+        # ── Status note ────────────────────────────────────────────────────────
+        if self.t.started and not self.t.finished:
+            note_color = "#FF8800"
+            note_text  = ("⚠  Tournament is in progress. You may add new players "
+                          "or remove players who have not yet played any games.")
+        elif self.t.finished:
+            note_color = "#FF4444"
+            note_text  = "🔒  Tournament is finished — roster is locked (read-only)."
+        else:
+            note_color = "#00FF80"
+            note_text  = "✔  Tournament has not started — free to edit the roster."
+
+        tk.Label(self.win, text=note_text,
+                 bg=BG, fg=note_color,
+                 font=('Segoe UI', 8, 'italic'),
+                 wraplength=620, anchor='w').pack(fill='x', padx=12, pady=(6, 2))
+
+        # ── Current player list ────────────────────────────────────────────────
+        tk.Label(self.win, text="Current Players:",
+                 bg=BG, fg=ACCENT,
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', padx=12, pady=(6, 2))
+
+        pf = tk.Frame(self.win, bg=LOG_BG, highlightthickness=1,
+                      highlightbackground="#333")
+        pf.pack(fill='both', expand=True, padx=12, pady=(0, 4))
+
+        sb = tk.Scrollbar(pf); sb.pack(side='right', fill='y')
+        cols = ['#', 'Name', 'Engine Path', 'Score', 'W', 'D', 'L', 'Games', 'Status']
+        self.tree = ttk.Treeview(pf, columns=cols, show='headings',
+                                  yscrollcommand=sb.set, height=10)
+        sb.config(command=self.tree.yview)
+        wcfg = {'#': 30, 'Name': 150, 'Engine Path': 180,
+                'Score': 50, 'W': 36, 'D': 36, 'L': 36, 'Games': 50, 'Status': 90}
+        for c in cols:
+            self.tree.heading(c, text=c)
+            self.tree.column(c, width=wcfg.get(c, 60),
+                             anchor='center' if c not in ('Name', 'Engine Path') else 'w')
+        style = ttk.Style()
+        style.configure('Treeview', background=LOG_BG, foreground=TEXT,
+                        fieldbackground=LOG_BG, borderwidth=0, rowheight=24)
+        style.configure('Treeview.Heading', background=BTN_BG,
+                        foreground=TEXT, font=('Segoe UI', 8, 'bold'))
+        style.map('Treeview', background=[('selected', ACCENT)])
+        self.tree.tag_configure('removable', foreground="#FF6B6B")
+        self.tree.tag_configure('active',    foreground=TEXT)
+        self.tree.tag_configure('locked',    foreground="#555555")
+        self.tree.pack(fill='both', expand=True)
+
+        # ── Remove button row ──────────────────────────────────────────────────
+        btn_row = tk.Frame(self.win, bg=BG)
+        btn_row.pack(fill='x', padx=12, pady=(2, 4))
+        self.remove_btn = tk.Button(
+            btn_row, text="🗑  Remove Selected Player",
+            command=self._remove_selected,
+            bg="#5A1A1A", fg="#FF8888", relief='flat',
+            font=('Segoe UI', 9), padx=10, pady=5,
+            cursor='hand2')
+        self.remove_btn.pack(side='left')
+        tk.Label(btn_row,
+                 text="  (Only players with 0 games played can be removed)",
+                 bg=BG, fg="#555", font=('Segoe UI', 7)).pack(side='left', padx=4)
+
+        # ── Add new player section ─────────────────────────────────────────────
+        tk.Frame(self.win, bg='#2a2a4a', height=1).pack(fill='x', padx=12, pady=(2, 4))
+        tk.Label(self.win, text="Add New Player:",
+                 bg=BG, fg=ACCENT,
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', padx=12)
+
+        add_row = tk.Frame(self.win, bg=BG)
+        add_row.pack(fill='x', padx=12, pady=(4, 2))
+
+        tk.Label(add_row, text="Name:", bg=BG, fg=TEXT,
+                 font=('Segoe UI', 8)).pack(side='left')
+        self.new_name_var = tk.StringVar()
+        tk.Entry(add_row, textvariable=self.new_name_var,
+                 bg=LOG_BG, fg=TEXT, font=('Segoe UI', 8),
+                 width=18, relief='flat',
+                 insertbackground=TEXT).pack(side='left', padx=(4, 12), ipady=3)
+
+        tk.Label(add_row, text="Engine:", bg=BG, fg=TEXT,
+                 font=('Segoe UI', 8)).pack(side='left')
+        self.new_path_var = tk.StringVar()
+        tk.Entry(add_row, textvariable=self.new_path_var,
+                 bg=LOG_BG, fg="#AAA", font=('Consolas', 7),
+                 relief='flat', insertbackground=TEXT
+                 ).pack(side='left', fill='x', expand=True, padx=4, ipady=3)
+
+        def _browse():
+            p = filedialog.askopenfilename(
+                parent=self.win, title="Select Engine",
+                filetypes=[('Executables', '*.exe *.bin *'), ('All', '*.*')])
+            if p:
+                self.new_path_var.set(p)
+                base = os.path.splitext(os.path.basename(p))[0]
+                if not self.new_name_var.get().strip():
+                    self.new_name_var.set(base)
+
+        tk.Button(add_row, text="...", command=_browse,
+                  bg=BTN_BG, fg=TEXT, relief='flat',
+                  font=('Segoe UI', 8), padx=6, pady=2,
+                  cursor='hand2').pack(side='left', padx=(0, 8))
+
+        add_btn_row = tk.Frame(self.win, bg=BG)
+        add_btn_row.pack(fill='x', padx=12, pady=(2, 10))
+        self.add_btn = tk.Button(
+            add_btn_row, text="➕  Add Player to Tournament",
+            command=self._add_player,
+            bg=BTN_BG, fg=TEXT, relief='flat',
+            font=('Segoe UI', 9), padx=12, pady=5,
+            cursor='hand2')
+        self.add_btn.pack(side='left')
+
+        # Lock controls if tournament is finished
+        if self.t.finished:
+            self.remove_btn.config(state='disabled')
+            self.add_btn.config(state='disabled')
+
+    def _refresh_list(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for i, p in enumerate(self.t.player_list, 1):
+            can_remove = p.games_played == 0
+            path_display = p.engine_path if p.engine_path else "—"
+            if len(path_display) > 38:
+                path_display = "…" + path_display[-36:]
+            if self.t.finished:
+                tag = 'locked'
+            elif can_remove:
+                tag = 'removable'
+            else:
+                tag = 'active'
+            status_str = (
+                "✓ removable" if can_remove and not self.t.finished
+                else "🔒 has games" if not self.t.finished
+                else "🔒 locked"
+            )
+            self.tree.insert('', 'end', values=[
+                i, p.name, path_display,
+                f"{p.score:.1f}", p.wins, p.draws, p.losses,
+                p.games_played, status_str
+            ], tags=(tag,))
+
+    def _remove_selected(self):
+        if self.t.finished:
+            messagebox.showwarning("Locked",
+                "Tournament is finished — roster cannot be changed.",
+                parent=self.win)
+            return
+
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("No selection",
+                "Please select a player to remove.", parent=self.win)
+            return
+
+        vals    = self.tree.item(sel[0])['values']
+        p_name  = str(vals[1])
+        p_games = int(vals[7])
+
+        if p_games > 0:
+            messagebox.showerror("Cannot Remove",
+                f'"{p_name}" has already played {p_games} game(s).\n\n'
+                "Only players with 0 games played can be removed.",
+                parent=self.win)
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Remove",
+            f'Remove "{p_name}" from the tournament?\n\n'
+            "They will no longer appear in future round pairings.",
+            parent=self.win)
+        if not confirm:
+            return
+
+        # Remove from all tournament data structures
+        player_obj = self.t.players.get(p_name)
+        if player_obj:
+            self.t.player_list.remove(player_obj)
+            del self.t.players[player_obj.name]
+            if player_obj in self.t._ko_active_players:
+                self.t._ko_active_players.remove(player_obj)
+            if player_obj in self.t._ko_pending_winners:
+                self.t._ko_pending_winners.remove(player_obj)
+
+        self._refresh_list()
+        if self.on_change:
+            self.on_change()
+
+        messagebox.showinfo("Removed",
+            f'"{p_name}" has been removed from the tournament.',
+            parent=self.win)
+
+    def _add_player(self):
+        if self.t.finished:
+            messagebox.showwarning("Locked",
+                "Tournament is finished — roster cannot be changed.",
+                parent=self.win)
+            return
+
+        name = self.new_name_var.get().strip()
+        path = self.new_path_var.get().strip()
+
+        if not name:
+            messagebox.showerror("Missing Name",
+                "Please enter a name for the engine.", parent=self.win)
+            return
+        if not path:
+            messagebox.showerror("Missing Path",
+                "Please select the engine executable.", parent=self.win)
+            return
+        if not os.path.isfile(path):
+            messagebox.showerror("File Not Found",
+                f"Engine file not found:\n{path}", parent=self.win)
+            return
+
+        # Duplicate name check (same logic as setup dialog)
+        norm_name = normalize_engine_name(name).lower()
+        for p in self.t.player_list:
+            if normalize_engine_name(p.name).lower() == norm_name:
+                messagebox.showerror("Duplicate Name",
+                    f'A player named "{name}" already exists in this tournament.\n\n'
+                    "Each player must have a unique name.",
+                    parent=self.win)
+                return
+
+        new_player = TournamentPlayer(name, path)
+        new_player.seed = len(self.t.player_list) + 1
+        self.t.player_list.append(new_player)
+        self.t.players[new_player.name] = new_player
+        if self.t.format == Tournament.FORMAT_KNOCKOUT:
+            self.t._ko_active_players.append(new_player)
+
+        # Clear entry fields after success
+        self.new_name_var.set("")
+        self.new_path_var.set("")
+
+        self._refresh_list()
+        if self.on_change:
+            self.on_change()
+
+        messagebox.showinfo("Player Added",
+            f'"{new_player.name}" has been added to the tournament.\n\n'
+            "They will be included in future round pairings.",
+            parent=self.win)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Main Tournament Window
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1760,6 +2021,9 @@ class TournamentWindow:
         self.current_game: TournamentGame = None
         self._history_win = None
 
+        # ── Database wiring ───────────────────────────────────────────────────
+        # Accept a Database instance directly, or build one from a path.
+        # Uses the provided database.py Database class if available.
         if db is not None:
             self.db = db
         elif db_path and Database is not None:
@@ -1842,11 +2106,13 @@ class TournamentWindow:
                 bg=PANEL_BG, fg="#00FF80",
                 font=('Consolas',9)).pack(side='left', padx=8)
 
+        # ── PATCH 2: Toolbar buttons with Roster ─────────────────────────────
         for txt, cmd, acc in [
             ("▶ Start",      self._start,          True),
             ("⏸ Pause",      self._pause,           False),
             ("⏹ Stop",       self._stop,            False),
             ("📜 History",   self._open_history,    False),
+            ("👥 Roster",    self._open_roster,     False),
             ("✕ Close",      self._on_close,        False),
         ]:
             bg = ACCENT if acc else BTN_BG
@@ -2152,6 +2418,18 @@ class TournamentWindow:
             return
         self._history_win = TournamentHistoryWindow(self.win, self.t)
 
+    # ── PATCH 3: Roster management methods ───────────────────────────────────
+
+    def _open_roster(self):
+        """Open the RosterDialog for adding/removing players."""
+        RosterDialog(self.win, self.t, on_change=self._on_roster_change)
+
+    def _on_roster_change(self):
+        """Called by RosterDialog after any add/remove action."""
+        self._refresh_standings()
+        self._refresh_schedule()
+        self._refresh_history()
+
     # ── Runner callbacks ──────────────────────────────────────────────────────
 
     def _cb_game_start(self, game):
@@ -2189,7 +2467,6 @@ class TournamentWindow:
         if eval_cp is not None:
             self._live_evals.append(eval_cp)
             self.live_eval_graph.set_evals(self._live_evals)
-        # ── FIX: update opening label and log whenever opening_name arrives ──
         if opening_name:
             self.opening_lbl.config(text=f"📖  {opening_name}")
             if not getattr(self, '_current_opening_in_log', False):
@@ -2449,12 +2726,23 @@ class TournamentWindow:
                 padx=16, pady=8, relief='flat', cursor='hand2'
                 ).pack(side='right')
 
-    # ── DB persistence ────────────────────────────────────────────────────────
+    # ── DB persistence — uses Database class from database.py ────────────────
 
     def _save_game_db(self, game: TournamentGame):
+        """
+        Persist a completed tournament game.
+
+        Uses Database.save_tournament_game() which:
+          1. Inserts into `games` (for Elo/stats)
+          2. Inserts into `tournament_games` (for tournament history)
+
+        Falls back to a raw SQLite write if no Database instance is available
+        but a db_path was supplied.
+        """
         if not game.pgn:
             return
 
+        # ── Primary path: use Database instance ──────────────────────────────
         if self.db is not None:
             game_id, t_game_id = self.db.save_tournament_game(
                 tournament_id   = self.t.tournament_id,
@@ -2479,43 +2767,92 @@ class TournamentWindow:
                       f"{game.white.name} vs {game.black.name}")
             return
 
+        # ── Fallback path: raw SQLite when only db_path is given ─────────────
         if not self.db_path:
             return
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute("PRAGMA journal_mode=WAL")
             cur = conn.cursor()
+
+            # Ensure both tables exist (matches database.py schema exactly)
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS games (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    white_engine      TEXT    NOT NULL,
+                    black_engine      TEXT    NOT NULL,
+                    result            TEXT    NOT NULL,
+                    reason            TEXT    NOT NULL,
+                    date              TEXT    NOT NULL,
+                    time              TEXT    NOT NULL,
+                    pgn               TEXT    NOT NULL,
+                    move_count        INTEGER,
+                    duration_seconds  INTEGER,
+                    source            TEXT    DEFAULT 'regular'
+                )
+            ''')
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS tournament_games (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tournament_id   TEXT,
-                    tournament_name TEXT,
-                    format          TEXT,
-                    round_num       INTEGER,
-                    white_engine    TEXT,
-                    black_engine    TEXT,
-                    result          TEXT,
-                    reason          TEXT,
-                    pgn             TEXT,
+                    game_id         INTEGER REFERENCES games(id) ON DELETE CASCADE,
+                    tournament_id   TEXT    NOT NULL,
+                    tournament_name TEXT    NOT NULL,
+                    format          TEXT    NOT NULL,
+                    round_num       INTEGER NOT NULL,
+                    white_engine    TEXT    NOT NULL,
+                    black_engine    TEXT    NOT NULL,
+                    result          TEXT    NOT NULL,
+                    reason          TEXT    NOT NULL,
+                    pgn             TEXT    NOT NULL,
                     move_count      INTEGER,
                     duration_sec    INTEGER,
                     opening         TEXT,
-                    date            TEXT,
-                    time            TEXT
+                    date            TEXT    NOT NULL,
+                    time            TEXT    NOT NULL
                 )
             ''')
-            now = datetime.now()
+            # Add source column if missing (migration safety)
+            try:
+                cur.execute("ALTER TABLE games ADD COLUMN source TEXT DEFAULT 'regular'")
+            except sqlite3.OperationalError:
+                pass
+
+            now      = datetime.now()
+            date_str = now.strftime("%Y.%m.%d")
+            time_str = now.strftime("%H:%M:%S")
+
+            # Insert into games table first
+            cur.execute('''
+                INSERT INTO games
+                    (white_engine, black_engine, result, reason,
+                     date, time, pgn, move_count, duration_seconds, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                normalize_engine_name(game.white.name),
+                normalize_engine_name(game.black.name),
+                game.result or '*', game.reason,
+                date_str, time_str,
+                game.pgn, game.move_count, game.duration,
+                'tournament',
+            ))
+            game_id = cur.lastrowid
+
+            # Insert into tournament_games table
             cur.execute('''
                 INSERT INTO tournament_games
-                (tournament_id,tournament_name,format,round_num,
-                white_engine,black_engine,result,reason,pgn,
-                move_count,duration_sec,opening,date,time)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    (game_id, tournament_id, tournament_name, format,
+                     round_num, white_engine, black_engine, result, reason,
+                     pgn, move_count, duration_sec, opening, date, time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
+                game_id,
                 self.t.tournament_id, self.t.name, self.t.format, game.round_num,
-                game.white.name, game.black.name, game.result or '*',
-                game.reason, game.pgn, game.move_count, game.duration,
-                game.opening or '', now.strftime("%Y.%m.%d"), now.strftime("%H:%M:%S"),
+                normalize_engine_name(game.white.name),
+                normalize_engine_name(game.black.name),
+                game.result or '*', game.reason,
+                game.pgn, game.move_count, game.duration,
+                game.opening or '',
+                date_str, time_str,
             ))
             conn.commit()
             conn.close()
