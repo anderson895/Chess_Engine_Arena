@@ -19,7 +19,7 @@ try:
     from utils import normalize_engine_name, build_pgn, get_tier
     from board import Board
     from engine import UCIEngine, AnalyzerEngine
-    from elo import compute_elo_ratings
+    from elo import compute_elo_ratings                     # ← PATCH: import Elo
     from database import Database
 except ImportError:
     try:
@@ -77,6 +77,381 @@ except ImportError:
                 if i%2==0: body+=f"{i//2+1}. "
                 body+=s+' '
             return h+body+result
+        def compute_elo_ratings(games_raw):
+            return {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Loading Overlay — non-blocking spinner shown while DB is fetched off-thread
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class LoadingOverlay:
+    """
+    A translucent overlay with an animated spinner and message label that
+    sits on top of any tk widget while a background thread is working.
+
+    Usage
+    -----
+        overlay = LoadingOverlay(parent_widget, message="Loading…")
+        overlay.show()
+        # … do work on a thread …
+        overlay.hide()
+
+    The overlay prevents the user from interacting with the underlying UI
+    without freezing the main thread (no .grab_set()).
+    """
+
+    _FRAMES   = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    _INTERVAL = 80   # ms per spinner frame
+
+    def __init__(self, parent: tk.Widget, message: str = "Loading…"):
+        self._parent  = parent
+        self._message = message
+        self._frame_i = 0
+        self._after_id: str | None = None
+        self._visible = False
+
+        # Semi-transparent dark backdrop
+        self._backdrop = tk.Frame(parent, bg="#0D0D1A", cursor="watch")
+
+        # Centred card
+        card = tk.Frame(self._backdrop, bg=PANEL_BG,
+                        highlightthickness=1,
+                        highlightbackground=ACCENT)
+
+        self._spin_lbl = tk.Label(card, text=self._FRAMES[0],
+                                  bg=PANEL_BG, fg=ACCENT,
+                                  font=("Segoe UI", 22))
+        self._spin_lbl.pack(pady=(18, 4))
+
+        self._msg_lbl = tk.Label(card, text=message,
+                                 bg=PANEL_BG, fg=TEXT,
+                                 font=("Segoe UI", 10))
+        self._msg_lbl.pack(padx=28, pady=(0, 18))
+
+        # Float the card in the backdrop centre
+        card.place(relx=0.5, rely=0.5, anchor="center")
+        self._card = card
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def show(self, message: str | None = None):
+        if message:
+            self._msg_lbl.config(text=message)
+        self._visible = True
+        self._backdrop.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+        self._backdrop.lift()
+        self._backdrop.update_idletasks()
+        self._animate()
+
+    def hide(self):
+        self._visible = False
+        if self._after_id is not None:
+            try:
+                self._parent.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+        self._backdrop.place_forget()
+
+    def update_message(self, message: str):
+        self._msg_lbl.config(text=message)
+
+    def destroy(self):
+        self.hide()
+        try:
+            self._backdrop.destroy()
+        except Exception:
+            pass
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _animate(self):
+        if not self._visible:
+            return
+        self._spin_lbl.config(text=self._FRAMES[self._frame_i % len(self._FRAMES)])
+        self._frame_i += 1
+        try:
+            self._after_id = self._parent.after(self._INTERVAL, self._animate)
+        except Exception:
+            pass
+
+
+def fetch_async(parent: tk.Widget,
+                work_fn,
+                done_fn,
+                overlay: "LoadingOverlay | None" = None,
+                error_fn=None):
+    """
+    Run *work_fn()* on a daemon thread, then schedule *done_fn(result)* back
+    on the Tk main thread when complete.
+
+    Parameters
+    ----------
+    parent    : any tk widget used for .after() scheduling
+    work_fn   : callable()  → result  (runs off-thread, NO Tk calls allowed)
+    done_fn   : callable(result)       (runs on main thread)
+    overlay   : optional LoadingOverlay to hide when done
+    error_fn  : optional callable(exception) on error (main thread);
+                defaults to printing the error
+    """
+    def _worker():
+        try:
+            result = work_fn()
+            parent.after(0, lambda: _finish(result, None))
+        except Exception as exc:
+            parent.after(0, lambda: _finish(None, exc))
+
+    def _finish(result, exc):
+        if overlay is not None:
+            try:
+                overlay.hide()
+            except Exception:
+                pass
+        if exc is not None:
+            if error_fn:
+                error_fn(exc)
+            else:
+                print(f"[fetch_async] error: {exc}")
+        else:
+            done_fn(result)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PATCH: Elo helper — fetch live Elo ratings from DB for tournament players
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _get_elo_map(db) -> dict:
+    """
+    Returns {engine_name: elo_int} for all engines in the database.
+    Returns empty dict if DB is unavailable or on any error.
+    """
+    if db is None:
+        return {}
+    try:
+        games_raw = db.get_all_games_for_elo()
+        return compute_elo_ratings(games_raw)
+    except Exception as e:
+        print(f"[Elo] Could not load ratings: {e}")
+        return {}
+
+
+def _fmt_elo(elo_map: dict, name: str) -> str:
+    """
+    Return a formatted Elo string like '1742 📝 Candidate' for display,
+    or '—' if the engine has no rating yet.
+    """
+    elo = elo_map.get(name) or elo_map.get(normalize_engine_name(name))
+    if elo is None:
+        return "—"
+    tier_lbl, _ = get_tier(elo)
+    return f"{elo}  {tier_lbl}"
+
+
+def _elo_color(elo_map: dict, name: str) -> str:
+    """Return the tier colour for this engine, or #888888 if unrated."""
+    elo = elo_map.get(name) or elo_map.get(normalize_engine_name(name))
+    if elo is None:
+        return "#888888"
+    _, col = get_tier(elo)
+    return col
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Off-thread DB reconstruction helper
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _parse_db_rows(tournament_id: str, rows: list):
+    """
+    Pure function — no Tk calls allowed.
+    Parses raw DB rows into a fully-populated Tournament object so the caller
+    can hand the result straight back to the main thread via fetch_async.
+    """
+    import re as _re
+
+    first  = rows[0]
+    t_name = first.get("tournament_name", "Unknown Tournament")
+    t_fmt  = first.get("format", "Swiss")  # Tournament.FORMAT_SWISS resolved below
+    t_id   = first.get("tournament_id", tournament_id)
+
+    # Resolve Board class (needed for PGN replay)
+    _Board = None
+    try:
+        from board import Board as _Board
+    except ImportError:
+        try:
+            from __main__ import Board as _Board
+        except ImportError:
+            pass
+
+    player_names: dict = {}
+    for row in rows:
+        for key in ("white_engine", "black_engine"):
+            name = row.get(key, "")
+            if name and name not in player_names:
+                player_names[name] = TournamentPlayer(name, "")
+
+    players     = list(player_names.values())
+    max_round   = max((r.get("round_num", 1) for r in rows), default=1)
+
+    t = Tournament(
+        name        = t_name,
+        fmt         = t_fmt,
+        players     = players,
+        rounds      = max_round,
+        movetime_ms = 1000,
+    )
+    t.tournament_id = t_id
+    t.started       = True
+    t.finished      = True
+    t.current_round = max_round
+
+    rounds_by_num: dict = {}
+    for row in rows:
+        rnum = row.get("round_num", 1)
+        rounds_by_num.setdefault(rnum, []).append(row)
+
+    for row in rows:
+        wname = row.get("white_engine", "")
+        bname = row.get("black_engine", "")
+        wp    = player_names.get(wname)
+        bp    = player_names.get(bname)
+        if wp is None or bp is None:
+            continue
+
+        rnum = row.get("round_num", 1)
+        g    = TournamentGame(rnum, wp, bp)
+        g.result     = row.get("result", "*")
+        g.reason     = row.get("reason", "")
+        g.pgn        = row.get("pgn", "")
+        g.move_count = row.get("move_count") or 0
+        g.duration   = row.get("duration_sec") or 0
+        g.opening    = row.get("opening", "")
+        g.status     = "done"
+
+        if g.pgn and _Board is not None:
+            try:
+                b     = _Board()
+                body  = _re.sub(r'\[.*?\]\s*', '', g.pgn, flags=_re.DOTALL)
+                body  = _re.sub(r'\d+\.+', '', body)
+                body  = _re.sub(r'1-0|0-1|1/2-1/2|\*', '', body)
+                for san in body.split():
+                    san = san.strip()
+                    if not san:
+                        continue
+                    try:
+                        legal   = b.legal_moves()
+                        matched = False
+                        for move in legal:
+                            fr, fc, tr, tc, promo = move
+                            csan = b._build_san(fr, fc, tr, tc, promo, legal)
+                            if csan.rstrip('+#') == san.rstrip('+#'):
+                                uci = (f"{chr(ord('a')+fc)}{8-fr}"
+                                       f"{chr(ord('a')+tc)}{8-tr}"
+                                       + (promo.lower() if promo else ""))
+                                b.apply_uci(uci)
+                                matched = True
+                                break
+                        if not matched:
+                            break
+                    except Exception:
+                        break
+                g.move_history = list(b.move_history)
+            except Exception:
+                g.move_history = []
+
+        ws = g.white_score
+        bs = g.black_score
+        if ws is not None:
+            wp.record(ws, bname, 'w')
+            bp.record(bs, wname, 'b')
+
+        t.all_games.append(g)
+
+        if t_fmt == Tournament.FORMAT_KNOCKOUT:
+            t._ko_round_games.setdefault(rnum, []).append(g)
+
+    if t_fmt == Tournament.FORMAT_KNOCKOUT:
+        eliminated_set: set = set()
+        for rnum in sorted(rounds_by_num.keys()):
+            for g in t._ko_round_games.get(rnum, []):
+                ws = g.white_score
+                bs = g.black_score
+                if ws is None:
+                    continue
+                if ws > bs:
+                    eliminated_set.add(g.black.name)
+                    t._ko_eliminated.append(g.black)
+                elif bs > ws:
+                    eliminated_set.add(g.white.name)
+                    t._ko_eliminated.append(g.white)
+                else:
+                    eliminated_set.add(g.black.name)
+                    t._ko_eliminated.append(g.black)
+
+        t._ko_pending_winners = [p for p in players if p.name not in eliminated_set]
+
+    t.round_games = (
+        t._ko_round_games.get(max_round, [])
+        if t_fmt == Tournament.FORMAT_KNOCKOUT
+        else [g for g in t.all_games if g.round_num == max_round]
+    )
+
+    standings = t.get_standings()
+    if standings:
+        t.winner = standings[0]
+
+    return t
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Chunked treeview insert — keeps UI responsive when inserting many rows
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _batch_tree_insert(widget: tk.Widget,
+                       tree,
+                       rows: list,
+                       chunk: int = 150,
+                       done_fn=None):
+    """
+    Insert *rows* into *tree* in chunks of *chunk* items, yielding control to
+    Tk between each chunk via widget.after(0, …).
+
+    Each element of *rows* must be a dict:
+        {"values": [...], "tags": (...,), "parent": "", "index": "end"}
+
+    *done_fn* is called (no args) on the main thread once all rows are inserted.
+    """
+    if not rows:
+        if done_fn:
+            done_fn()
+        return
+
+    iterator = iter(rows)
+
+    def _insert_chunk():
+        count = 0
+        try:
+            while count < chunk:
+                r = next(iterator)
+                tree.insert(
+                    r.get("parent", ""),
+                    r.get("index", "end"),
+                    values=r["values"],
+                    tags=r.get("tags", ()),
+                    iid=r.get("iid"),
+                )
+                count += 1
+        except StopIteration:
+            if done_fn:
+                done_fn()
+            return
+        widget.after(0, _insert_chunk)
+
+    widget.after(0, _insert_chunk)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1103,8 +1478,9 @@ class TournamentRunner:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentHistoryWindow:
-    def __init__(self, parent, tournament: Tournament):
+    def __init__(self, parent, tournament: Tournament, db=None):
         self.t   = tournament
+        self.db  = db
         self.win = tk.Toplevel(parent)
         self.win.title(f"📜 Tournament History — {tournament.name}")
         self.win.configure(bg=BG)
@@ -1113,8 +1489,26 @@ class TournamentHistoryWindow:
         self.win.minsize(860, 600)
         self._selected_game: TournamentGame = None
         self._game_map = {}
+        self._elo_map  = {}           # filled async below
         self._build()
         self._populate_game_list()
+
+        # ── Load Elo off-thread so window opens instantly ─────────────────────
+        self._elo_overlay = LoadingOverlay(self.win, "Fetching Elo ratings…")
+        self._elo_overlay.show()
+        fetch_async(
+            parent  = self.win,
+            work_fn = lambda: _get_elo_map(self.db),
+            done_fn = self._on_elo_loaded,
+            overlay = self._elo_overlay,
+        )
+
+    def _on_elo_loaded(self, elo_map: dict):
+        """Called on main thread once background Elo fetch is done."""
+        self._elo_map = elo_map
+        # refresh badges on whatever game is currently selected
+        if self._selected_game:
+            self._load_game(self._selected_game)
 
     def _build(self):
         tb = tk.Frame(self.win, bg=PANEL_BG, height=44)
@@ -1199,22 +1593,41 @@ class TournamentHistoryWindow:
 
         pl_row = tk.Frame(p, bg=BG)
         pl_row.pack(fill='x', padx=8, pady=(0,2))
-        self.vh_white = tk.Label(pl_row, text="♔  —",
-                                bg="#1c2a1c", fg="#FFD700",
-                                font=('Segoe UI', 9, 'bold'),
-                                anchor='center', pady=4,
-                                highlightthickness=1,
-                                highlightbackground="#444400")
-        self.vh_white.pack(side='left', fill='x', expand=True, padx=(0,4))
+
+        # ── PATCH: white player label + Elo badge ─────────────────────────────
+        white_col = tk.Frame(pl_row, bg="#1c2a1c",
+                             highlightthickness=1,
+                             highlightbackground="#444400")
+        white_col.pack(side='left', fill='x', expand=True, padx=(0,4))
+        self.vh_white = tk.Label(white_col, text="♔  —",
+                                 bg="#1c2a1c", fg="#FFD700",
+                                 font=('Segoe UI', 9, 'bold'),
+                                 anchor='center', pady=3)
+        self.vh_white.pack(fill='x')
+        self.vh_white_elo = tk.Label(white_col, text="",
+                                     bg="#1c2a1c", fg="#888",
+                                     font=('Consolas', 7),
+                                     anchor='center', pady=1)
+        self.vh_white_elo.pack(fill='x')
+
         tk.Label(pl_row, text="vs", bg=BG, fg="#444",
                 font=('Segoe UI',8)).pack(side='left')
-        self.vh_black = tk.Label(pl_row, text="♚  —",
-                                bg="#1a1a2a", fg="#C8C8C8",
-                                font=('Segoe UI', 9, 'bold'),
-                                anchor='center', pady=4,
-                                highlightthickness=1,
-                                highlightbackground="#333344")
-        self.vh_black.pack(side='right', fill='x', expand=True, padx=(4,0))
+
+        # ── PATCH: black player label + Elo badge ─────────────────────────────
+        black_col = tk.Frame(pl_row, bg="#1a1a2a",
+                             highlightthickness=1,
+                             highlightbackground="#333344")
+        black_col.pack(side='right', fill='x', expand=True, padx=(4,0))
+        self.vh_black = tk.Label(black_col, text="♚  —",
+                                 bg="#1a1a2a", fg="#C8C8C8",
+                                 font=('Segoe UI', 9, 'bold'),
+                                 anchor='center', pady=3)
+        self.vh_black.pack(fill='x')
+        self.vh_black_elo = tk.Label(black_col, text="",
+                                     bg="#1a1a2a", fg="#888",
+                                     font=('Consolas', 7),
+                                     anchor='center', pady=1)
+        self.vh_black_elo.pack(fill='x')
 
         self.vh_opening_lbl = tk.Label(p, text="",
                                        bg=BG, fg="#00BFFF",
@@ -1265,10 +1678,14 @@ class TournamentHistoryWindow:
         for item in tree.get_children():
             tree.delete(item)
         self._game_map = {}
-        games = self.t.get_all_completed_games()
-        flt   = self.filter_var.get().strip().lower()
-        rflt  = self.result_filter.get()
-        shown = 0
+
+        games  = self.t.get_all_completed_games()
+        flt    = self.filter_var.get().strip().lower()
+        rflt   = self.result_filter.get()
+        total  = len(games)
+        rows   = []
+        game_order = []   # parallel list to rebuild _game_map after batch insert
+
         for g in games:
             if rflt != "All" and g.result != rflt:
                 continue
@@ -1284,11 +1701,18 @@ class TournamentHistoryWindow:
             elif g.result == '0-1':      tag = 'bwin'
             elif g.result == '1/2-1/2':  tag = 'draw'
             else:                        tag = 'other'
-            iid = tree.insert('', 'end', values=row, tags=(tag,))
-            self._game_map[iid] = g
-            shown += 1
-        total = len(self.t.get_all_completed_games())
+            rows.append({"values": row, "tags": (tag,)})
+            game_order.append(g)
+
+        shown = len(rows)
         self.game_count_lbl.config(text=f"{shown} / {total} games")
+
+        def _after_insert():
+            # Re-map tree iids → game objects once all rows are in
+            for iid, g in zip(tree.get_children(), game_order):
+                self._game_map[iid] = g
+
+        _batch_tree_insert(self.win, tree, rows, done_fn=_after_insert)
 
     def _on_game_select(self, event):
         sel = self.game_tree.selection()
@@ -1303,6 +1727,14 @@ class TournamentHistoryWindow:
             text=f"Round {game.round_num}  ·  {game.result or '—'}")
         self.vh_white.config(text=f"♔  {game.white.name}")
         self.vh_black.config(text=f"♚  {game.black.name}")
+
+        # ── PATCH: populate Elo badges ─────────────────────────────────────────
+        w_elo_str = _fmt_elo(self._elo_map, game.white.name)
+        b_elo_str = _fmt_elo(self._elo_map, game.black.name)
+        w_elo_col = _elo_color(self._elo_map, game.white.name)
+        b_elo_col = _elo_color(self._elo_map, game.black.name)
+        self.vh_white_elo.config(text=w_elo_str, fg=w_elo_col)
+        self.vh_black_elo.config(text=b_elo_str, fg=b_elo_col)
 
         if game.opening:
             self.vh_opening_lbl.config(text=f"📖  {game.opening}")
@@ -1672,7 +2104,6 @@ class TournamentSetupDialog:
                 return p
         return None
 
-    # ── PATCH 1: Duplicate engine name validation ─────────────────────────────
     def _confirm(self):
         players = []
         seen_names = {}
@@ -1723,16 +2154,10 @@ class TournamentSetupDialog:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Roster Dialog  (Add / Remove players from a running tournament)
+#  Roster Dialog
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class RosterDialog:
-    """
-    Add new engine players or remove existing ones from a tournament
-    that has not yet finished.  Only players with 0 games played can
-    be safely removed without corrupting pairings / scores.
-    """
-
     def __init__(self, parent, tournament: Tournament, on_change=None):
         self.t         = tournament
         self.on_change = on_change
@@ -1748,7 +2173,6 @@ class RosterDialog:
         self._refresh_list()
 
     def _build(self):
-        # ── Header ────────────────────────────────────────────────────────────
         hdr = tk.Frame(self.win, bg=PANEL_BG,
                        highlightthickness=1, highlightbackground="#333")
         hdr.pack(fill='x')
@@ -1763,7 +2187,6 @@ class RosterDialog:
                   cursor='hand2').pack(side='right', padx=8, pady=6)
         tk.Frame(self.win, bg=ACCENT, height=2).pack(fill='x')
 
-        # ── Status note ────────────────────────────────────────────────────────
         if self.t.started and not self.t.finished:
             note_color = "#FF8800"
             note_text  = ("⚠  Tournament is in progress. You may add new players "
@@ -1780,7 +2203,6 @@ class RosterDialog:
                  font=('Segoe UI', 8, 'italic'),
                  wraplength=620, anchor='w').pack(fill='x', padx=12, pady=(6, 2))
 
-        # ── Current player list ────────────────────────────────────────────────
         tk.Label(self.win, text="Current Players:",
                  bg=BG, fg=ACCENT,
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w', padx=12, pady=(6, 2))
@@ -1811,7 +2233,6 @@ class RosterDialog:
         self.tree.tag_configure('locked',    foreground="#555555")
         self.tree.pack(fill='both', expand=True)
 
-        # ── Remove button row ──────────────────────────────────────────────────
         btn_row = tk.Frame(self.win, bg=BG)
         btn_row.pack(fill='x', padx=12, pady=(2, 4))
         self.remove_btn = tk.Button(
@@ -1825,7 +2246,6 @@ class RosterDialog:
                  text="  (Only players with 0 games played can be removed)",
                  bg=BG, fg="#555", font=('Segoe UI', 7)).pack(side='left', padx=4)
 
-        # ── Add new player section ─────────────────────────────────────────────
         tk.Frame(self.win, bg='#2a2a4a', height=1).pack(fill='x', padx=12, pady=(2, 4))
         tk.Label(self.win, text="Add New Player:",
                  bg=BG, fg=ACCENT,
@@ -1875,7 +2295,6 @@ class RosterDialog:
             cursor='hand2')
         self.add_btn.pack(side='left')
 
-        # Lock controls if tournament is finished
         if self.t.finished:
             self.remove_btn.config(state='disabled')
             self.add_btn.config(state='disabled')
@@ -1937,7 +2356,6 @@ class RosterDialog:
         if not confirm:
             return
 
-        # Remove from all tournament data structures
         player_obj = self.t.players.get(p_name)
         if player_obj:
             self.t.player_list.remove(player_obj)
@@ -1978,7 +2396,6 @@ class RosterDialog:
                 f"Engine file not found:\n{path}", parent=self.win)
             return
 
-        # Duplicate name check (same logic as setup dialog)
         norm_name = normalize_engine_name(name).lower()
         for p in self.t.player_list:
             if normalize_engine_name(p.name).lower() == norm_name:
@@ -1995,7 +2412,6 @@ class RosterDialog:
         if self.t.format == Tournament.FORMAT_KNOCKOUT:
             self.t._ko_active_players.append(new_player)
 
-        # Clear entry fields after success
         self.new_name_var.set("")
         self.new_path_var.set("")
 
@@ -2021,9 +2437,6 @@ class TournamentWindow:
         self.current_game: TournamentGame = None
         self._history_win = None
 
-        # ── Database wiring ───────────────────────────────────────────────────
-        # Accept a Database instance directly, or build one from a path.
-        # Uses the provided database.py Database class if available.
         if db is not None:
             self.db = db
         elif db_path and Database is not None:
@@ -2032,6 +2445,9 @@ class TournamentWindow:
             self.db = None
 
         self.db_path = db_path or (db.db_path if db is not None else None)
+
+        # Elo map starts empty; loaded async after window opens
+        self._elo_map: dict = {}
 
         self.win = tk.Toplevel(root)
         self.win.title(f"🏆 Tournament — {tournament.name}")
@@ -2043,6 +2459,16 @@ class TournamentWindow:
 
         self._build_ui()
         self._refresh_standings()
+
+        # ── Load Elo off-thread so window opens without freezing ─────────────
+        self._elo_overlay = LoadingOverlay(self.win, "Fetching Elo ratings…")
+        self._elo_overlay.show()
+        fetch_async(
+            parent  = self.win,
+            work_fn = lambda: _get_elo_map(self.db),
+            done_fn = self._on_elo_loaded,
+            overlay = self._elo_overlay,
+        )
 
         has_book     = tournament.opening_book is not None
         has_analyzer = tournament.analyzer_path is not None
@@ -2106,7 +2532,6 @@ class TournamentWindow:
                 bg=PANEL_BG, fg="#00FF80",
                 font=('Consolas',9)).pack(side='left', padx=8)
 
-        # ── PATCH 2: Toolbar buttons with Roster ─────────────────────────────
         for txt, cmd, acc in [
             ("▶ Start",      self._start,          True),
             ("⏸ Pause",      self._pause,           False),
@@ -2132,22 +2557,41 @@ class TournamentWindow:
 
         players_row = tk.Frame(p, bg=BG)
         players_row.pack(fill='x', padx=6, pady=(0,2))
-        self.white_lbl = tk.Label(players_row, text="♔ —",
-                                bg="#1c2a1c", fg="#FFD700",
-                                font=('Segoe UI',10,'bold'),
-                                anchor='center', pady=6,
-                                highlightthickness=1,
-                                highlightbackground="#555500")
-        self.white_lbl.pack(side='left', fill='x', expand=True, padx=(0,4))
+
+        # ── PATCH: white side with Elo sub-label ─────────────────────────────
+        white_col = tk.Frame(players_row, bg="#1c2a1c",
+                             highlightthickness=1,
+                             highlightbackground="#555500")
+        white_col.pack(side='left', fill='x', expand=True, padx=(0,4))
+        self.white_lbl = tk.Label(white_col, text="♔ —",
+                                  bg="#1c2a1c", fg="#FFD700",
+                                  font=('Segoe UI',10,'bold'),
+                                  anchor='center', pady=4)
+        self.white_lbl.pack(fill='x')
+        self.white_elo_lbl = tk.Label(white_col, text="",
+                                      bg="#1c2a1c", fg="#888",
+                                      font=('Consolas', 7),
+                                      anchor='center', pady=1)
+        self.white_elo_lbl.pack(fill='x')
+
         tk.Label(players_row, text="vs", bg=BG, fg="#555",
                 font=('Segoe UI',9)).pack(side='left')
-        self.black_lbl = tk.Label(players_row, text="♚ —",
-                                bg="#1a1a2a", fg="#C8C8C8",
-                                font=('Segoe UI',10,'bold'),
-                                anchor='center', pady=6,
-                                highlightthickness=1,
-                                highlightbackground="#444444")
-        self.black_lbl.pack(side='right', fill='x', expand=True, padx=(4,0))
+
+        # ── PATCH: black side with Elo sub-label ─────────────────────────────
+        black_col = tk.Frame(players_row, bg="#1a1a2a",
+                             highlightthickness=1,
+                             highlightbackground="#444444")
+        black_col.pack(side='right', fill='x', expand=True, padx=(4,0))
+        self.black_lbl = tk.Label(black_col, text="♚ —",
+                                  bg="#1a1a2a", fg="#C8C8C8",
+                                  font=('Segoe UI',10,'bold'),
+                                  anchor='center', pady=4)
+        self.black_lbl.pack(fill='x')
+        self.black_elo_lbl = tk.Label(black_col, text="",
+                                      bg="#1a1a2a", fg="#888",
+                                      font=('Consolas', 7),
+                                      anchor='center', pady=1)
+        self.black_elo_lbl.pack(fill='x')
 
         self.opening_lbl = tk.Label(p, text="",
                                     bg=BG, fg="#00BFFF",
@@ -2222,19 +2666,24 @@ class TournamentWindow:
         tf = tk.Frame(p, bg=PANEL_BG)
         tf.pack(fill='both', expand=True, padx=8, pady=(0,8))
         sb = tk.Scrollbar(tf); sb.pack(side='right', fill='y')
-        cols = ['#','Engine','Score','W','D','L','Pts']
+
+        # ── PATCH: add 'Elo' column to standings ─────────────────────────────
+        cols = ['#','Engine','Elo','Score','W','D','L','Pts']
         if self.t.format == Tournament.FORMAT_SWISS:
             cols += ['BH','SB']
+
         self.standings_tree = ttk.Treeview(
             tf, columns=cols, show='headings', yscrollcommand=sb.set)
         sb.config(command=self.standings_tree.yview)
-        widths = {'#':30,'Engine':160,'Score':50,'W':40,'D':40,'L':40,
-                'Pts':45,'BH':50,'SB':50}
+
+        widths = {'#':30,'Engine':150,'Elo':60,'Score':50,'W':40,'D':40,'L':40,
+                  'Pts':45,'BH':50,'SB':50}
         for c in cols:
             self.standings_tree.heading(c, text=c)
             self.standings_tree.column(
                 c, width=widths.get(c,50),
                 anchor='center' if c!='Engine' else 'w')
+
         style = ttk.Style()
         style.configure('Treeview', background=LOG_BG, foreground=TEXT,
                         fieldbackground=LOG_BG, borderwidth=0, rowheight=26)
@@ -2247,6 +2696,11 @@ class TournamentWindow:
         self.standings_tree.tag_configure('bronze', foreground="#CD7F32")
         self.standings_tree.tag_configure('normal', foreground=TEXT)
         self.standings_tree.tag_configure('active', background="#1A2A1A")
+
+        # ── PATCH: per-tier colour tags for Elo column ───────────────────────
+        for _, _, colour in RANK_TIERS:
+            self.standings_tree.tag_configure(f'tier_{colour}', foreground=colour)
+
         self.standings_tree.pack(fill='both', expand=True)
 
     def _build_schedule_tab(self, p):
@@ -2402,6 +2856,15 @@ class TournamentWindow:
                 f"[Rnd {game.round_num}]  {game.result}")
         self.white_lbl.config(text=f"♔  {game.white.name}")
         self.black_lbl.config(text=f"♚  {game.black.name}")
+
+        # ── PATCH: show Elo in replay mode too ───────────────────────────────
+        self.white_elo_lbl.config(
+            text=_fmt_elo(self._elo_map, game.white.name),
+            fg=_elo_color(self._elo_map, game.white.name))
+        self.black_elo_lbl.config(
+            text=_fmt_elo(self._elo_map, game.black.name),
+            fg=_elo_color(self._elo_map, game.black.name))
+
         if game.opening:
             self.opening_lbl.config(text=f"📖  {game.opening}")
         else:
@@ -2416,16 +2879,13 @@ class TournamentWindow:
         if self._history_win and self._history_win.win.winfo_exists():
             self._history_win.win.lift()
             return
-        self._history_win = TournamentHistoryWindow(self.win, self.t)
-
-    # ── PATCH 3: Roster management methods ───────────────────────────────────
+        # ── PATCH: pass db so TournamentHistoryWindow can show Elo ───────────
+        self._history_win = TournamentHistoryWindow(self.win, self.t, db=self.db)
 
     def _open_roster(self):
-        """Open the RosterDialog for adding/removing players."""
         RosterDialog(self.win, self.t, on_change=self._on_roster_change)
 
     def _on_roster_change(self):
-        """Called by RosterDialog after any add/remove action."""
         self._refresh_standings()
         self._refresh_schedule()
         self._refresh_history()
@@ -2441,6 +2901,15 @@ class TournamentWindow:
             text=f"▶  Round {game.round_num}:  {game.white.name}  vs  {game.black.name}")
         self.white_lbl.config(text=f"♔  {game.white.name}")
         self.black_lbl.config(text=f"♚  {game.black.name}")
+
+        # ── PATCH: show Elo when game starts ─────────────────────────────────
+        self.white_elo_lbl.config(
+            text=_fmt_elo(self._elo_map, game.white.name),
+            fg=_elo_color(self._elo_map, game.white.name))
+        self.black_elo_lbl.config(
+            text=_fmt_elo(self._elo_map, game.black.name),
+            fg=_elo_color(self._elo_map, game.black.name))
+
         self.opening_lbl.config(text="")
         self._live_evals = []
         self._current_opening_in_log = False
@@ -2499,7 +2968,7 @@ class TournamentWindow:
         self.move_log.insert('end', f"\n  ⇒ {game.result}  {game.reason}\n", 'res')
         self.move_log.see('end')
         self.move_log.config(state='disabled')
-        self._refresh_standings()
+
         self._refresh_schedule()
         self._refresh_history()
         if self.t.format == Tournament.FORMAT_KNOCKOUT:
@@ -2507,6 +2976,8 @@ class TournamentWindow:
         self._save_game_db(game)
         if self._history_win and self._history_win.win.winfo_exists():
             self._history_win._populate_game_list()
+        # Refresh Elo off-thread (updates standings + badges when done)
+        self._refresh_elo_async()
 
     def _cb_round_end(self, completed_round):
         self.win.after(0, self._on_round_end_ui, completed_round)
@@ -2529,13 +3000,46 @@ class TournamentWindow:
         self._refresh_history()
         if t.format == Tournament.FORMAT_KNOCKOUT:
             self._draw_bracket()
-        self._show_final_results()
+        # Refresh final Elo off-thread, then show results
+        fetch_async(
+            parent  = self.win,
+            work_fn = lambda: _get_elo_map(self.db),
+            done_fn = lambda em: (
+                self.__dict__.update(_elo_map=em),
+                self._refresh_standings(),
+                self._show_final_results(),
+            ),
+        )
 
     def _cb_status(self, msg):
         self.win.after(0, self._status, msg)
 
     def _status(self, msg):
         self.status_var.set(msg)
+
+    # ── Async Elo callback ───────────────────────────────────────────────────
+
+    def _on_elo_loaded(self, elo_map: dict):
+        """Called on main thread once the background Elo fetch completes."""
+        self._elo_map = elo_map
+        self._refresh_standings()
+        # Refresh live player badges if a game is running
+        if self.current_game:
+            g = self.current_game
+            self.white_elo_lbl.config(
+                text=_fmt_elo(self._elo_map, g.white.name),
+                fg=_elo_color(self._elo_map, g.white.name))
+            self.black_elo_lbl.config(
+                text=_fmt_elo(self._elo_map, g.black.name),
+                fg=_elo_color(self._elo_map, g.black.name))
+
+    def _refresh_elo_async(self):
+        """Re-fetch Elo ratings in background and refresh standings when done."""
+        fetch_async(
+            parent  = self.win,
+            work_fn = lambda: _get_elo_map(self.db),
+            done_fn = self._on_elo_loaded,
+        )
 
     # ── Control buttons ───────────────────────────────────────────────────────
 
@@ -2583,26 +3087,39 @@ class TournamentWindow:
             text=f"Round {rnd} / {total}  ·  "
                 f"{len(self.t.get_all_completed_games())} games completed")
         cols = list(tree['columns'])
+
+        rows = []
         for i, p in enumerate(standings, 1):
-            row = [i, p.name, f"{p.score:.1f}", p.wins, p.draws, p.losses,
-                   p.games_played]
+            elo_val = self._elo_map.get(p.name) or \
+                      self._elo_map.get(normalize_engine_name(p.name))
+            elo_str = str(elo_val) if elo_val is not None else "—"
+            row = [i, p.name, elo_str, f"{p.score:.1f}",
+                   p.wins, p.draws, p.losses, p.games_played]
             if 'BH' in cols:
                 row += [f"{p.buchholz:.1f}", f"{p.sonneborn:.1f}"]
-            tag = 'gold' if i==1 else 'silver' if i==2 else \
-                  'bronze' if i==3 else 'normal'
+            if elo_val is not None:
+                _, tier_col = get_tier(elo_val)
+                tag = f'tier_{tier_col}'
+            else:
+                tag = ('gold' if i==1 else 'silver' if i==2 else
+                       'bronze' if i==3 else 'normal')
             if self.current_game and p.name in (
                     self.current_game.white.name,
                     self.current_game.black.name):
                 tag = 'active'
-            tree.insert('', 'end', values=row, tags=(tag,))
+            rows.append({"values": row, "tags": (tag,)})
+
+        _batch_tree_insert(self.win, tree, rows)
 
     def _refresh_schedule(self):
         tree = self.schedule_tree
         for item in tree.get_children():
             tree.delete(item)
+
+        rows = []
         for rnd in range(1, self.t.current_round + 1):
-            round_games = [g for g in self.t.all_games if g.round_num == rnd]
-            for seq, g in enumerate(round_games, 1):
+            for seq, g in enumerate(
+                    [g for g in self.t.all_games if g.round_num == rnd], 1):
                 result_str  = g.result or "—"
                 opening_str = (g.opening[:22] if g.opening else "")
                 moves_str   = str(g.move_count) if g.status == 'done' else ""
@@ -2615,14 +3132,21 @@ class TournamentWindow:
                     elif g.result == '1/2-1/2':  tag = 'done_draw'
                     else:                        tag = 'pending'
                 else:                            tag = 'pending'
-                tree.insert('', 'end', values=row, tags=(tag,))
-        ch = tree.get_children()
-        if ch: tree.see(ch[-1])
+                rows.append({"values": row, "tags": (tag,)})
+
+        def _after_insert():
+            ch = tree.get_children()
+            if ch:
+                tree.see(ch[-1])
+
+        _batch_tree_insert(self.win, tree, rows, done_fn=_after_insert)
 
     def _refresh_history(self):
         tree = self.history_tree
         for item in tree.get_children():
             tree.delete(item)
+
+        rows = []
         for g in reversed(self.t.get_all_completed_games()):
             dur_s = f"{g.duration//60}m{g.duration%60}s" if g.duration else "—"
             row = [g.round_num, g.white.name, g.black.name,
@@ -2632,7 +3156,9 @@ class TournamentWindow:
             if g.result == '1-0':      tag = 'wwin'
             elif g.result == '0-1':    tag = 'bwin'
             else:                      tag = 'draw'
-            tree.insert('', 'end', values=row, tags=(tag,))
+            rows.append({"values": row, "tags": (tag,)})
+
+        _batch_tree_insert(self.win, tree, rows)
 
     def _prepend_opening_to_log(self, opening_name):
         self.move_log.config(state='normal')
@@ -2673,7 +3199,7 @@ class TournamentWindow:
         d = tk.Toplevel(self.win)
         d.title("🏆 Tournament Results")
         d.configure(bg=BG)
-        d.geometry("520x620")
+        d.geometry("560x640")
         d.resizable(True, True)
         d.transient(self.win)
         d.grab_set()
@@ -2685,33 +3211,59 @@ class TournamentWindow:
                 font=('Segoe UI',10)).pack()
         tk.Frame(d, bg=ACCENT, height=2).pack(fill='x', padx=20, pady=10)
         if winner:
-            tk.Label(d, text=f"🥇  {winner.name}", bg=BG, fg="#FFD700",
-                    font=('Segoe UI',18,'bold')).pack(pady=4)
+            # ── PATCH: show winner's Elo in final results ─────────────────────
+            w_elo     = self._elo_map.get(winner.name) or \
+                        self._elo_map.get(normalize_engine_name(winner.name))
+            w_elo_str = f"  ·  Elo {w_elo}" if w_elo is not None else ""
+            w_tier    = ""
+            w_col     = "#FFD700"
+            if w_elo is not None:
+                w_tier, w_col = get_tier(w_elo)
+            tk.Label(d, text=f"🥇  {winner.name}", bg=BG, fg=w_col,
+                    font=('Segoe UI',18,'bold')).pack(pady=(4,0))
             tk.Label(d, text=f"Score: {winner.score:.1f}  ·  "
-                            f"W:{winner.wins}  D:{winner.draws}  L:{winner.losses}",
+                             f"W:{winner.wins}  D:{winner.draws}  L:{winner.losses}"
+                             f"{w_elo_str}",
                     bg=BG, fg="#AAA", font=('Segoe UI',10)).pack()
+            if w_elo is not None:
+                tk.Label(d, text=w_tier, bg=BG, fg=w_col,
+                         font=('Segoe UI', 9, 'italic')).pack(pady=(0,4))
         tk.Frame(d, bg='#2a2a4a', height=1).pack(fill='x', padx=20, pady=8)
         tk.Label(d, text="Final Standings:", bg=BG, fg="#AAA",
                 font=('Segoe UI',9,'bold')).pack(anchor='w', padx=24)
         tf = tk.Frame(d, bg=LOG_BG)
         tf.pack(fill='both', expand=True, padx=20, pady=4)
         sb = tk.Scrollbar(tf); sb.pack(side='right', fill='y')
-        cols = ['#','Engine','Score','W','D','L']
+
+        # ── PATCH: add Elo column to final standings table ─────────────────────
+        cols = ['#','Engine','Elo','Score','W','D','L']
         tree = ttk.Treeview(tf, columns=cols, show='headings',
                             yscrollcommand=sb.set, height=8)
         sb.config(command=tree.yview)
-        for c, w in [('#',30),('Engine',200),('Score',55),('W',40),('D',40),('L',40)]:
+        for c, w in [('#',30),('Engine',175),('Elo',65),
+                     ('Score',55),('W',40),('D',40),('L',40)]:
             tree.heading(c, text=c)
             tree.column(c, width=w, anchor='center' if c != 'Engine' else 'w')
         tree.tag_configure('gold',   foreground="#FFD700")
         tree.tag_configure('silver', foreground="#C0C0C0")
         tree.tag_configure('bronze', foreground="#CD7F32")
         tree.tag_configure('normal', foreground=TEXT)
+        for _, _, colour in RANK_TIERS:
+            tree.tag_configure(f'tier_{colour}', foreground=colour)
+
         for i, p in enumerate(self.t.get_standings(), 1):
-            tag = 'gold' if i==1 else 'silver' if i==2 else \
-                  'bronze' if i==3 else 'normal'
+            p_elo     = self._elo_map.get(p.name) or \
+                        self._elo_map.get(normalize_engine_name(p.name))
+            elo_str   = str(p_elo) if p_elo is not None else "—"
+            if p_elo is not None:
+                _, tier_col = get_tier(p_elo)
+                tag = f'tier_{tier_col}'
+            else:
+                tag = ('gold' if i==1 else 'silver' if i==2 else
+                       'bronze' if i==3 else 'normal')
             tree.insert('', 'end',
-                values=[i, p.name, f"{p.score:.1f}", p.wins, p.draws, p.losses],
+                values=[i, p.name, elo_str, f"{p.score:.1f}",
+                        p.wins, p.draws, p.losses],
                 tags=(tag,))
         tree.pack(fill='both', expand=True)
         bf = tk.Frame(d, bg=BG)
@@ -2726,23 +3278,12 @@ class TournamentWindow:
                 padx=16, pady=8, relief='flat', cursor='hand2'
                 ).pack(side='right')
 
-    # ── DB persistence — uses Database class from database.py ────────────────
+    # ── DB persistence ────────────────────────────────────────────────────────
 
     def _save_game_db(self, game: TournamentGame):
-        """
-        Persist a completed tournament game.
-
-        Uses Database.save_tournament_game() which:
-          1. Inserts into `games` (for Elo/stats)
-          2. Inserts into `tournament_games` (for tournament history)
-
-        Falls back to a raw SQLite write if no Database instance is available
-        but a db_path was supplied.
-        """
         if not game.pgn:
             return
 
-        # ── Primary path: use Database instance ──────────────────────────────
         if self.db is not None:
             game_id, t_game_id = self.db.save_tournament_game(
                 tournament_id   = self.t.tournament_id,
@@ -2767,7 +3308,6 @@ class TournamentWindow:
                       f"{game.white.name} vs {game.black.name}")
             return
 
-        # ── Fallback path: raw SQLite when only db_path is given ─────────────
         if not self.db_path:
             return
         try:
@@ -2775,7 +3315,6 @@ class TournamentWindow:
             conn.execute("PRAGMA journal_mode=WAL")
             cur = conn.cursor()
 
-            # Ensure both tables exist (matches database.py schema exactly)
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS games (
                     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2811,7 +3350,6 @@ class TournamentWindow:
                     time            TEXT    NOT NULL
                 )
             ''')
-            # Add source column if missing (migration safety)
             try:
                 cur.execute("ALTER TABLE games ADD COLUMN source TEXT DEFAULT 'regular'")
             except sqlite3.OperationalError:
@@ -2821,7 +3359,6 @@ class TournamentWindow:
             date_str = now.strftime("%Y.%m.%d")
             time_str = now.strftime("%H:%M:%S")
 
-            # Insert into games table first
             cur.execute('''
                 INSERT INTO games
                     (white_engine, black_engine, result, reason,
@@ -2837,7 +3374,6 @@ class TournamentWindow:
             ))
             game_id = cur.lastrowid
 
-            # Insert into tournament_games table
             cur.execute('''
                 INSERT INTO tournament_games
                     (game_id, tournament_id, tournament_name, format,
@@ -2865,10 +3401,6 @@ class TournamentWindow:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentManager:
-    """
-    Central registry for all Tournament objects created in this session.
-    """
-
     def __init__(self):
         self._entries: list[dict]          = []
         self._windows: dict[str, object]   = {}
@@ -3084,6 +3616,34 @@ class TournamentListWindow:
         return len(t.get_all_completed_games())
 
     def _refresh(self, *_):
+        """
+        Step 1: render in-memory entries immediately (no freeze),
+        Step 2: fetch DB rows off-thread and merge them in.
+        """
+        self._render_display_rows(db_rows=[])   # instant render from memory
+
+        if self.db is not None:
+            overlay = LoadingOverlay(self.win, "Loading tournament list…")
+            overlay.show()
+            fetch_async(
+                parent  = self.win,
+                work_fn = self.db.get_tournament_list,
+                done_fn = lambda rows: (
+                    overlay.hide(),
+                    self._render_display_rows(db_rows=rows),
+                ),
+                overlay = overlay,
+                error_fn = lambda e: (
+                    overlay.hide(),
+                    print(f"[TournamentListWindow] DB load error: {e}"),
+                ),
+            )
+
+    def _render_display_rows(self, db_rows=None):
+        """
+        Populate the tree from in-memory manager entries + optional db_rows.
+        Uses _batch_tree_insert to stay responsive with large history lists.
+        """
         for iid in self.tree.get_children():
             self.tree.delete(iid)
         self._id_map.clear()
@@ -3094,13 +3654,6 @@ class TournamentListWindow:
 
         entries = self.manager.get_all()
         in_memory_ids = {e["id"] for e in entries}
-
-        db_rows = []
-        if self.db is not None:
-            try:
-                db_rows = self.db.get_tournament_list()
-            except Exception as e:
-                print(f"[TournamentListWindow] DB load error: {e}")
 
         display_rows = []
 
@@ -3122,7 +3675,7 @@ class TournamentListWindow:
                 "obj":     t,
             })
 
-        for row in db_rows:
+        for row in (db_rows or []):
             tid = row.get("tournament_id", "")
             if tid in in_memory_ids:
                 continue
@@ -3139,12 +3692,13 @@ class TournamentListWindow:
                 "obj":     None,
             })
 
-        shown = 0
+        # Build filtered tree-row list (ids tracked in insertion order)
+        tree_rows   = []
+        ordered_ids = []
+
         for i, d in enumerate(display_rows, 1):
             status = d["status"]
-
-            if flt and flt not in d["name"].lower() \
-                    and flt not in d["winner"].lower():
+            if flt and flt not in d["name"].lower()                     and flt not in d["winner"].lower():
                 continue
             if fmt_flt != "All" and d["format"] != fmt_flt:
                 continue
@@ -3152,26 +3706,18 @@ class TournamentListWindow:
                 continue
 
             row_vals = [
-                i,
-                d["name"],
-                d["format"],
-                d["players"],
-                d["rounds"],
-                d["games"],
-                status,
-                d["winner"],
-                d["created"],
+                i, d["name"], d["format"], d["players"],
+                d["rounds"], d["games"], status, d["winner"], d["created"],
             ]
-
             if   status == "Running":  tag = 'running'
             elif status == "Finished": tag = 'finished'
             else:                      tag = 'pending'
 
-            iid = self.tree.insert('', 'end', values=row_vals, tags=(tag,))
-            self._id_map[iid] = d["id"]
-            shown += 1
+            tree_rows.append({"values": row_vals, "tags": (tag,)})
+            ordered_ids.append(d["id"])
 
         total     = len(display_rows)
+        shown     = len(tree_rows)
         finished  = sum(1 for d in display_rows if d["status"] == "Finished")
         running   = sum(1 for d in display_rows if d["status"] == "Running")
         all_games = sum(
@@ -3184,6 +3730,12 @@ class TournamentListWindow:
             f"{running} running  ·  {finished} finished  ·  "
             f"{all_games} total games played"
         )
+
+        def _after_insert():
+            for iid, tid in zip(self.tree.get_children(), ordered_ids):
+                self._id_map[iid] = tid
+
+        _batch_tree_insert(self.win, self.tree, tree_rows, done_fn=_after_insert)
 
     def _sort_by(self, col: str):
         if self._sort_col == col:
@@ -3245,159 +3797,60 @@ class TournamentListWindow:
                                 parent=self.win)
             return
 
-        try:
-            rows = self.db.get_tournament_games(tournament_id=tournament_id)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load tournament:\n{e}",
+        overlay = LoadingOverlay(self.win, "Loading tournament from database…")
+        overlay.show()
+
+        def _load():
+            return self.db.get_tournament_games(tournament_id=tournament_id)
+
+        def _on_loaded(rows):
+            if not rows:
+                messagebox.showinfo("Empty",
+                                    "No games found for this tournament in the database.",
+                                    parent=self.win)
+                return
+            self._build_db_tournament(tournament_id, rows)
+
+        def _on_error(exc):
+            messagebox.showerror("Error", f"Failed to load tournament:\n{exc}",
                                  parent=self.win)
-            return
 
-        if not rows:
-            messagebox.showinfo("Empty",
-                                "No games found for this tournament in the database.",
-                                parent=self.win)
-            return
-
-        first  = rows[0]
-        t_name = first.get("tournament_name", "Unknown Tournament")
-        t_fmt  = first.get("format", Tournament.FORMAT_SWISS)
-        t_id   = first.get("tournament_id", tournament_id)
-
-        player_names = {}
-        for row in rows:
-            for key in ("white_engine", "black_engine"):
-                name = row.get(key, "")
-                if name and name not in player_names:
-                    player_names[name] = TournamentPlayer(name, "")
-
-        players = list(player_names.values())
-        max_round = max((r.get("round_num", 1) for r in rows), default=1)
-
-        t = Tournament(
-            name        = t_name,
-            fmt         = t_fmt,
-            players     = players,
-            rounds      = max_round,
-            movetime_ms = 1000,
+        fetch_async(
+            parent   = self.win,
+            work_fn  = _load,
+            done_fn  = _on_loaded,
+            overlay  = overlay,
+            error_fn = _on_error,
         )
-        t.tournament_id = t_id
-        t.started       = True
-        t.finished      = True
-        t.current_round = max_round
+        return   # the rest of the method is extracted to _build_db_tournament
 
-        try:
-            from board import Board as _Board
-        except ImportError:
-            try:
-                from __main__ import Board as _Board
-            except ImportError:
-                _Board = None
+    def _build_db_tournament(self, tournament_id: str, rows: list):
+        """
+        Reconstruct a finished Tournament from raw DB rows.
+        The heavy PGN-parsing loop runs on a background thread so the UI
+        never freezes regardless of how many games are in the database.
+        """
+        overlay = LoadingOverlay(self.win, f"Processing {len(rows)} games…")
+        overlay.show()
 
-        import re as _re
+        def _work():
+            return _parse_db_rows(tournament_id, rows)
 
-        rounds_by_num: dict[int, list] = {}
-        for row in rows:
-            rnum = row.get("round_num", 1)
-            rounds_by_num.setdefault(rnum, []).append(row)
+        def _done(t):
+            win = TournamentWindow(self.root, t, db=self.db, db_path=self.db_path)
+            self.manager.register(t, win)
+            self._refresh()
+            if t.format == Tournament.FORMAT_KNOCKOUT:
+                win.win.after(100, win._draw_bracket)
 
-        for row in rows:
-            wname = row.get("white_engine", "")
-            bname = row.get("black_engine", "")
-            wp    = player_names.get(wname)
-            bp    = player_names.get(bname)
-            if wp is None or bp is None:
-                continue
-
-            rnum = row.get("round_num", 1)
-            g    = TournamentGame(rnum, wp, bp)
-            g.result     = row.get("result", "*")
-            g.reason     = row.get("reason", "")
-            g.pgn        = row.get("pgn", "")
-            g.move_count = row.get("move_count") or 0
-            g.duration   = row.get("duration_sec") or 0
-            g.opening    = row.get("opening", "")
-            g.status     = "done"
-
-            if g.pgn and _Board is not None:
-                try:
-                    b = _Board()
-                    body = _re.sub(r'\[.*?\]\s*', '', g.pgn, flags=_re.DOTALL)
-                    body = _re.sub(r'\d+\.+', '', body)
-                    body = _re.sub(r'1-0|0-1|1/2-1/2|\*', '', body)
-                    tokens = body.split()
-                    for san in tokens:
-                        san = san.strip()
-                        if not san:
-                            continue
-                        try:
-                            legal = b.legal_moves()
-                            matched = False
-                            for move in legal:
-                                fr, fc, tr, tc, promo = move
-                                candidate_san = b._build_san(fr, fc, tr, tc, promo, legal)
-                                if candidate_san.rstrip('+#') == san.rstrip('+#'):
-                                    uci = (f"{chr(ord('a')+fc)}{8-fr}"
-                                           f"{chr(ord('a')+tc)}{8-tr}"
-                                           + (promo.lower() if promo else ""))
-                                    b.apply_uci(uci)
-                                    matched = True
-                                    break
-                            if not matched:
-                                break
-                        except Exception:
-                            break
-                    g.move_history = list(b.move_history)
-                except Exception:
-                    g.move_history = []
-
-            ws = g.white_score
-            bs = g.black_score
-            if ws is not None:
-                wp.record(ws, bname, 'w')
-                bp.record(bs, wname, 'b')
-
-            t.all_games.append(g)
-
-            if t_fmt == Tournament.FORMAT_KNOCKOUT:
-                t._ko_round_games.setdefault(rnum, []).append(g)
-
-        if t_fmt == Tournament.FORMAT_KNOCKOUT:
-            eliminated_set = set()
-            for rnum in sorted(rounds_by_num.keys()):
-                round_games = t._ko_round_games.get(rnum, [])
-                for g in round_games:
-                    ws = g.white_score
-                    bs = g.black_score
-                    if ws is None:
-                        continue
-                    if ws > bs:
-                        eliminated_set.add(g.black.name)
-                        t._ko_eliminated.append(g.black)
-                    elif bs > ws:
-                        eliminated_set.add(g.white.name)
-                        t._ko_eliminated.append(g.white)
-                    else:
-                        eliminated_set.add(g.black.name)
-                        t._ko_eliminated.append(g.black)
-
-            t._ko_pending_winners = [
-                p for p in players if p.name not in eliminated_set
-            ]
-
-        t.round_games = t._ko_round_games.get(max_round, []) \
-            if t_fmt == Tournament.FORMAT_KNOCKOUT \
-            else [g for g in t.all_games if g.round_num == max_round]
-
-        standings = t.get_standings()
-        if standings:
-            t.winner = standings[0]
-
-        win = TournamentWindow(self.root, t, db=self.db, db_path=self.db_path)
-        self.manager.register(t, win)
-        self._refresh()
-
-        if t_fmt == Tournament.FORMAT_KNOCKOUT:
-            win.win.after(100, win._draw_bracket)
+        fetch_async(
+            parent   = self.win,
+            work_fn  = _work,
+            done_fn  = _done,
+            overlay  = overlay,
+            error_fn = lambda e: messagebox.showerror(
+                "Error", f"Failed to build tournament:\n{e}", parent=self.win),
+        )
 
     def _open_history(self):
         t = self._selected_tournament()
