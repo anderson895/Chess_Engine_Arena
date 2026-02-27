@@ -536,10 +536,17 @@ class ChessGUI:
             tk.Frame(self.config_frame, bg='#2a2a4a', height=1).pack(fill='x', pady=4)
 
     def _on_mode_change(self):
+        if self.play_mode.get() == "human_vs_engine":
+            default_engine = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "engines", "gfruit.exe")
+            if not self.e2_path.get().strip() and os.path.isfile(default_engine):
+                self.e2_path.set(default_engine)
+                name = os.path.splitext(os.path.basename(default_engine))[0]
+                self.e2_name.set(f"{name} (Engine)")
         self._build_config_ui()
         msg = ("Enter your name, choose color, and load an engine"
-               if self.play_mode.get() == "human_vs_engine"
-               else "Load two engine .exe files, then press ▶ Start")
+            if self.play_mode.get() == "human_vs_engine"
+            else "Load two engine .exe files, then press ▶ Start")
         self._status(msg)
 
     def _browse_opponent(self):
