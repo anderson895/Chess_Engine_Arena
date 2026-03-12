@@ -459,33 +459,13 @@ class ChessGUI:
                  font=('Segoe UI', 12, 'bold'), padx=14).pack(side='left')
         tk.Frame(tb, bg=ACCENT, width=2).pack(side='left', fill='y', pady=6, padx=(0, 6))
 
-        # View / stats buttons
+        # View / stats buttons only
         for txt, cmd in [
             ("🏆 Rankings",     self._show_rankings),
             ("📊 Statistics",   self._show_statistics),
             ("📖 Openings",     self._show_opening_stats),
             ("📋 Tournaments",  self._tournament_list),
             ("🕘 History",      self._show_game_history),
-        ]:
-            _tbtn(tb, txt, cmd).pack(side='left', padx=2, pady=5)
-
-        tk.Frame(tb, bg="#2a2a4a", width=2).pack(side='left', fill='y', pady=6, padx=6)
-
-        # Game control buttons in toolbar
-        for txt, cmd, acc in [
-            ("▶ Start",   self._start_game,   True),
-            ("⏸ Pause",   self._toggle_pause, False),
-            ("⏹ Stop",    self._stop_game,    False),
-            ("↺ New",     self._new_game,     False),
-        ]:
-            _tbtn(tb, txt, cmd, accent=acc).pack(side='left', padx=2, pady=5)
-
-        tk.Frame(tb, bg="#2a2a4a", width=2).pack(side='left', fill='y', pady=6, padx=6)
-
-        # Utility
-        for txt, cmd in [
-            ("⇅ Flip",      self._flip_board),
-            ("💾 PGN",      self._export_pgn),
         ]:
             _tbtn(tb, txt, cmd).pack(side='left', padx=2, pady=5)
 
@@ -575,6 +555,17 @@ class ChessGUI:
                       font=('Consolas', 8), relief='flat', insertbackground=TEXT)
             if fmt: kw['format'] = fmt
             tk.Spinbox(rf, **kw).pack(side='right')
+
+        tk.Frame(p, bg='#2a2a4a', height=1).pack(fill='x', padx=10, pady=6)
+        for txt, cmd, acc in [
+            ("▶  START GAME",     self._start_game,   True),
+            ("⏸  PAUSE / RESUME", self._toggle_pause, False),
+            ("⏹  STOP GAME",      self._stop_game,    False),
+            ("↺  NEW GAME",       self._new_game,     False),
+            ("⇅  FLIP BOARD",     self._flip_board,   False),
+            ("💾  EXPORT PGN",    self._export_pgn,   False),
+        ]:
+            self._btn(p, txt, cmd, accent=acc).pack(fill='x', padx=10, pady=2)
 
         # Opening preset status (compact)
         tk.Frame(p, bg='#2a2a4a', height=1).pack(fill='x', padx=10, pady=6)
