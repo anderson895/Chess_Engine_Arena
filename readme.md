@@ -4,7 +4,7 @@ This guide explains how to package `main.py` into a single `.exe` that includes 
 
 ## Chess Engine Resources
 https://e.pcloud.link/publink/show?lang=en&code=kZHEppZbCDCs9wagDhvjGGM2bo36LEIvynX
-
+https://chessengines.blogspot.com/
 ---
 
 ## Prerequisites
