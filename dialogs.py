@@ -281,3 +281,251 @@ def make_search_bar(parent, on_search_cb, placeholder="🔍 Search…"):
 
     var.trace_add('write', _on_var_change)
     return frame, var
+
+
+# ═══════════════════════════════════════════════════════════
+#  Opening selection dialog
+# ═══════════════════════════════════════════════════════════
+
+def ask_opening_choice(root, opening_book):
+    """
+    Show a modal dialog for picking a starting opening position.
+
+    Parameters
+    ----------
+    root         : tk.Tk | tk.Toplevel
+    opening_book : OpeningBook instance (must be loaded)
+
+    Returns
+    -------
+    (uci_moves: list[str], opening_name: str) | (None, None) if cancelled / random start
+    The caller should apply the returned uci_moves to the board before starting the game.
+    """
+    result_moves = [None]
+    result_name  = [None]
+
+    dialog = tk.Toplevel(root)
+    dialog.title("📖  Choose Starting Opening")
+    dialog.configure(bg=BG)
+    dialog.resizable(True, True)
+    dialog.transient(root)
+    dialog.grab_set()
+
+    sw, sh = dialog.winfo_screenwidth(), dialog.winfo_screenheight()
+    w, h = min(780, sw - 60), min(620, sh - 80)
+    dialog.geometry(f'{w}x{h}+{(sw-w)//2}+{(sh-h)//2}')
+    dialog.minsize(640, 480)
+
+    # ── Build full entry list from opening book ────────────
+    all_entries = []
+    seen = set()
+    for seq, eco, name in opening_book._entries:
+        key = (eco, name)
+        if key not in seen:
+            seen.add(key)
+            all_entries.append((eco, name, list(seq)))
+    # Sort alphabetically by name for easier browsing
+    all_entries.sort(key=lambda x: x[1])
+
+    # ── Header ────────────────────────────────────────────
+    hdr = tk.Frame(dialog, bg=BG)
+    hdr.pack(fill='x', padx=20, pady=(16, 0))
+    tk.Label(hdr, text="📖  CHOOSE STARTING OPENING", bg=BG, fg=ACCENT,
+             font=('Segoe UI', 15, 'bold')).pack(anchor='w')
+    tk.Label(hdr, text=f"{len(all_entries)} openings available — engines will start from this position",
+             bg=BG, fg="#666", font=('Segoe UI', 9)).pack(anchor='w', pady=(2, 0))
+    tk.Frame(dialog, bg=ACCENT, height=2).pack(fill='x', padx=20, pady=(8, 6))
+
+    # ── ECO filter buttons ────────────────────────────────
+    eco_bar = tk.Frame(dialog, bg=PANEL_BG)
+    eco_bar.pack(fill='x', padx=20, pady=(0, 4))
+    tk.Label(eco_bar, text="ECO:", bg=PANEL_BG, fg="#AAA",
+             font=('Segoe UI', 8, 'bold')).pack(side='left', padx=(6, 4))
+
+    active_eco_filter = [None]  # None = show all
+
+    eco_btns = {}
+
+    def apply_eco_filter(letter):
+        active_eco_filter[0] = letter
+        for l, b in eco_btns.items():
+            b.config(bg=ACCENT if l == letter else BTN_BG)
+        _filter(search_var.get() if 'search_var' in dir() else '')
+
+    for letter in ['All', 'A', 'B', 'C', 'D', 'E']:
+        lbl = letter
+        btn = tk.Button(
+            eco_bar, text=lbl,
+            command=lambda l=letter: apply_eco_filter(None if l == 'All' else l),
+            bg=ACCENT if letter == 'All' else BTN_BG,
+            fg=TEXT, relief='flat', font=('Segoe UI', 8, 'bold'),
+            padx=10, pady=3, cursor='hand2')
+        btn.pack(side='left', padx=2, pady=4)
+        eco_btns[letter] = btn
+
+    # ── Search bar ────────────────────────────────────────
+    search_frame = tk.Frame(dialog, bg=BG)
+    search_frame.pack(fill='x', padx=20, pady=(0, 4))
+
+    search_var = tk.StringVar()
+    tk.Label(search_frame, text="🔍", bg=BG, fg=ACCENT,
+             font=('Segoe UI', 11)).pack(side='left', padx=(0, 4))
+    search_entry = tk.Entry(search_frame, textvariable=search_var,
+                            bg=LOG_BG, fg=TEXT, insertbackground=TEXT,
+                            font=('Segoe UI', 10), relief='flat',
+                            highlightthickness=1, highlightcolor=ACCENT,
+                            highlightbackground='#333')
+    search_entry.pack(side='left', fill='x', expand=True, ipady=5)
+    tk.Button(search_frame, text='✕',
+              command=lambda: search_var.set(''),
+              bg=BG, fg='#666', relief='flat', font=('Segoe UI', 9),
+              cursor='hand2', padx=4).pack(side='left', padx=(4, 0))
+
+    # ── Treeview ──────────────────────────────────────────
+    tree_frame = tk.Frame(dialog, bg=BG)
+    tree_frame.pack(fill='both', expand=True, padx=20, pady=(0, 4))
+
+    scrollbar = tk.Scrollbar(tree_frame)
+    scrollbar.pack(side='right', fill='y')
+
+    style = ttk.Style()
+    style.theme_use('clam')
+    style.configure('OpenDlg.Treeview',
+                    background=LOG_BG, foreground=TEXT,
+                    fieldbackground=LOG_BG, borderwidth=0, rowheight=26)
+    style.configure('OpenDlg.Treeview.Heading',
+                    background=BTN_BG, foreground=TEXT,
+                    borderwidth=1, font=('Segoe UI', 9, 'bold'))
+    style.map('OpenDlg.Treeview',
+              background=[('selected', ACCENT)])
+
+    columns = ('ECO', 'Name', 'Moves')
+    tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                        style='OpenDlg.Treeview',
+                        yscrollcommand=scrollbar.set, selectmode='browse')
+    scrollbar.config(command=tree.yview)
+
+    for col, w, anch in [('ECO', 70, 'center'), ('Name', 360, 'w'), ('Moves', 260, 'w')]:
+        tree.column(col, width=w, anchor=anch)
+        tree.heading(col, text=col)
+    tree.pack(fill='both', expand=True)
+
+    count_lbl = tk.Label(dialog, text="", bg=BG, fg="#555", font=('Segoe UI', 9))
+    count_lbl.pack(pady=(0, 2))
+
+    # ── Preview label ─────────────────────────────────────
+    preview_var = tk.StringVar(value="Select an opening to preview its moves")
+    preview_lbl = tk.Label(dialog, textvariable=preview_var,
+                           bg=PANEL_BG, fg="#00BFFF",
+                           font=('Segoe UI', 9, 'italic'),
+                           anchor='w', padx=10, pady=6, wraplength=w - 60)
+    preview_lbl.pack(fill='x', padx=20, pady=(0, 4))
+
+    # ── Data population ───────────────────────────────────
+    visible_entries = [list(all_entries)]  # mutable ref
+
+    def _populate(entries):
+        for item in tree.get_children():
+            tree.delete(item)
+        for eco, name, uci_seq in entries:
+            moves_preview = ' '.join(uci_seq[:6])
+            if len(uci_seq) > 6:
+                moves_preview += '…'
+            tree.insert('', 'end', values=(eco, name, moves_preview))
+        visible_entries[0] = entries
+        count_lbl.config(text=f"{len(entries)} openings shown")
+
+    def _filter(query=''):
+        q = query.strip().lower()
+        eco_f = active_eco_filter[0]
+        filtered = []
+        for eco, name, seq in all_entries:
+            if eco_f and not eco.startswith(eco_f):
+                continue
+            if q and q not in name.lower() and q not in eco.lower():
+                continue
+            filtered.append((eco, name, seq))
+        _populate(filtered)
+
+    search_var.trace_add('write', lambda *_: _filter(search_var.get()))
+
+    def on_select(event=None):
+        sel = tree.selection()
+        if not sel:
+            return
+        vals = tree.item(sel[0])['values']
+        eco, name = vals[0], vals[1]
+        # Find full UCI sequence
+        for e, n, seq in visible_entries[0]:
+            if e == eco and n == name:
+                moves_str = ' '.join(seq)
+                preview_var.set(f"📖 {eco} · {name}  →  {moves_str}")
+                break
+
+    tree.bind('<<TreeviewSelect>>', on_select)
+
+    def _confirm():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("No Selection",
+                                   "Please select an opening first.",
+                                   parent=dialog)
+            return
+        vals = tree.item(sel[0])['values']
+        eco, name = vals[0], vals[1]
+        for e, n, seq in visible_entries[0]:
+            if e == eco and n == name:
+                result_moves[0] = seq
+                result_name[0]  = f"{eco} · {name}" if eco else name
+                break
+        dialog.destroy()
+
+    def _random():
+        import random
+        entry = random.choice(all_entries)
+        result_moves[0] = entry[2]
+        result_name[0]  = f"{entry[0]} · {entry[1]}" if entry[0] else entry[1]
+        dialog.destroy()
+
+    def _no_opening():
+        result_moves[0] = []
+        result_name[0]  = None
+        dialog.destroy()
+
+    # ── Footer ────────────────────────────────────────────
+    foot = tk.Frame(dialog, bg=BG)
+    foot.pack(fill='x', padx=20, pady=(0, 16))
+
+    tk.Button(foot, text="✔  Start with this Opening",
+              command=_confirm,
+              bg=ACCENT, fg='white', activebackground=BTN_HOV,
+              relief='flat', font=('Segoe UI', 11, 'bold'),
+              padx=14, pady=10, cursor='hand2').pack(side='left', expand=True, fill='x', padx=(0, 6))
+
+    tk.Button(foot, text="🎲  Random",
+              command=_random,
+              bg=BTN_BG, fg=TEXT, activebackground=BTN_HOV,
+              relief='flat', font=('Segoe UI', 10),
+              padx=14, pady=10, cursor='hand2').pack(side='left', padx=(0, 6))
+
+    tk.Button(foot, text="♟  Normal Start",
+              command=_no_opening,
+              bg=BTN_BG, fg=TEXT, activebackground=BTN_HOV,
+              relief='flat', font=('Segoe UI', 10),
+              padx=14, pady=10, cursor='hand2').pack(side='left', padx=(0, 6))
+
+    tk.Button(foot, text="✕  Cancel",
+              command=dialog.destroy,
+              bg=BTN_BG, fg='#888', activebackground=BTN_HOV,
+              relief='flat', font=('Segoe UI', 10),
+              padx=14, pady=10, cursor='hand2').pack(side='left')
+
+    tree.bind('<Double-1>', lambda e: _confirm())
+    dialog.bind('<Escape>', lambda e: dialog.destroy())
+    dialog.bind('<Return>', lambda e: _confirm())
+
+    _populate(all_entries)
+    search_entry.focus_set()
+
+    root.wait_window(dialog)
+    return result_moves[0], result_name[0]

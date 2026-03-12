@@ -343,6 +343,136 @@ class Database:
             print(f"[Database] get_tournament_games error: {e}")
             return []
 
+    def get_opening_stats(self, engine_name, top_n=10):
+        """
+        Return the most common openings used by an engine as White and as Black.
+
+        Parameters
+        ----------
+        engine_name : str   — engine name (color suffixes stripped automatically)
+        top_n       : int   — how many top openings to return per color
+
+        Returns
+        -------
+        dict with keys 'as_white' and 'as_black', each a list of dicts:
+            {opening, games, wins, draws, losses, win_rate}
+        Opening name is extracted from the PGN [Opening "..."] tag.
+        Games without an Opening tag are grouped as "Unknown / No Opening".
+        """
+        import re
+        norm = normalize_engine_name(engine_name)
+        result = {'as_white': [], 'as_black': []}
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            for color, col_self, col_opp, win_result in [
+                ('as_white', 'white_engine', 'black_engine', '1-0'),
+                ('as_black',  'black_engine', 'white_engine', '0-1'),
+            ]:
+                cursor.execute(
+                    f"SELECT pgn, result FROM games WHERE {col_self} = ?",
+                    (norm,))
+                rows = cursor.fetchall()
+
+                opening_counts = {}
+                for pgn, res in rows:
+                    # Extract [Opening "..."] tag from PGN header
+                    m = re.search(r'\[Opening\s+"([^"]+)"\]', pgn or '')
+                    opening = m.group(1).strip() if m else "Unknown / No Opening"
+                    if opening not in opening_counts:
+                        opening_counts[opening] = {'games': 0, 'wins': 0,
+                                                   'draws': 0, 'losses': 0}
+                    d = opening_counts[opening]
+                    d['games'] += 1
+                    if res == win_result:
+                        d['wins'] += 1
+                    elif res == '1/2-1/2':
+                        d['draws'] += 1
+                    else:
+                        d['losses'] += 1
+
+                sorted_openings = sorted(
+                    opening_counts.items(),
+                    key=lambda x: x[1]['games'],
+                    reverse=True)[:top_n]
+
+                result[color] = [
+                    {
+                        'opening':  name,
+                        'games':    d['games'],
+                        'wins':     d['wins'],
+                        'draws':    d['draws'],
+                        'losses':   d['losses'],
+                        'win_rate': round(d['wins'] / d['games'] * 100, 1)
+                                    if d['games'] > 0 else 0.0,
+                    }
+                    for name, d in sorted_openings
+                ]
+
+            conn.close()
+        except Exception as e:
+            print(f"[Database] get_opening_stats error: {e}")
+
+        return result
+
+    def get_opening_stats_all(self, top_n=10):
+        """
+        Aggregate opening statistics across ALL engines.
+
+        Returns
+        -------
+        dict with keys 'as_white' and 'as_black', same format as get_opening_stats.
+        """
+        import re
+        result = {'as_white': [], 'as_black': []}
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            for color, win_result in [('as_white', '1-0'), ('as_black', '0-1')]:
+                cursor.execute("SELECT pgn, result FROM games")
+                rows = cursor.fetchall()
+
+                opening_counts = {}
+                for pgn, res in rows:
+                    m = re.search(r'\[Opening\s+"([^"]+)"\]', pgn or '')
+                    opening = m.group(1).strip() if m else "Unknown / No Opening"
+                    if opening not in opening_counts:
+                        opening_counts[opening] = {'games': 0, 'wins': 0,
+                                                   'draws': 0, 'losses': 0}
+                    d = opening_counts[opening]
+                    d['games'] += 1
+                    if res == win_result:
+                        d['wins'] += 1
+                    elif res == '1/2-1/2':
+                        d['draws'] += 1
+                    else:
+                        d['losses'] += 1
+
+                sorted_openings = sorted(
+                    opening_counts.items(),
+                    key=lambda x: x[1]['games'],
+                    reverse=True)[:top_n]
+
+                result[color] = [
+                    {
+                        'opening':  name,
+                        'games':    d['games'],
+                        'wins':     d['wins'],
+                        'draws':    d['draws'],
+                        'losses':   d['losses'],
+                        'win_rate': round(d['wins'] / d['games'] * 100, 1)
+                                    if d['games'] > 0 else 0.0,
+                    }
+                    for name, d in sorted_openings
+                ]
+            conn.close()
+        except Exception as e:
+            print(f"[Database] get_opening_stats_all error: {e}")
+        return result
+
     def get_tournament_list(self):
         """
         Return a summary list of all tournaments stored in the database.

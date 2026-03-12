@@ -25,10 +25,11 @@ from board import Board
 from engine import UCIEngine, AnalyzerEngine
 from opening_book import OpeningBook
 from database import Database
-from dialogs import ask_promotion, ask_stop_result, make_search_bar
+from dialogs import ask_promotion, ask_stop_result, make_search_bar, ask_opening_choice
 from views import (
     show_rankings, show_elo_history,
     show_statistics, show_game_history, show_pgn_viewer,
+    show_opening_stats,
 )
 
 
@@ -100,6 +101,8 @@ class ChessGUI:
         self.e2_depth = tk.StringVar(value='—')
 
         self.opening_var = tk.StringVar(value="")
+        self._preset_opening_moves = []   # UCI moves to replay before engines start
+        self._preset_opening_name  = None
 
         # ── Game state ────────────────────────────────────
         self.game_running   = False
@@ -341,6 +344,33 @@ class ChessGUI:
     def _show_statistics(self):
         show_statistics(self.root, self.db)
 
+    def _show_opening_stats(self):
+        show_opening_stats(self.root, self.db, engine_name=None)
+
+    def _pick_opening(self):
+        """Open the opening picker dialog and store the chosen preset."""
+        if not self.opening_book or not self.opening_book.loaded:
+            messagebox.showwarning(
+                "No Openings",
+                "Opening book not loaded.\nLoad an Openings CSV first.",
+                parent=self.root)
+            return
+        moves, name = ask_opening_choice(self.root, self.opening_book)
+        if moves is None:
+            return  # dialog was cancelled (X button)
+        self._preset_opening_moves = moves
+        self._preset_opening_name  = name
+        if moves:
+            short = (name[:38] + "…") if name and len(name) > 38 else (name or "")
+            self._preset_lbl.config(text=f"📖 {short}\n({len(moves)} moves)", fg="#00BFFF")
+        else:
+            self._preset_lbl.config(text="♟ Normal start (no preset)", fg="#666")
+
+    def _clear_opening_preset(self):
+        self._preset_opening_moves = []
+        self._preset_opening_name  = None
+        self._preset_lbl.config(text="♟ Normal start (no preset)", fg="#666")
+
     def _show_game_history(self, filter_engine=None):
         show_game_history(self.root, self.db,
                           filter_engine=filter_engine,
@@ -449,17 +479,32 @@ class ChessGUI:
 
         tk.Frame(p, bg='#2a2a4a', height=1).pack(fill='x', padx=10, pady=6)
         for txt, cmd, acc in [
-            ("▶  START GAME",        self._start_game,       True),
-            ("⏸  PAUSE / RESUME",    self._toggle_pause,     False),
-            ("⏹  STOP GAME",         self._stop_game,        False),
-            ("↺  NEW GAME",          self._new_game,         False),
-            ("⇅  FLIP BOARD",        self._flip_board,       False),
-            ("💾  EXPORT PGN",       self._export_pgn,       False),
-            ("🏆  RANKINGS",         self._show_rankings,    False),
-            ("📋  TOURNAMENTS",  self._tournament_list,  False),   # ← new
-            ("📊  STATISTICS",       self._show_statistics,  False),
+            ("▶  START GAME",        self._start_game,         True),
+            ("⏸  PAUSE / RESUME",    self._toggle_pause,       False),
+            ("⏹  STOP GAME",         self._stop_game,          False),
+            ("↺  NEW GAME",          self._new_game,           False),
+            ("⇅  FLIP BOARD",        self._flip_board,         False),
+            ("💾  EXPORT PGN",       self._export_pgn,         False),
+            ("🏆  RANKINGS",         self._show_rankings,      False),
+            ("📋  TOURNAMENTS",      self._tournament_list,    False),
+            ("📊  STATISTICS",       self._show_statistics,    False),
+            ("📖  OPENINGS",         self._show_opening_stats, False),
         ]:
             self._btn(p, txt, cmd, accent=acc).pack(fill='x', padx=10, pady=2)
+
+        tk.Frame(p, bg='#2a2a4a', height=1).pack(fill='x', padx=10, pady=4)
+        self._lbl(p, "🎯 STARTING OPENING", 8, bold=True, fg=ACCENT).pack(fill='x', padx=10)
+        self._preset_lbl = tk.Label(p, text="♟ Normal start (no preset)",
+                                     bg=PANEL_BG, fg="#666",
+                                     font=('Segoe UI', 7), anchor='w',
+                                     wraplength=240, justify='left')
+        self._preset_lbl.pack(fill='x', padx=10, pady=(2, 2))
+        pick_row = tk.Frame(p, bg=PANEL_BG)
+        pick_row.pack(fill='x', padx=10, pady=2)
+        self._btn(pick_row, "📖  Pick Opening", self._pick_opening,
+                  small=True).pack(side='left', fill='x', expand=True)
+        self._btn(pick_row, "✕", self._clear_opening_preset,
+                  small=True).pack(side='right', padx=(4, 0))
 
         tk.Frame(p, bg='#2a2a4a', height=1).pack(fill='x', padx=10, pady=4)
         self._lbl(p, "Material balance", 8, fg="#888").pack(fill='x', padx=10)
@@ -1160,7 +1205,33 @@ class ChessGUI:
         self._last_quality    = None
         self._move_qualities  = []
         self._eval_bar_cp     = 0
-        self._reset_opening()
+
+        # ── Apply preset opening if selected ──────────────
+        preset_moves = list(self._preset_opening_moves)
+        if preset_moves:
+            self.current_opening_name = self._preset_opening_name
+            for uci in preset_moves:
+                try:
+                    self.board.apply_uci(uci)
+                except Exception as e:
+                    print(f"[OpeningPreset] Failed to apply {uci}: {e}")
+                    self.board.reset()
+                    self.current_opening_name = None
+                    break
+            if self.board.move_history:
+                self.last_move = preset_moves[-1]
+                # Log the opening moves
+                sans = [m[1] for m in self.board.move_history]
+                for i in range(0, len(sans), 2):
+                    w_san = sans[i]
+                    b_san = sans[i + 1] if i + 1 < len(sans) else None
+                    self.root.after(0, self._log_move, i // 2 + 1, w_san, b_san)
+            self._reset_opening()
+            # Show the opening name immediately
+            if self.current_opening_name:
+                self.opening_var.set(f"📖  {self.current_opening_name}")
+        else:
+            self._reset_opening()
         self._draw_board(); self._update_info()
         self.root.after(200, self._refresh_banners)
         self.root.after(100, self._draw_eval_bar, 0)
