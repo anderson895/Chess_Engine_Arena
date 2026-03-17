@@ -1,6 +1,23 @@
 # ═══════════════════════════════════════════════════════════
 #  engine.py — UCI engine wrapper and dedicated analyzer
 # ═══════════════════════════════════════════════════════════
+#
+#  KEY PROTOCOL RULES (learned from Arasan/Houdini behaviour):
+#
+#  1. NEVER send 'stop' to an idle engine.  Many engines re-emit their
+#     last bestmove on 'stop', which then contaminates the next search.
+#
+#  2. setoption and ucinewgame are fire-and-forget per the UCI spec.
+#     Do NOT send isready after them — extra readyok responses queue up
+#     and are consumed by the WRONG _wait() call, causing get_best_move
+#     to fire 'go' before the position command is processed.
+#
+#  3. The single isready/readyok in get_best_move (sent AFTER position)
+#     is the only synchronisation point needed before each search.
+#     After readyok arrives, drain once more to flush any late-arriving
+#     stale bestmove before sending 'go'.
+#
+# ═══════════════════════════════════════════════════════════
 
 import queue
 import subprocess
@@ -10,29 +27,17 @@ import time
 
 
 class UCIEngine:
-    """
-    Wraps a UCI-compatible chess engine subprocess.
-
-    Usage
-    -----
-    eng = UCIEngine('/path/to/engine', 'MyEngine')
-    eng.start()
-    best = eng.get_best_move('e2e4 e7e5', movetime_ms=1000)
-    eng.stop()
-    """
-
     def __init__(self, path, name="Engine"):
-        self.path     = path
-        self.name     = name
-        self.process  = None
-        self.ready    = False
-        self.q        = queue.Queue()
+        self.path      = path
+        self.name      = name
+        self.process   = None
+        self.ready     = False
+        self.q         = queue.Queue()
         self.last_info = {}
 
     # ── Lifecycle ─────────────────────────────────────────
 
     def start(self):
-        """Start the engine subprocess and perform the UCI handshake."""
         kw = dict(
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -61,7 +66,6 @@ class UCIEngine:
             raise RuntimeError(f"No 'readyok' from {self.path}")
 
     def stop(self):
-        """Send quit command and terminate the engine subprocess."""
         if self.process:
             try:
                 self._send("stop"); time.sleep(0.1)
@@ -75,13 +79,11 @@ class UCIEngine:
 
     @property
     def alive(self):
-        """True if the engine process is running."""
         return self.process is not None and self.process.poll() is None
 
     # ── Internal I/O ──────────────────────────────────────
 
     def _reader(self):
-        """Background thread: push every stdout line onto self.q."""
         try:
             for line in self.process.stdout:
                 self.q.put(line.rstrip('\n'))
@@ -89,7 +91,6 @@ class UCIEngine:
             pass
 
     def _send(self, cmd):
-        """Send a single UCI command to the engine."""
         if self.process and self.process.poll() is None:
             try:
                 self.process.stdin.write(cmd + '\n')
@@ -97,8 +98,21 @@ class UCIEngine:
             except BrokenPipeError:
                 pass
 
+    def new_game(self):
+        """ucinewgame is fire-and-forget — no isready needed."""
+        if not self.ready or not self.alive:
+            return
+        self._send("ucinewgame")
+        time.sleep(0.05)
+        self._drain()
+
+    def set_option(self, name, value):
+        """setoption is fire-and-forget — no isready needed."""
+        if not self.ready or not self.alive:
+            return
+        self._send(f"setoption name {name} value {value}")
+
     def _drain(self):
-        """Discard all pending output lines."""
         while not self.q.empty():
             try:
                 self.q.get_nowait()
@@ -106,7 +120,6 @@ class UCIEngine:
                 break
 
     def _wait(self, kw, timeout):
-        """Block until a line starting with *kw* appears, or until *timeout* seconds pass."""
         end = time.time() + timeout
         while time.time() < end:
             try:
@@ -122,34 +135,35 @@ class UCIEngine:
 
     # ── Move / eval requests ──────────────────────────────
 
-    def get_best_move(self, moves_str, movetime_ms=1000, on_info=None):
-        """
-        Ask the engine for its best move.
-
-        Parameters
-        ----------
-        moves_str : str
-            Space-separated UCI move history from the starting position.
-        movetime_ms : int
-            Milliseconds the engine is allowed to think.
-        on_info : callable | None
-            Optional callback invoked with each parsed ``info`` dict.
-
-        Returns
-        -------
-        str | None  — UCI move string, or None on failure.
-        """
+    def get_best_move(self, moves_str, movetime_ms=1000, on_info=None, start_fen=None):
         if not self.ready or not self.alive:
             return None
+
+        # Drain before sending anything.
+        # NEVER send 'stop' here — idle engines re-emit their last bestmove
+        # on stop; it arrives AFTER drain() and poisons the next search.
         self._drain()
         self.last_info = {}
 
-        cmd = (f"position startpos moves {moves_str}"
-               if moves_str else "position startpos")
+        if start_fen:
+            cmd = (f"position fen {start_fen} moves {moves_str}"
+                   if moves_str else f"position fen {start_fen}")
+        else:
+            cmd = (f"position startpos moves {moves_str}"
+                   if moves_str else "position startpos")
         self._send(cmd)
+
+        # Single sync point: engine cannot reply until position is processed.
+        self._send("isready")
+        if not self._wait("readyok", 10):
+            return None
+
+        # Second drain: flush any stale bestmove that arrived during the wait.
+        self._drain()
+
         self._send(f"go movetime {movetime_ms}")
 
-        max_wait = (movetime_ms / 1000) + 10
+        max_wait = (movetime_ms / 1000) + 15
         end  = time.time() + max_wait
         best = None
 
@@ -176,13 +190,6 @@ class UCIEngine:
         return best
 
     def get_eval(self, moves_str, movetime_ms=200):
-        """
-        Ask the engine to evaluate a position and return the centipawn score.
-
-        Returns
-        -------
-        int | None  — centipawn score from White's perspective, or None.
-        """
         if not self.ready or not self.alive:
             return None
         self._drain()
@@ -222,7 +229,6 @@ class UCIEngine:
     # ── Info parsing ──────────────────────────────────────
 
     def _parse_info(self, line):
-        """Parse a UCI ``info`` line into a dict of named values."""
         info = {}
         tokens = line.split()[1:]
         i = 0
@@ -262,28 +268,8 @@ class UCIEngine:
 # ═══════════════════════════════════════════════════════════
 
 class AnalyzerEngine(UCIEngine):
-    """
-    A dedicated UCIEngine instance for position evaluation and move-quality
-    analysis.  Returns scores always from White's perspective.
-    """
 
     def eval_position(self, moves_str, movetime_ms=150):
-        """
-        Evaluate a position and return the score from White's perspective.
-
-        Parameters
-        ----------
-        moves_str : str
-            Space-separated UCI move history.
-        movetime_ms : int
-            Search time in milliseconds.
-
-        Returns
-        -------
-        (cp: int | None, score_type: str | None)
-            cp is the centipawn score from White's perspective.
-            score_type is 'cp' or 'mate'.
-        """
         if not self.ready or not self.alive:
             return None, None
         self._drain()
@@ -297,8 +283,7 @@ class AnalyzerEngine(UCIEngine):
         last_score      = None
         last_score_type = 'cp'
 
-        # Determine which side is to move (needed to flip the engine score)
-        n_moves     = len(moves_str.split()) if moves_str else 0
+        n_moves      = len(moves_str.split()) if moves_str else 0
         side_to_move = 'w' if n_moves % 2 == 0 else 'b'
 
         while time.time() < end:
@@ -321,7 +306,6 @@ class AnalyzerEngine(UCIEngine):
         if last_score is None:
             return None, None
 
-        # Engine always reports score for the side to move; convert to White's POV
         if last_score_type == 'mate':
             cp = 30000 if last_score > 0 else -30000
         else:

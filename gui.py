@@ -26,6 +26,7 @@ from engine import UCIEngine, AnalyzerEngine
 from opening_book import OpeningBook
 from database import Database
 from dialogs import ask_promotion, ask_stop_result, make_search_bar, ask_opening_choice
+from chess960 import show_chess960_picker, generate_chess960_fen
 from views import (
     show_rankings, show_elo_history,
     show_statistics, show_game_history, show_pgn_viewer,
@@ -103,6 +104,8 @@ class ChessGUI:
         self.opening_var = tk.StringVar(value="")
         self._preset_opening_moves = []   # UCI moves to replay before engines start
         self._preset_opening_name  = None
+        self._chess960_fen         = None  # None = standard start
+        self._chess960_sp          = None  # SP number
 
         # ── Game state ────────────────────────────────────
         self.game_running   = False
@@ -376,12 +379,43 @@ class ChessGUI:
             if hasattr(self, '_tbtn_clear_preset'):
                 self._tbtn_clear_preset.config(fg="#666")
 
+    def _pick_chess960(self):
+        """Open the Chess960 picker and store the chosen starting FEN."""
+        fen, sp = show_chess960_picker(self.root)
+        if fen is None:
+            return
+        # Clear any opening preset — Chess960 replaces it
+        self._preset_opening_moves = []
+        self._preset_opening_name  = None
+        self._chess960_fen = fen
+        self._chess960_sp  = sp
+        label = f"SP {sp}" if sp != 518 else "SP 518 (Standard)"
+        self._preset_lbl.config(text=f"⚄ Chess 960 — {label}", fg="#CF87EB")
+        if hasattr(self, '_tbtn_960'):
+            self._tbtn_960.config(text=f"⚄ SP {sp}", bg=ACCENT, fg='white')
+        if hasattr(self, '_tbtn_pick'):
+            self._tbtn_pick.config(text="📖 Pick Opening", fg="#00BFFF", bg="#1E1E3A")
+        if hasattr(self, '_tbtn_clear_preset'):
+            self._tbtn_clear_preset.config(fg=TEXT)
+
+    def _current_game_type(self):
+        """Return the game_type string to store in the database."""
+        if self._chess960_fen:
+            return 'chess960'
+        if self._preset_opening_moves:
+            return 'opening_preset'
+        return 'standard'
+
     def _clear_opening_preset(self):
         self._preset_opening_moves = []
         self._preset_opening_name  = None
+        self._chess960_fen         = None
+        self._chess960_sp          = None
         self._preset_lbl.config(text="♟ Normal start", fg="#666")
         if hasattr(self, '_tbtn_pick'):
             self._tbtn_pick.config(text="📖 Pick Opening", fg="#00BFFF", bg="#1E1E3A")
+        if hasattr(self, '_tbtn_960'):
+            self._tbtn_960.config(text="⚄ Chess 960", fg="#CF87EB", bg="#1E1E3A")
         if hasattr(self, '_tbtn_clear_preset'):
             self._tbtn_clear_preset.config(fg="#666")
 
@@ -490,6 +524,17 @@ class ChessGUI:
         self._tbtn_pick.pack(side='right', padx=(0, 2), pady=5)
         self._tbtn_pick.bind('<Enter>', lambda e: self._tbtn_pick.config(bg=BTN_HOV))
         self._tbtn_pick.bind('<Leave>', lambda e: self._tbtn_pick.config(bg='#1E1E3A'))
+
+        # Chess960 button
+        self._tbtn_960 = tk.Button(
+            tb, text="⚄ Chess 960", command=self._pick_chess960,
+            bg="#1E1E3A", fg="#CF87EB",
+            activebackground=BTN_HOV, activeforeground='white',
+            relief='flat', font=('Segoe UI', 9, 'bold'),
+            padx=10, pady=0, cursor='hand2', height=2)
+        self._tbtn_960.pack(side='right', padx=(0, 2), pady=5)
+        self._tbtn_960.bind('<Enter>', lambda e: self._tbtn_960.config(bg=BTN_HOV))
+        self._tbtn_960.bind('<Leave>', lambda e: self._tbtn_960.config(bg='#1E1E3A'))
 
         tk.Frame(tb, bg="#2a2a4a", width=2).pack(side='right', fill='y', pady=6, padx=4)
 
@@ -1113,6 +1158,9 @@ class ChessGUI:
                 self.root.after(0, self._status, f"Loading {name_var.get()}…")
                 eng = UCIEngine(path, name_var.get())
                 eng.start()
+                chess960_val = "true" if self._chess960_fen else "false"
+                eng.set_option("UCI_Chess960", chess960_val)
+                eng.new_game()
                 if n == 1: self.engine1 = eng
                 else:       self.engine2 = eng
                 self.root.after(0, self._log_eng, f"✓ {name_var.get()} ready", tag)
@@ -1130,6 +1178,9 @@ class ChessGUI:
             self.root.after(0, self._status, f"Loading {self.e2_name.get()}…")
             eng = UCIEngine(path, self.e2_name.get())
             eng.start()
+            chess960_val = "true" if self._chess960_fen else "false"
+            eng.set_option("UCI_Chess960", chess960_val)
+            eng.new_game()
             self.engine2 = eng
             self.root.after(0, self._log_eng, f"✓ {self.e2_name.get()} ready", 'W')
             return True
@@ -1170,7 +1221,8 @@ class ChessGUI:
 
         with self.board_lock:
             if self.board.turn != engine_turn: return
-            mvs = self.board.uci_moves_str()
+            mvs         = self.board.uci_moves_str()
+            current_fen = self.board.to_fen()
 
         moves_before     = mvs
         was_white_moving = (engine_turn == 'w')
@@ -1179,7 +1231,8 @@ class ChessGUI:
             self.root.after(0, lambda: self._show_eval(engine, side))
 
         try:
-            uci = engine.get_best_move(mvs, self.movetime.get(), on_info=on_info)
+            uci = engine.get_best_move("", self.movetime.get(), on_info=on_info,
+                                       start_fen=current_fen)
         except Exception as ex:
             self.root.after(0, self._log_eng, f"[ERR] {ex}", tag); uci = None
 
@@ -1275,6 +1328,18 @@ class ChessGUI:
         self._last_quality    = None
         self._move_qualities  = []
         self._eval_bar_cp     = 0
+
+        # ── Apply Chess960 starting position if selected ──
+        if self._chess960_fen:
+            self.board._load_fen(self._chess960_fen)
+            self.board.move_history = []
+            self.board.pos_history  = {}
+            self.board.cap_white    = []
+            self.board.cap_black    = []
+            sp_label = (f"Chess 960 — SP {self._chess960_sp}"
+                        if self._chess960_sp is not None else "Chess 960")
+            self.current_opening_name = sp_label
+            self.opening_var.set(f"⚄  {sp_label}")
 
         # ── Apply preset opening if selected ──────────────
         preset_moves = list(self._preset_opening_moves)
@@ -1372,7 +1437,8 @@ class ChessGUI:
                             self.game_date or datetime.now().strftime("%Y.%m.%d"),
                             opening_name=self.current_opening_name)
             self.db.save_game(white_name, black_name, result, reason, pgn,
-                              len(self.board.move_history), duration)
+                              len(self.board.move_history), duration,
+                              game_type=self._current_game_type())
             self._log_result(f"{result}  —  {reason}")
 
         if result == '*':
@@ -1540,13 +1606,15 @@ class ChessGUI:
                                f"{name}'s engine process died", wn); return
 
             moves_before     = self.board.uci_moves_str()
+            current_fen      = self.board.to_fen()
             was_white_moving = not is_b
 
             def on_info(info, _side=side, _eng=engine):
                 self.root.after(0, lambda: self._show_eval(_eng, _side))
 
             try:
-                uci = engine.get_best_move(moves_before, movetime, on_info=on_info)
+                uci = engine.get_best_move("", movetime, on_info=on_info,
+                                           start_fen=current_fen)
             except Exception as ex:
                 self.root.after(0, self._log_eng, f"[ERR] {ex}", tag); uci = None
 
@@ -1614,7 +1682,8 @@ class ChessGUI:
                         self.game_date or datetime.now().strftime("%Y.%m.%d"),
                         opening_name=self.current_opening_name)
         self.db.save_game(white_name, black_name, result, reason, pgn,
-                          len(self.board.move_history), duration)
+                          len(self.board.move_history), duration,
+                          game_type=self._current_game_type())
 
         status_msg = (f"🏁 {normalize_engine_name(winner_name)} wins by {reason}"
                       if winner_name else f"🏁 {result} — {reason}")

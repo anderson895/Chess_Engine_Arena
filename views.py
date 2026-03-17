@@ -356,24 +356,27 @@ def show_statistics(root, db):
     win = tk.Toplevel(root)
     win.title("Engine Statistics")
     win.configure(bg=BG)
-    win.geometry("720x580")
+    win.geometry("940x600")
 
     tk.Label(win, text="📊 ENGINE STATISTICS", bg=BG, fg=ACCENT,
              font=('Segoe UI', 16, 'bold')).pack(pady=(12, 2))
     tk.Label(win, text=f"📁 {db.db_path}", bg=BG, fg="#555",
-             font=('Consolas', 8), wraplength=700).pack(pady=(0, 6))
+             font=('Consolas', 8), wraplength=900).pack(pady=(0, 6))
 
     all_stats   = [None]
     tree_ref    = [None]
     sort_state  = {'col': None, 'reverse': False}
 
     COL_META = {
-        'Engine':   ('engine',   str),
-        'Matches':  ('matches',  int),
-        'Win':      ('wins',     int),
-        'Draw':     ('draws',    int),
-        'Lose':     ('loses',    int),
-        'WinRate%': ('win_rate', float),
+        'Engine':    ('engine',        str),
+        'Total':     ('matches',       int),
+        'Win':       ('wins',          int),
+        'Draw':      ('draws',         int),
+        'Lose':      ('loses',         int),
+        'Win%':      ('win_rate',      float),
+        'Standard':  ('std_games',     int),
+        '960':       ('chess960_games',int),
+        'Preset':    ('preset_games',  int),
     }
 
     def _render_rows(stats):
@@ -382,9 +385,20 @@ def show_statistics(root, db):
         for row in tree.get_children():
             tree.delete(row)
         for stat in stats:
+            std   = stat.get('std_games', 0)
+            c960  = stat.get('chess960_games', 0)
+            preset= stat.get('preset_games', 0)
             tree.insert('', 'end', values=(
-                stat['engine'], stat['matches'], stat['wins'],
-                stat['draws'], stat['loses'], f"{stat['win_rate']:.1f}%"))
+                stat['engine'],
+                stat['matches'],
+                stat['wins'],
+                stat['draws'],
+                stat['loses'],
+                f"{stat['win_rate']:.1f}%",
+                std   if std   > 0 else '—',
+                c960  if c960  > 0 else '—',
+                preset if preset > 0 else '—',
+            ))
 
     def _update_headings():
         tree = tree_ref[0]
@@ -404,7 +418,7 @@ def show_statistics(root, db):
             sort_state['col']     = col
             sort_state['reverse'] = False
         key_name, _ = COL_META[col]
-        all_stats[0] = sorted(stats, key=lambda x: x[key_name],
+        all_stats[0] = sorted(stats, key=lambda x: x.get(key_name, 0),
                               reverse=sort_state['reverse'])
         _render_rows(all_stats[0])
         _update_headings()
@@ -414,7 +428,7 @@ def show_statistics(root, db):
         stats = db.get_engine_stats(search_query=query)
         if sort_state['col']:
             key_name, _ = COL_META[sort_state['col']]
-            stats = sorted(stats, key=lambda x: x[key_name],
+            stats = sorted(stats, key=lambda x: x.get(key_name, 0),
                            reverse=sort_state['reverse'])
         all_stats[0] = stats
         _render_rows(stats)
@@ -434,49 +448,63 @@ def show_statistics(root, db):
     scrollbar = tk.Scrollbar(tree_frame)
     scrollbar.pack(side='right', fill='y')
 
-    columns = ('Engine', 'Matches', 'Win', 'Draw', 'Lose', 'WinRate%')
+    columns = ('Engine','Total','Win','Draw','Lose','Win%','Standard','960','Preset')
     tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
                         yscrollcommand=scrollbar.set)
     scrollbar.config(command=tree.yview)
     tree_ref[0] = tree
     _apply_tree_style()
 
-    for col, w in [('Engine', 260), ('Matches', 75), ('Win', 55),
-                   ('Draw', 55), ('Lose', 55), ('WinRate%', 90)]:
-        anchor = 'center' if col != 'Engine' else 'w'
+    col_widths = [('Engine',220),('Total',58),('Win',52),('Draw',52),('Lose',52),
+                  ('Win%',72),('Standard',80),('960',62),('Preset',68)]
+    for col, w in col_widths:
+        anchor = 'w' if col == 'Engine' else 'center'
         tree.column(col, width=w, anchor=anchor)
         tree.heading(col, text=col, command=lambda c=col: sort_by_column(c))
 
+    # Tag rows that have chess960 or preset games for subtle highlight
+    tree.tag_configure('has960',    background='#1a1a2e', foreground='#CF87EB')
+    tree.tag_configure('haspreset', background='#1a2a1a', foreground='#90EE90')
+
     tree.pack(fill='both', expand=True)
+
+    # ── Legend ────────────────────────────────────────────
+    legend = tk.Frame(win, bg=BG)
+    legend.pack(fill='x', padx=20, pady=(0, 2))
+    for sym, txt, fg in [
+        ("♟", "Standard — regular chess games", "#AAA"),
+        ("⚄", "960 — Fischer Random (Chess960) games", "#CF87EB"),
+        ("📖", "Preset — games with a forced opening", "#90EE90"),
+    ]:
+        tk.Label(legend, text=f"{sym} {txt}", bg=BG, fg=fg,
+                 font=('Segoe UI', 8)).pack(side='left', padx=(0, 18))
 
     count_lbl = tk.Label(win, text="", bg=BG, fg="#555", font=('Segoe UI', 9))
     count_lbl.pack(pady=(0, 2))
 
-    tk.Label(win, text="💡 Click column header to sort",
-             bg=BG, fg="#555", font=('Segoe UI', 9)).pack(pady=(0, 2))
+    tk.Label(win,
+             text="💡 Click column header to sort  ·  Double-click row to view game history",
+             bg=BG, fg="#555", font=('Segoe UI', 9)).pack(pady=(0, 4))
 
     def on_engine_double_click(event):
         sel = tree.selection()
         if not sel: return
         engine_name = tree.item(sel[0])['values'][0]
-        # Show a mini-menu: game history or opening stats
-        menu = tk.Menu(win, tearoff=0, bg=BTN_BG, fg=TEXT,
+
+        # Show context menu
+        menu = tk.Menu(win, tearoff=0, bg='#1E1E3A', fg=TEXT,
                        activebackground=ACCENT, activeforeground='white',
                        font=('Segoe UI', 10))
-        menu.add_command(label="📋  Game History",
+        menu.add_command(label="📋 Game History",
                          command=lambda: show_game_history(root, db, filter_engine=engine_name))
-        menu.add_command(label="📖  Opening Stats",
-                         command=lambda: show_opening_stats(root, db, engine_name))
+        menu.add_command(label="📖 Opening Stats",
+                         command=lambda: show_opening_stats(root, db, engine_name=engine_name))
         try:
             menu.tk_popup(win.winfo_pointerx(), win.winfo_pointery())
         finally:
             menu.grab_release()
 
     tree.bind('<Double-1>', on_engine_double_click)
-
-    tk.Label(win,
-             text="💡 Double-click a row → Game History or Opening Stats",
-             bg=BG, fg="#555", font=('Segoe UI', 9)).pack(pady=(0, 2))
 
     # ── Footer buttons ────────────────────────────────────
     btn_frame = tk.Frame(win, bg=BG)
@@ -486,7 +514,8 @@ def show_statistics(root, db):
     shortcuts.pack(side='left')
     tk.Label(shortcuts, text="Sort by:", bg=BG, fg="#888",
              font=('Segoe UI', 8)).pack(side='left', padx=(0, 4))
-    for label, col in [("Matches", "Matches"), ("Wins", "Win"), ("Win%", "WinRate%")]:
+    for label, col in [("Total", "Total"), ("Wins", "Win"), ("Win%", "Win%"),
+                        ("960 Games", "960"), ("Preset", "Preset")]:
         tk.Button(shortcuts, text=label, command=lambda c=col: sort_by_column(c),
                   bg=BTN_BG, fg=TEXT, font=('Segoe UI', 8),
                   padx=8, pady=4, cursor='hand2', relief='flat').pack(side='left', padx=2)
@@ -496,7 +525,7 @@ def show_statistics(root, db):
               bg=ACCENT, fg=TEXT, font=('Segoe UI', 10, 'bold'),
               padx=15, pady=8, cursor='hand2', relief='flat').pack(side='left', padx=(10, 5))
     tk.Button(btn_frame, text="📖 All Openings",
-              command=lambda: show_opening_stats(root, db, engine_name=None),
+              command=lambda: show_opening_stats(root, db),
               bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
               padx=15, pady=8, cursor='hand2', relief='flat').pack(side='left', padx=5)
     tk.Button(btn_frame, text="View All Game History",
@@ -512,145 +541,6 @@ def show_statistics(root, db):
               padx=15, pady=8, cursor='hand2').pack(side='right', padx=5)
 
     refresh_stats('')
-
-
-# ═══════════════════════════════════════════════════════════
-#  Opening statistics window
-# ═══════════════════════════════════════════════════════════
-
-def show_opening_stats(root, db, engine_name=None):
-    """
-    Show a window with the most common openings for a given engine
-    (or for all engines combined if engine_name is None).
-
-    Parameters
-    ----------
-    root        : tk.Tk | tk.Toplevel
-    db          : Database instance
-    engine_name : str | None
-    """
-    if engine_name:
-        data  = db.get_opening_stats(engine_name)
-        title = f"📖 Opening Stats — {normalize_engine_name(engine_name)}"
-    else:
-        data  = db.get_opening_stats_all()
-        title = "📖 Opening Stats — All Engines"
-
-    win = tk.Toplevel(root)
-    win.title(title)
-    win.configure(bg=BG)
-    win.geometry("900x620")
-    win.resizable(True, True)
-
-    # ── Header ────────────────────────────────────────────
-    tk.Label(win, text=title, bg=BG, fg=ACCENT,
-             font=('Segoe UI', 15, 'bold')).pack(pady=(14, 2))
-    tk.Frame(win, bg=ACCENT, height=2).pack(fill='x', padx=20, pady=(4, 8))
-
-    notebook = ttk.Notebook(win)
-    notebook.pack(fill='both', expand=True, padx=16, pady=(0, 8))
-
-    style = ttk.Style()
-    style.theme_use('clam')
-    style.configure('TNotebook', background=BG, borderwidth=0)
-    style.configure('TNotebook.Tab', background=BTN_BG, foreground=TEXT,
-                    padding=[14, 6], font=('Segoe UI', 10, 'bold'))
-    style.map('TNotebook.Tab',
-              background=[('selected', ACCENT)],
-              foreground=[('selected', 'white')])
-
-    def _build_tab(parent, rows, color_label):
-        """Build a treeview tab for one color side."""
-        _apply_tree_style()
-        columns = ('Opening', 'Games', 'W', 'D', 'L', 'WR%', 'Bar')
-        frame = tk.Frame(parent, bg=BG)
-        frame.pack(fill='both', expand=True, padx=8, pady=8)
-
-        scroll = tk.Scrollbar(frame)
-        scroll.pack(side='right', fill='y')
-
-        tree = ttk.Treeview(frame, columns=columns, show='headings',
-                            yscrollcommand=scroll.set)
-        scroll.config(command=tree.yview)
-
-        for col, w, anch in [
-            ('Opening', 320, 'w'),
-            ('Games',    60, 'center'),
-            ('W',        50, 'center'),
-            ('D',        50, 'center'),
-            ('L',        50, 'center'),
-            ('WR%',      65, 'center'),
-            ('Bar',     200, 'w'),
-        ]:
-            tree.column(col, width=w, anchor=anch)
-            tree.heading(col, text=col)
-
-        tree.tag_configure('top',    foreground='#FFD700')
-        tree.tag_configure('good',   foreground='#1BECA0')
-        tree.tag_configure('normal', foreground=TEXT)
-        tree.tag_configure('losing', foreground='#FF6B6B')
-
-        max_games = rows[0]['games'] if rows else 1
-        for i, row in enumerate(rows):
-            bar_filled  = int(row['games'] / max_games * 20)
-            bar_str     = '█' * bar_filled + '░' * (20 - bar_filled)
-            wr          = row['win_rate']
-            tag = 'top' if i == 0 else ('good' if wr >= 50 else
-                  ('losing' if wr < 35 else 'normal'))
-            tree.insert('', 'end', values=(
-                row['opening'],
-                row['games'],
-                row['wins'],
-                row['draws'],
-                row['losses'],
-                f"{wr:.1f}%",
-                bar_str,
-            ), tags=(tag,))
-
-        tree.pack(fill='both', expand=True)
-
-        if not rows:
-            tk.Label(frame, text="No games recorded yet.",
-                     bg=BG, fg="#666", font=('Segoe UI', 11)).pack(pady=30)
-
-    # ── As White tab ──────────────────────────────────────
-    tab_white = tk.Frame(notebook, bg=BG)
-    notebook.add(tab_white, text="  ♔  As White  ")
-    _build_tab(tab_white, data.get('as_white', []), 'white')
-
-    # ── As Black tab ──────────────────────────────────────
-    tab_black = tk.Frame(notebook, bg=BG)
-    notebook.add(tab_black, text="  ♚  As Black  ")
-    _build_tab(tab_black, data.get('as_black', []), 'black')
-
-    # ── Summary stats ─────────────────────────────────────
-    summary_frame = tk.Frame(win, bg=PANEL_BG)
-    summary_frame.pack(fill='x', padx=16, pady=(0, 4))
-
-    white_rows = data.get('as_white', [])
-    black_rows = data.get('as_black', [])
-    total_w = sum(r['games'] for r in white_rows)
-    total_b = sum(r['games'] for r in black_rows)
-
-    fav_w = white_rows[0]['opening'] if white_rows else "—"
-    fav_b = black_rows[0]['opening'] if black_rows else "—"
-
-    for label, val, col in [
-        ("White games:", str(total_w), "#FFD700"),
-        ("Fav. as White:", fav_w[:30] + ("…" if len(fav_w) > 30 else ""), "#FFD700"),
-        ("Black games:", str(total_b), "#C8C8C8"),
-        ("Fav. as Black:", fav_b[:30] + ("…" if len(fav_b) > 30 else ""), "#C8C8C8"),
-    ]:
-        f = tk.Frame(summary_frame, bg=PANEL_BG)
-        f.pack(side='left', expand=True, padx=8, pady=6)
-        tk.Label(f, text=label, bg=PANEL_BG, fg="#666",
-                 font=('Segoe UI', 8)).pack()
-        tk.Label(f, text=val, bg=PANEL_BG, fg=col,
-                 font=('Segoe UI', 9, 'bold'), wraplength=180).pack()
-
-    tk.Button(win, text="✕ Close", command=win.destroy,
-              bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
-              padx=20, pady=8, cursor='hand2', relief='flat').pack(pady=(0, 12))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1132,3 +1022,146 @@ def show_pgn_viewer(root, db, pgn, game_info, all_games, opening_book=None):
 
     draw_replay_board()
     update_move_label()
+
+# ═══════════════════════════════════════════════════════════
+#  Opening Stats window
+# ═══════════════════════════════════════════════════════════
+
+def show_opening_stats(root, db, engine_name=None):
+    """
+    Show a window with the most common openings for a given engine
+    (or for all engines combined if engine_name is None).
+
+    Parameters
+    ----------
+    root        : tk.Tk | tk.Toplevel
+    db          : Database instance
+    engine_name : str | None
+    """
+    if engine_name:
+        data  = db.get_opening_stats(engine_name)
+        title = f"📖 Opening Stats — {normalize_engine_name(engine_name)}"
+    else:
+        data  = db.get_opening_stats_all()
+        title = "📖 Opening Stats — All Engines"
+
+    win = tk.Toplevel(root)
+    win.title(title)
+    win.configure(bg=BG)
+    win.geometry("900x620")
+    win.resizable(True, True)
+
+    # ── Header ────────────────────────────────────────────
+    tk.Label(win, text=title, bg=BG, fg=ACCENT,
+             font=('Segoe UI', 15, 'bold')).pack(pady=(14, 2))
+    tk.Frame(win, bg=ACCENT, height=2).pack(fill='x', padx=20, pady=(4, 8))
+
+    notebook = ttk.Notebook(win)
+    notebook.pack(fill='both', expand=True, padx=16, pady=(0, 8))
+
+    style = ttk.Style()
+    style.theme_use('clam')
+    style.configure('TNotebook', background=BG, borderwidth=0)
+    style.configure('TNotebook.Tab', background=BTN_BG, foreground=TEXT,
+                    padding=[14, 6], font=('Segoe UI', 10, 'bold'))
+    style.map('TNotebook.Tab',
+              background=[('selected', ACCENT)],
+              foreground=[('selected', 'white')])
+
+    def _build_tab(parent, rows, color_label):
+        """Build a treeview tab for one color side."""
+        _apply_tree_style()
+        columns = ('Opening', 'Games', 'W', 'D', 'L', 'WR%', 'Bar')
+        frame = tk.Frame(parent, bg=BG)
+        frame.pack(fill='both', expand=True, padx=8, pady=8)
+
+        scroll = tk.Scrollbar(frame)
+        scroll.pack(side='right', fill='y')
+
+        tree = ttk.Treeview(frame, columns=columns, show='headings',
+                            yscrollcommand=scroll.set)
+        scroll.config(command=tree.yview)
+
+        for col, w, anch in [
+            ('Opening', 320, 'w'),
+            ('Games',    60, 'center'),
+            ('W',        50, 'center'),
+            ('D',        50, 'center'),
+            ('L',        50, 'center'),
+            ('WR%',      65, 'center'),
+            ('Bar',     200, 'w'),
+        ]:
+            tree.column(col, width=w, anchor=anch)
+            tree.heading(col, text=col)
+
+        tree.tag_configure('top',    foreground='#FFD700')
+        tree.tag_configure('good',   foreground='#1BECA0')
+        tree.tag_configure('normal', foreground=TEXT)
+        tree.tag_configure('losing', foreground='#FF6B6B')
+
+        max_games = rows[0]['games'] if rows else 1
+        for i, row in enumerate(rows):
+            bar_filled  = int(row['games'] / max_games * 20)
+            bar_str     = '█' * bar_filled + '░' * (20 - bar_filled)
+            wr          = row['win_rate']
+            tag = 'top' if i == 0 else ('good' if wr >= 50 else
+                  ('losing' if wr < 35 else 'normal'))
+            tree.insert('', 'end', values=(
+                row['opening'],
+                row['games'],
+                row['wins'],
+                row['draws'],
+                row['losses'],
+                f"{wr:.1f}%",
+                bar_str,
+            ), tags=(tag,))
+
+        tree.pack(fill='both', expand=True)
+
+        if not rows:
+            tk.Label(frame, text="No games recorded yet.",
+                     bg=BG, fg="#666", font=('Segoe UI', 11)).pack(pady=30)
+
+    # ── As White tab ──────────────────────────────────────
+    tab_white = tk.Frame(notebook, bg=BG)
+    notebook.add(tab_white, text="  ♔  As White  ")
+    _build_tab(tab_white, data.get('as_white', []), 'white')
+
+    # ── As Black tab ──────────────────────────────────────
+    tab_black = tk.Frame(notebook, bg=BG)
+    notebook.add(tab_black, text="  ♚  As Black  ")
+    _build_tab(tab_black, data.get('as_black', []), 'black')
+
+    # ── Summary stats ─────────────────────────────────────
+    summary_frame = tk.Frame(win, bg=PANEL_BG)
+    summary_frame.pack(fill='x', padx=16, pady=(0, 4))
+
+    white_rows = data.get('as_white', [])
+    black_rows = data.get('as_black', [])
+    total_w = sum(r['games'] for r in white_rows)
+    total_b = sum(r['games'] for r in black_rows)
+
+    fav_w = white_rows[0]['opening'] if white_rows else "—"
+    fav_b = black_rows[0]['opening'] if black_rows else "—"
+
+    for label, val, col in [
+        ("White games:", str(total_w), "#FFD700"),
+        ("Fav. as White:", fav_w[:30] + ("…" if len(fav_w) > 30 else ""), "#FFD700"),
+        ("Black games:", str(total_b), "#C8C8C8"),
+        ("Fav. as Black:", fav_b[:30] + ("…" if len(fav_b) > 30 else ""), "#C8C8C8"),
+    ]:
+        f = tk.Frame(summary_frame, bg=PANEL_BG)
+        f.pack(side='left', expand=True, padx=8, pady=6)
+        tk.Label(f, text=label, bg=PANEL_BG, fg="#666",
+                 font=('Segoe UI', 8)).pack()
+        tk.Label(f, text=val, bg=PANEL_BG, fg=col,
+                 font=('Segoe UI', 9, 'bold'), wraplength=180).pack()
+
+    tk.Button(win, text="✕ Close", command=win.destroy,
+              bg=BTN_BG, fg=TEXT, font=('Segoe UI', 10),
+              padx=20, pady=8, cursor='hand2', relief='flat').pack(pady=(0, 12))
+
+
+# ═══════════════════════════════════════════════════════════
+#  Game history window
+# ═══════════════════════════════════════════════════════════

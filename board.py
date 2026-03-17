@@ -223,29 +223,93 @@ class Board:
                 if valid(nr, nc) and not self.same(piece, self.board[nr][nc]):
                     mv.append((r, c, nr, nc, None))
             opp = 'b' if turn == 'w' else 'w'
-            kr, kc = (7, 4) if turn == 'w' else (0, 4)
-            if r == kr and c == kc and not self.is_attacked(kr, kc, opp):
-                ks = 'K' if turn == 'w' else 'k'
-                qs = 'Q' if turn == 'w' else 'q'
+            kr = 7 if turn == 'w' else 0
+            cas = self.castling if self.castling else ''
+
+            if r == kr and c == self._king_start_col(turn) and not self.is_attacked(kr, c, opp):
                 rp = 'R' if turn == 'w' else 'r'
-                cas = self.castling if self.castling else ''
-                # Kingside
-                if (ks in cas and
-                        self.board[kr][5] == '.' and self.board[kr][6] == '.' and
-                        self.board[kr][7] == rp and
-                        not self.is_attacked(kr, 5, opp) and
-                        not self.is_attacked(kr, 6, opp)):
-                    mv.append((r, c, kr, kc + 2, None))
-                # Queenside
-                if (qs in cas and
-                        self.board[kr][3] == '.' and self.board[kr][2] == '.' and
-                        self.board[kr][1] == '.' and self.board[kr][0] == rp and
-                        not self.is_attacked(kr, 3, opp) and
-                        not self.is_attacked(kr, 2, opp)):
-                    mv.append((r, c, kr, kc - 2, None))
+                # Determine rook columns from castling rights (X-FEN or classic)
+                ks_col, qs_col = self._castling_rook_cols(turn)
+
+                # Kingside castling
+                if ks_col is not None:
+                    dest_k, dest_r = 6, 5  # king→g-file, rook→f-file
+                    # Path must be clear and king must not pass through check
+                    kc_range = range(min(c, dest_k) + 1, max(c, dest_k) + 1)
+                    rc_range = range(min(ks_col, dest_r) + 1, max(ks_col, dest_r) + 1)
+                    squares_clear = all(
+                        self.board[kr][col] in ('.', rp if col == ks_col else '.')
+                        or col in (c, ks_col)
+                        for col in range(8)
+                        if col in list(kc_range) + list(rc_range) and col not in (c, ks_col)
+                    )
+                    # Simpler: all squares between king and its destination clear (except rook)
+                    between = [col for col in range(min(c, dest_k), max(c, dest_k) + 1)
+                               if col not in (c, ks_col)]
+                    rook_between = [col for col in range(min(ks_col, dest_r), max(ks_col, dest_r) + 1)
+                                    if col not in (c, ks_col)]
+                    all_clear = all(self.board[kr][col] == '.' for col in between + rook_between
+                                    if col not in (c, ks_col))
+                    no_check = (not self.is_attacked(kr, dest_k, opp) and
+                                not self.is_attacked(kr, dest_r, opp))
+                    if all_clear and no_check:
+                        mv.append((r, c, kr, dest_k, None))
+
+                # Queenside castling
+                if qs_col is not None:
+                    dest_k, dest_r = 2, 3  # king→c-file, rook→d-file
+                    between = [col for col in range(min(c, dest_k), max(c, dest_k) + 1)
+                               if col not in (c, qs_col)]
+                    rook_between = [col for col in range(min(qs_col, dest_r), max(qs_col, dest_r) + 1)
+                                    if col not in (c, qs_col)]
+                    all_clear = all(self.board[kr][col] == '.' for col in between + rook_between
+                                    if col not in (c, qs_col))
+                    no_check = (not self.is_attacked(kr, dest_k, opp) and
+                                not self.is_attacked(kr, dest_r, opp))
+                    if all_clear and no_check:
+                        mv.append((r, c, kr, dest_k, None))
         return mv
 
-    # ── Legal move generation ─────────────────────────────
+    def _king_start_col(self, turn):
+        """Return the starting column of the king for the given side."""
+        k = 'K' if turn == 'w' else 'k'
+        row = 7 if turn == 'w' else 0
+        for c in range(8):
+            if self.board[row][c] == k:
+                return c
+        return 4  # fallback
+
+    def _castling_rook_cols(self, turn):
+        """
+        Return (kingside_rook_col, queenside_rook_col) from castling rights.
+        Supports both classic KQkq and X-FEN (e.g. HAha) notation.
+        Returns None for a side if that castling right is absent.
+        """
+        cas = self.castling if self.castling and self.castling != '-' else ''
+        if turn == 'w':
+            relevant = [c for c in cas if c.isupper()]
+        else:
+            relevant = [c.upper() for c in cas if c.islower()]
+
+        king_col = self._king_start_col(turn)
+        ks_col = qs_col = None
+
+        for ch in relevant:
+            if ch == 'K':
+                # Classic: kingside rook on h-file
+                ks_col = 7
+            elif ch == 'Q':
+                # Classic: queenside rook on a-file
+                qs_col = 0
+            elif 'A' <= ch <= 'H':
+                # X-FEN: letter encodes actual rook file
+                col = ord(ch) - ord('A')
+                if col > king_col:
+                    ks_col = col
+                else:
+                    qs_col = col
+
+        return ks_col, qs_col
 
     def legal_moves(self, turn=None):
         """Return all strictly legal moves for the given side."""
@@ -291,12 +355,19 @@ class Board:
             if tr == ep_r and tc == ep_c:
                 b.board[fr][ep_c] = '.'
 
-        # Castling: move rook
+        # Castling: move rook to correct square
         if p == 'k':
-            if fc == 4 and tc == 6:
-                b.board[fr][7] = '.'; b.board[fr][5] = 'R' if turn == 'w' else 'r'
-            elif fc == 4 and tc == 2:
-                b.board[fr][0] = '.'; b.board[fr][3] = 'R' if turn == 'w' else 'r'
+            rp = 'R' if turn == 'w' else 'r'
+            ks_col, qs_col = self._castling_rook_cols(turn)
+            kr = 7 if turn == 'w' else 0
+            if tc == 6 and ks_col is not None:
+                # Kingside: rook moves to f-file (col 5)
+                b.board[kr][ks_col] = '.'
+                b.board[kr][5] = rp
+            elif tc == 2 and qs_col is not None:
+                # Queenside: rook moves to d-file (col 3)
+                b.board[kr][qs_col] = '.'
+                b.board[kr][3] = rp
 
         b.board[tr][tc] = piece
         b.board[fr][fc] = '.'
@@ -317,17 +388,37 @@ class Board:
         # Update castling rights
         cas = list((b.castling or '').replace('-', ''))
         if p == 'k':
-            remove = 'KQ' if turn == 'w' else 'kq'
-            cas = [x for x in cas if x not in remove]
+            # Remove all castling rights for the moving side
+            if turn == 'w':
+                cas = [x for x in cas if not x.isupper()]
+            else:
+                cas = [x for x in cas if not x.islower()]
         if p == 'r':
-            pairs = [(7, 7, 'K'), (7, 0, 'Q'), (0, 7, 'k'), (0, 0, 'q')]
-            for rr, rc, flag in pairs:
-                if fr == rr and fc == rc and flag in cas:
-                    cas.remove(flag)
-        pairs2 = [(7, 7, 'K'), (7, 0, 'Q'), (0, 7, 'k'), (0, 0, 'q')]
-        for rr, rc, flag in pairs2:
-            if tr == rr and tc == rc and flag in cas:
-                cas.remove(flag)
+            # Remove right for the specific rook that moved
+            # Works for both classic (KQ/kq) and X-FEN (file letters)
+            w_ks, w_qs = b._castling_rook_cols('w')
+            b_ks, b_qs = b._castling_rook_cols('b')
+            if turn == 'w':
+                if fr == 7 and fc == w_ks:
+                    cas = [x for x in cas if x not in ('K', chr(ord('A') + fc))]
+                if fr == 7 and fc == w_qs:
+                    cas = [x for x in cas if x not in ('Q', chr(ord('A') + fc))]
+            else:
+                if fr == 0 and fc == b_ks:
+                    cas = [x for x in cas if x not in ('k', chr(ord('a') + fc))]
+                if fr == 0 and fc == b_qs:
+                    cas = [x for x in cas if x not in ('q', chr(ord('a') + fc))]
+        # Remove rights if a rook is captured on its starting square
+        w_ks2, w_qs2 = b._castling_rook_cols('w')
+        b_ks2, b_qs2 = b._castling_rook_cols('b')
+        if tr == 7 and tc == w_ks2:
+            cas = [x for x in cas if x not in ('K', chr(ord('A') + tc))]
+        if tr == 7 and tc == w_qs2:
+            cas = [x for x in cas if x not in ('Q', chr(ord('A') + tc))]
+        if tr == 0 and tc == b_ks2:
+            cas = [x for x in cas if x not in ('k', chr(ord('a') + tc))]
+        if tr == 0 and tc == b_qs2:
+            cas = [x for x in cas if x not in ('q', chr(ord('a') + tc))]
         b.castling = ''.join(cas) if cas else '-'
 
         b.halfmove = 0 if (p == 'p' or target != '.') else b.halfmove + 1
@@ -410,8 +501,9 @@ class Board:
             tc == ord(self.ep[0]) - ord('a') and tr == 8 - int(self.ep[1]))
 
         if p == 'k':
-            if fc == 4 and tc == 6: return 'O-O'
-            if fc == 4 and tc == 2: return 'O-O-O'
+            # Castling: king always ends on g-file (6) or c-file (2)
+            if tc == 6 and abs(fc - tc) > 1: return 'O-O'
+            if tc == 2 and abs(fc - tc) > 1: return 'O-O-O'
 
         to_sq = f"{chr(ord('a') + tc)}{8 - tr}"
 
