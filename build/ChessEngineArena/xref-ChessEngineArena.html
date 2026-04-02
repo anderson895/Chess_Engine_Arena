@@ -154,7 +154,6 @@ imports:
  &#8226;   <a href="#io">io</a>
  &#8226;   <a href="#keyword">keyword</a>
  &#8226;   <a href="#linecache">linecache</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
  &#8226;   <a href="#locale">locale</a>
  &#8226;   <a href="#ntpath">ntpath</a>
  &#8226;   <a href="#operator">operator</a>
@@ -171,6 +170,7 @@ imports:
  &#8226;   <a href="#tkinter">tkinter</a>
  &#8226;   <a href="#traceback">traceback</a>
  &#8226;   <a href="#types">types</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
  &#8226;   <a href="#warnings">warnings</a>
  &#8226;   <a href="#weakref">weakref</a>
 
@@ -180,7 +180,7 @@ imports:
 
 <div class="node">
   <a name="pyi_rth__tkinter.py"></a>
-  <a target="code" href="///C:/Users/Desktop/AppData/Roaming/Python/Python310/site-packages/PyInstaller/hooks/rthooks/pyi_rth__tkinter.py" type="text/plain"><tt>pyi_rth__tkinter.py</tt></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/venv/Lib/site-packages/PyInstaller/hooks/rthooks/pyi_rth__tkinter.py" type="text/plain"><tt>pyi_rth__tkinter.py</tt></a>
 <span class="moduletype">Script</span>  <div class="import">
 imports:
     <a href="#os">os</a>
@@ -197,7 +197,7 @@ imported by:
 
 <div class="node">
   <a name="pyi_rth_inspect.py"></a>
-  <a target="code" href="///C:/Users/Desktop/AppData/Roaming/Python/Python310/site-packages/PyInstaller/hooks/rthooks/pyi_rth_inspect.py" type="text/plain"><tt>pyi_rth_inspect.py</tt></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/venv/Lib/site-packages/PyInstaller/hooks/rthooks/pyi_rth_inspect.py" type="text/plain"><tt>pyi_rth_inspect.py</tt></a>
 <span class="moduletype">Script</span>  <div class="import">
 imports:
     <a href="#inspect">inspect</a>
@@ -219,18 +219,7 @@ imported by:
   <a target="code" href="" type="text/plain"><tt>'org.python'</tt></a>
 <span class="moduletype">MissingModule</span>  <div class="import">
 imported by:
-    <a href="#pickle">pickle</a>
-
-  </div>
-
-</div>
-
-<div class="node">
-  <a name="__main__"></a>
-  <a target="code" href="" type="text/plain"><tt>__main__</tt></a>
-<span class="moduletype">ExcludedModule</span>  <div class="import">
-imported by:
-    <a href="#tournament">tournament</a>
+    <a href="#copy">copy</a>
 
   </div>
 
@@ -1165,26 +1154,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="board"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/board.py" type="text/plain"><tt>board</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#constants">constants</a>
- &#8226;   <a href="#utils">utils</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#opening_book">opening_book</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="builtins"></a>
   <tt>builtins</tt> <span class="moduletype"><i>(builtin module)</i></span>  <div class="import">
 imported by:
@@ -1465,23 +1434,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="constants"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/constants.py" type="text/plain"><tt>constants</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imported by:
-    <a href="#board">board</a>
- &#8226;   <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#utils">utils</a>
- &#8226;   <a href="#views">views</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="contextlib"></a>
   <a target="code" href="///C:/Program%20Files/Python310/lib/contextlib.py" type="text/plain"><tt>contextlib</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -1529,8 +1481,8 @@ imported by:
   <a target="code" href="///C:/Program%20Files/Python310/lib/copy.py" type="text/plain"><tt>copy</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#copyreg">copyreg</a>
- &#8226;   <a href="#org">org</a>
+    <a href="#'org.python'">'org.python'</a>
+ &#8226;   <a href="#copyreg">copyreg</a>
  &#8226;   <a href="#types">types</a>
  &#8226;   <a href="#weakref">weakref</a>
 
@@ -1544,7 +1496,7 @@ imported by:
  &#8226;   <a href="#email.generator">email.generator</a>
  &#8226;   <a href="#gettext">gettext</a>
  &#8226;   <a href="#tarfile">tarfile</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
  &#8226;   <a href="#weakref">weakref</a>
 
   </div>
@@ -1573,6 +1525,169 @@ imported by:
 </div>
 
 <div class="node">
+  <a name="core"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/__init__.py" type="text/plain"><tt>core</tt></a>
+<span class="moduletype">Package</span>  <div class="import">
+imports:
+    <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.elo">core.elo</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
+ &#8226;   <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.elo">core.elo</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
+ &#8226;   <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="core.board"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/board.py" type="text/plain"><tt>core.board</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="core.constants"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/constants.py" type="text/plain"><tt>core.constants</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core">core</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+ &#8226;   <a href="#ui.widgets">ui.widgets</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="core.elo"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/elo.py" type="text/plain"><tt>core.elo</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core">core</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="core.engine"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/engine.py" type="text/plain"><tt>core.engine</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core">core</a>
+ &#8226;   <a href="#queue">queue</a>
+ &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#sys">sys</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#time">time</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core">core</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="core.opening_book"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/opening_book.py" type="text/plain"><tt>core.opening_book</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.board">core.board</a>
+ &#8226;   <a href="#csv">csv</a>
+ &#8226;   <a href="#os">os</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core">core</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="core.utils"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/core/utils.py" type="text/plain"><tt>core.utils</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#os">os</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#core">core</a>
+ &#8226;   <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.elo">core.elo</a>
+ &#8226;   <a href="#data.database">data.database</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+
+  </div>
+
+</div>
+
+<div class="node">
   <a name="csv"></a>
   <a target="code" href="///C:/Program%20Files/Python310/lib/csv.py" type="text/plain"><tt>csv</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -1584,28 +1699,46 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#importlib.metadata">importlib.metadata</a>
- &#8226;   <a href="#opening_book">opening_book</a>
+    <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#importlib.metadata">importlib.metadata</a>
 
   </div>
 
 </div>
 
 <div class="node">
-  <a name="database"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/database.py" type="text/plain"><tt>database</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
+  <a name="data"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/data/__init__.py" type="text/plain"><tt>data</tt></a>
+<span class="moduletype">Package</span>  <div class="import">
 imports:
-    <a href="#datetime">datetime</a>
- &#8226;   <a href="#re">re</a>
- &#8226;   <a href="#sqlite3">sqlite3</a>
- &#8226;   <a href="#utils">utils</a>
+    <a href="#data.database">data.database</a>
 
   </div>
   <div class="import">
 imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#tournament">tournament</a>
+    <a href="#data.database">data.database</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="data.database"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/data/database.py" type="text/plain"><tt>data.database</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.utils">core.utils</a>
+ &#8226;   <a href="#data">data</a>
+ &#8226;   <a href="#datetime">datetime</a>
+ &#8226;   <a href="#re">re</a>
+ &#8226;   <a href="#sqlite3">sqlite3</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#data">data</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
 
   </div>
 
@@ -1653,11 +1786,11 @@ imports:
 imported by:
     <a href="#_strptime">_strptime</a>
  &#8226;   <a href="#calendar">calendar</a>
- &#8226;   <a href="#database">database</a>
+ &#8226;   <a href="#data.database">data.database</a>
  &#8226;   <a href="#email.utils">email.utils</a>
- &#8226;   <a href="#gui">gui</a>
  &#8226;   <a href="#sqlite3.dbapi2">sqlite3.dbapi2</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
 
   </div>
 
@@ -1682,28 +1815,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="dialogs"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/dialogs.py" type="text/plain"><tt>dialogs</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#constants">constants</a>
- &#8226;   <a href="#random">random</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
- &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
- &#8226;   <a href="#utils">utils</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#views">views</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="dis"></a>
   <a target="code" href="///C:/Program%20Files/Python310/lib/dis.py" type="text/plain"><tt>dis</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -1719,24 +1830,6 @@ imports:
   <div class="import">
 imported by:
     <a href="#inspect">inspect</a>
-
-  </div>
-
-</div>
-
-<div class="node">
-  <a name="elo"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/elo.py" type="text/plain"><tt>elo</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#utils">utils</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
 
   </div>
 
@@ -4712,28 +4805,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="engine"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/engine.py" type="text/plain"><tt>engine</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#queue">queue</a>
- &#8226;   <a href="#subprocess">subprocess</a>
- &#8226;   <a href="#sys">sys</a>
- &#8226;   <a href="#threading">threading</a>
- &#8226;   <a href="#time">time</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
- &#8226;   <a href="#tournament">tournament</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="enum"></a>
   <a target="code" href="///C:/Program%20Files/Python310/lib/enum.py" type="text/plain"><tt>enum</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -4962,42 +5033,6 @@ imported by:
  &#8226;   <a href="#shutil">shutil</a>
  &#8226;   <a href="#subprocess">subprocess</a>
  &#8226;   <a href="#tarfile">tarfile</a>
-
-  </div>
-
-</div>
-
-<div class="node">
-  <a name="gui"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/gui.py" type="text/plain"><tt>gui</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#board">board</a>
- &#8226;   <a href="#constants">constants</a>
- &#8226;   <a href="#database">database</a>
- &#8226;   <a href="#datetime">datetime</a>
- &#8226;   <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#elo">elo</a>
- &#8226;   <a href="#engine">engine</a>
- &#8226;   <a href="#math">math</a>
- &#8226;   <a href="#opening_book">opening_book</a>
- &#8226;   <a href="#os">os</a>
- &#8226;   <a href="#sys">sys</a>
- &#8226;   <a href="#threading">threading</a>
- &#8226;   <a href="#time">time</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tkinter.filedialog">tkinter.filedialog</a>
- &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
- &#8226;   <a href="#tkinter.scrolledtext">tkinter.scrolledtext</a>
- &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#utils">utils</a>
- &#8226;   <a href="#views">views</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#loading_screen">loading_screen</a>
 
   </div>
 
@@ -5522,7 +5557,7 @@ imported by:
  &#8226;   <a href="#statistics">statistics</a>
  &#8226;   <a href="#threading">threading</a>
  &#8226;   <a href="#tokenize">tokenize</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
  &#8226;   <a href="#traceback">traceback</a>
  &#8226;   <a href="#weakref">weakref</a>
  &#8226;   <a href="#zipfile">zipfile</a>
@@ -5562,30 +5597,6 @@ imported by:
  &#8226;   <a href="#traceback">traceback</a>
  &#8226;   <a href="#tracemalloc">tracemalloc</a>
  &#8226;   <a href="#warnings">warnings</a>
-
-  </div>
-
-</div>
-
-<div class="node">
-  <a name="loading_screen"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/loading_screen.py" type="text/plain"><tt>loading_screen</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#constants">constants</a>
- &#8226;   <a href="#engine">engine</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#opening_book">opening_book</a>
- &#8226;   <a href="#os">os</a>
- &#8226;   <a href="#sys">sys</a>
- &#8226;   <a href="#threading">threading</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#main.py">main.py</a>
 
   </div>
 
@@ -5688,11 +5699,11 @@ imported by:
     <a href="#_pydecimal">_pydecimal</a>
  &#8226;   <a href="#datetime">datetime</a>
  &#8226;   <a href="#fractions">fractions</a>
- &#8226;   <a href="#gui">gui</a>
  &#8226;   <a href="#random">random</a>
  &#8226;   <a href="#selectors">selectors</a>
  &#8226;   <a href="#statistics">statistics</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
 
   </div>
 
@@ -5780,25 +5791,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="opening_book"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/opening_book.py" type="text/plain"><tt>opening_book</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#board">board</a>
- &#8226;   <a href="#csv">csv</a>
- &#8226;   <a href="#os">os</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="operator"></a>
   <a target="code" href="///C:/Program%20Files/Python310/lib/operator.py" type="text/plain"><tt>operator</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -5851,7 +5843,7 @@ imported by:
   <a target="code" href="" type="text/plain"><tt>org</tt></a>
 <span class="moduletype">MissingModule</span>  <div class="import">
 imported by:
-    <a href="#copy">copy</a>
+    <a href="#pickle">pickle</a>
 
   </div>
 
@@ -5880,23 +5872,22 @@ imports:
 imported by:
     <a href="#argparse">argparse</a>
  &#8226;   <a href="#bz2">bz2</a>
+ &#8226;   <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
  &#8226;   <a href="#email.utils">email.utils</a>
  &#8226;   <a href="#fnmatch">fnmatch</a>
  &#8226;   <a href="#genericpath">genericpath</a>
  &#8226;   <a href="#getopt">getopt</a>
  &#8226;   <a href="#gettext">gettext</a>
- &#8226;   <a href="#gui">gui</a>
  &#8226;   <a href="#gzip">gzip</a>
  &#8226;   <a href="#importlib.metadata">importlib.metadata</a>
  &#8226;   <a href="#inspect">inspect</a>
  &#8226;   <a href="#linecache">linecache</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
  &#8226;   <a href="#locale">locale</a>
  &#8226;   <a href="#logging">logging</a>
  &#8226;   <a href="#lzma">lzma</a>
  &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#ntpath">ntpath</a>
- &#8226;   <a href="#opening_book">opening_book</a>
  &#8226;   <a href="#optparse">optparse</a>
  &#8226;   <a href="#os.path">os.path</a>
  &#8226;   <a href="#pathlib">pathlib</a>
@@ -5913,8 +5904,9 @@ imported by:
  &#8226;   <a href="#tkinter">tkinter</a>
  &#8226;   <a href="#tkinter.filedialog">tkinter.filedialog</a>
  &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#utils">utils</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
  &#8226;   <a href="#uu">uu</a>
  &#8226;   <a href="#zipfile">zipfile</a>
 
@@ -5990,14 +5982,14 @@ imported by:
   <a target="code" href="///C:/Program%20Files/Python310/lib/pickle.py" type="text/plain"><tt>pickle</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#'org.python'">'org.python'</a>
- &#8226;   <a href="#_compat_pickle">_compat_pickle</a>
+    <a href="#_compat_pickle">_compat_pickle</a>
  &#8226;   <a href="#_pickle">_pickle</a>
  &#8226;   <a href="#codecs">codecs</a>
  &#8226;   <a href="#copyreg">copyreg</a>
  &#8226;   <a href="#functools">functools</a>
  &#8226;   <a href="#io">io</a>
  &#8226;   <a href="#itertools">itertools</a>
+ &#8226;   <a href="#org">org</a>
  &#8226;   <a href="#pprint">pprint</a>
  &#8226;   <a href="#re">re</a>
  &#8226;   <a href="#struct">struct</a>
@@ -6134,7 +6126,7 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#engine">engine</a>
+    <a href="#core.engine">core.engine</a>
 
   </div>
 
@@ -6182,11 +6174,11 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#email.generator">email.generator</a>
+    <a href="#email.generator">email.generator</a>
  &#8226;   <a href="#email.utils">email.utils</a>
  &#8226;   <a href="#statistics">statistics</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
 
   </div>
 
@@ -6214,7 +6206,7 @@ imported by:
  &#8226;   <a href="#argparse">argparse</a>
  &#8226;   <a href="#base64">base64</a>
  &#8226;   <a href="#csv">csv</a>
- &#8226;   <a href="#database">database</a>
+ &#8226;   <a href="#data.database">data.database</a>
  &#8226;   <a href="#dataclasses">dataclasses</a>
  &#8226;   <a href="#email._encoded_words">email._encoded_words</a>
  &#8226;   <a href="#email._header_value_parser">email._header_value_parser</a>
@@ -6245,10 +6237,10 @@ imported by:
  &#8226;   <a href="#textwrap">textwrap</a>
  &#8226;   <a href="#tkinter">tkinter</a>
  &#8226;   <a href="#tokenize">tokenize</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
  &#8226;   <a href="#typing">typing</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
  &#8226;   <a href="#urllib.parse">urllib.parse</a>
- &#8226;   <a href="#views">views</a>
  &#8226;   <a href="#warnings">warnings</a>
 
   </div>
@@ -6405,11 +6397,11 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#database">database</a>
+    <a href="#data.database">data.database</a>
  &#8226;   <a href="#sqlite3">sqlite3</a>
  &#8226;   <a href="#sqlite3.dbapi2">sqlite3.dbapi2</a>
  &#8226;   <a href="#sqlite3.dump">sqlite3.dump</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
 
   </div>
 
@@ -6647,7 +6639,7 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#engine">engine</a>
+    <a href="#core.engine">core.engine</a>
  &#8226;   <a href="#os">os</a>
 
   </div>
@@ -6668,6 +6660,7 @@ imported by:
  &#8226;   <a href="#codecs">codecs</a>
  &#8226;   <a href="#collections">collections</a>
  &#8226;   <a href="#contextlib">contextlib</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
  &#8226;   <a href="#dataclasses">dataclasses</a>
  &#8226;   <a href="#datetime">datetime</a>
  &#8226;   <a href="#dis">dis</a>
@@ -6679,12 +6672,10 @@ imported by:
  &#8226;   <a href="#encodings.rot_13">encodings.rot_13</a>
  &#8226;   <a href="#encodings.utf_16">encodings.utf_16</a>
  &#8226;   <a href="#encodings.utf_32">encodings.utf_32</a>
- &#8226;   <a href="#engine">engine</a>
  &#8226;   <a href="#enum">enum</a>
  &#8226;   <a href="#fractions">fractions</a>
  &#8226;   <a href="#getopt">getopt</a>
  &#8226;   <a href="#gettext">gettext</a>
- &#8226;   <a href="#gui">gui</a>
  &#8226;   <a href="#gzip">gzip</a>
  &#8226;   <a href="#importlib">importlib</a>
  &#8226;   <a href="#importlib._bootstrap_external">importlib._bootstrap_external</a>
@@ -6692,7 +6683,6 @@ imported by:
  &#8226;   <a href="#importlib.util">importlib.util</a>
  &#8226;   <a href="#inspect">inspect</a>
  &#8226;   <a href="#linecache">linecache</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
  &#8226;   <a href="#locale">locale</a>
  &#8226;   <a href="#logging">logging</a>
  &#8226;   <a href="#ntpath">ntpath</a>
@@ -6719,6 +6709,8 @@ imported by:
  &#8226;   <a href="#traceback">traceback</a>
  &#8226;   <a href="#types">types</a>
  &#8226;   <a href="#typing">typing</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
  &#8226;   <a href="#urllib.parse">urllib.parse</a>
  &#8226;   <a href="#uu">uu</a>
  &#8226;   <a href="#warnings">warnings</a>
@@ -6802,13 +6794,13 @@ imports:
   <div class="import">
 imported by:
     <a href="#_threading_local">_threading_local</a>
- &#8226;   <a href="#engine">engine</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
  &#8226;   <a href="#logging">logging</a>
  &#8226;   <a href="#queue">queue</a>
  &#8226;   <a href="#subprocess">subprocess</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
  &#8226;   <a href="#zipfile">zipfile</a>
 
   </div>
@@ -6826,13 +6818,12 @@ imports:
 imported by:
     <a href="#_datetime">_datetime</a>
  &#8226;   <a href="#_strptime">_strptime</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
  &#8226;   <a href="#datetime">datetime</a>
  &#8226;   <a href="#email._parseaddr">email._parseaddr</a>
  &#8226;   <a href="#email.generator">email.generator</a>
  &#8226;   <a href="#email.utils">email.utils</a>
- &#8226;   <a href="#engine">engine</a>
  &#8226;   <a href="#gc">gc</a>
- &#8226;   <a href="#gui">gui</a>
  &#8226;   <a href="#gzip">gzip</a>
  &#8226;   <a href="#logging">logging</a>
  &#8226;   <a href="#pprint">pprint</a>
@@ -6842,7 +6833,8 @@ imported by:
  &#8226;   <a href="#subprocess">subprocess</a>
  &#8226;   <a href="#tarfile">tarfile</a>
  &#8226;   <a href="#threading">threading</a>
- &#8226;   <a href="#tournament">tournament</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
  &#8226;   <a href="#zipfile">zipfile</a>
 
   </div>
@@ -6871,10 +6863,7 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
- &#8226;   <a href="#main.py">main.py</a>
+    <a href="#main.py">main.py</a>
  &#8226;   <a href="#tkinter.commondialog">tkinter.commondialog</a>
  &#8226;   <a href="#tkinter.constants">tkinter.constants</a>
  &#8226;   <a href="#tkinter.dialog">tkinter.dialog</a>
@@ -6883,8 +6872,13 @@ imported by:
  &#8226;   <a href="#tkinter.scrolledtext">tkinter.scrolledtext</a>
  &#8226;   <a href="#tkinter.simpledialog">tkinter.simpledialog</a>
  &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+ &#8226;   <a href="#ui.widgets">ui.widgets</a>
 
   </div>
 
@@ -6958,10 +6952,10 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
+    <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
 
   </div>
 
@@ -6978,12 +6972,12 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#tkinter">tkinter</a>
+    <a href="#tkinter">tkinter</a>
  &#8226;   <a href="#tkinter.simpledialog">tkinter.simpledialog</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
 
   </div>
 
@@ -7000,10 +6994,10 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#gui">gui</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
+    <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
 
   </div>
 
@@ -7037,12 +7031,13 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#loading_screen">loading_screen</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
+    <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
 
   </div>
 
@@ -7089,17 +7084,33 @@ imported by:
 
 <div class="node">
   <a name="tournament"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/tournament.py" type="text/plain"><tt>tournament</tt></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/tournament/__init__.py" type="text/plain"><tt>tournament</tt></a>
+<span class="moduletype">Package</span>  <div class="import">
+imports:
+    <a href="#tournament.manager">tournament.manager</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#tournament.manager">tournament.manager</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="tournament.manager"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/tournament/manager.py" type="text/plain"><tt>tournament.manager</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#__main__">__main__</a>
- &#8226;   <a href="#board">board</a>
- &#8226;   <a href="#constants">constants</a>
- &#8226;   <a href="#copy">copy</a>
- &#8226;   <a href="#database">database</a>
+    <a href="#copy">copy</a>
+ &#8226;   <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.elo">core.elo</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+ &#8226;   <a href="#data.database">data.database</a>
  &#8226;   <a href="#datetime">datetime</a>
- &#8226;   <a href="#elo">elo</a>
- &#8226;   <a href="#engine">engine</a>
  &#8226;   <a href="#itertools">itertools</a>
  &#8226;   <a href="#math">math</a>
  &#8226;   <a href="#os">os</a>
@@ -7113,12 +7124,13 @@ imports:
  &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
  &#8226;   <a href="#tkinter.scrolledtext">tkinter.scrolledtext</a>
  &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
- &#8226;   <a href="#utils">utils</a>
+ &#8226;   <a href="#tournament">tournament</a>
 
   </div>
   <div class="import">
 imported by:
-    <a href="#gui">gui</a>
+    <a href="#tournament">tournament</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
 
   </div>
 
@@ -7234,6 +7246,185 @@ imported by:
 </div>
 
 <div class="node">
+  <a name="ui"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/__init__.py" type="text/plain"><tt>ui</tt></a>
+<span class="moduletype">Package</span>  <div class="import">
+imports:
+    <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+ &#8226;   <a href="#ui.widgets">ui.widgets</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="ui.app"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/app.py" type="text/plain"><tt>ui.app</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.elo">core.elo</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
+ &#8226;   <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+ &#8226;   <a href="#data.database">data.database</a>
+ &#8226;   <a href="#datetime">datetime</a>
+ &#8226;   <a href="#math">math</a>
+ &#8226;   <a href="#os">os</a>
+ &#8226;   <a href="#sys">sys</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#time">time</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tkinter.filedialog">tkinter.filedialog</a>
+ &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
+ &#8226;   <a href="#tkinter.scrolledtext">tkinter.scrolledtext</a>
+ &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
+ &#8226;   <a href="#tournament.manager">tournament.manager</a>
+ &#8226;   <a href="#ui">ui</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+ &#8226;   <a href="#ui.widgets">ui.widgets</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#ui">ui</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="ui.dialogs"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/dialogs.py" type="text/plain"><tt>ui.dialogs</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+ &#8226;   <a href="#random">random</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
+ &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
+ &#8226;   <a href="#ui">ui</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.views">ui.views</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="ui.loading_screen"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/loading_screen.py" type="text/plain"><tt>ui.loading_screen</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.engine">core.engine</a>
+ &#8226;   <a href="#core.opening_book">core.opening_book</a>
+ &#8226;   <a href="#os">os</a>
+ &#8226;   <a href="#sys">sys</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
+ &#8226;   <a href="#ui">ui</a>
+ &#8226;   <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
+ &#8226;   <a href="#ui">ui</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="ui.theme"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/theme.py" type="text/plain"><tt>ui.theme</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
+ &#8226;   <a href="#ui">ui</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#ui.app">ui.app</a>
+ &#8226;   <a href="#ui.loading_screen">ui.loading_screen</a>
+ &#8226;   <a href="#ui.widgets">ui.widgets</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="ui.views"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/views.py" type="text/plain"><tt>ui.views</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.board">core.board</a>
+ &#8226;   <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#core.elo">core.elo</a>
+ &#8226;   <a href="#core.utils">core.utils</a>
+ &#8226;   <a href="#re">re</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#tkinter.filedialog">tkinter.filedialog</a>
+ &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
+ &#8226;   <a href="#tkinter.scrolledtext">tkinter.scrolledtext</a>
+ &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
+ &#8226;   <a href="#ui">ui</a>
+ &#8226;   <a href="#ui.dialogs">ui.dialogs</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#ui.app">ui.app</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="ui.widgets"></a>
+  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/ui/widgets.py" type="text/plain"><tt>ui.widgets</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#core.constants">core.constants</a>
+ &#8226;   <a href="#tkinter">tkinter</a>
+ &#8226;   <a href="#ui">ui</a>
+ &#8226;   <a href="#ui.theme">ui.theme</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#ui.app">ui.app</a>
+
+  </div>
+
+</div>
+
+<div class="node">
   <a name="unicodedata"></a>
   <tt>unicodedata</tt> <span class="moduletype"><tt>C:\Program Files\Python310\DLLs\unicodedata.pyd</tt></span>  <div class="import">
 imported by:
@@ -7282,29 +7473,6 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="utils"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/utils.py" type="text/plain"><tt>utils</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#constants">constants</a>
- &#8226;   <a href="#os">os</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#board">board</a>
- &#8226;   <a href="#database">database</a>
- &#8226;   <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#elo">elo</a>
- &#8226;   <a href="#gui">gui</a>
- &#8226;   <a href="#tournament">tournament</a>
- &#8226;   <a href="#views">views</a>
-
-  </div>
-
-</div>
-
-<div class="node">
   <a name="uu"></a>
   <a target="code" href="///C:/Program%20Files/Python310/lib/uu.py" type="text/plain"><tt>uu</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
@@ -7318,32 +7486,6 @@ imports:
   <div class="import">
 imported by:
     <a href="#email.message">email.message</a>
-
-  </div>
-
-</div>
-
-<div class="node">
-  <a name="views"></a>
-  <a target="code" href="///D:/Downloads/Chess_Engine_Arena/views.py" type="text/plain"><tt>views</tt></a>
-<span class="moduletype">SourceModule</span>  <div class="import">
-imports:
-    <a href="#board">board</a>
- &#8226;   <a href="#constants">constants</a>
- &#8226;   <a href="#dialogs">dialogs</a>
- &#8226;   <a href="#elo">elo</a>
- &#8226;   <a href="#re">re</a>
- &#8226;   <a href="#tkinter">tkinter</a>
- &#8226;   <a href="#tkinter.filedialog">tkinter.filedialog</a>
- &#8226;   <a href="#tkinter.messagebox">tkinter.messagebox</a>
- &#8226;   <a href="#tkinter.scrolledtext">tkinter.scrolledtext</a>
- &#8226;   <a href="#tkinter.ttk">tkinter.ttk</a>
- &#8226;   <a href="#utils">utils</a>
-
-  </div>
-  <div class="import">
-imported by:
-    <a href="#gui">gui</a>
 
   </div>
 

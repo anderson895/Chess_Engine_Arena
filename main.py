@@ -5,7 +5,7 @@
 # ═══════════════════════════════════════════════════════════
 
 import tkinter as tk
-from loading_screen import LoadingScreen
+from ui.loading_screen import LoadingScreen
 
 
 def main():
