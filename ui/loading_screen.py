@@ -11,6 +11,7 @@ from tkinter import ttk
 from core.constants import BG, PANEL_BG, ACCENT, TEXT, LOG_BG
 from core.engine import AnalyzerEngine
 from core.opening_book import OpeningBook
+from core.utils import get_base_path, get_resource_path
 from ui.theme import FONT_FAMILY, FONT_MONO, apply_progressbar_style
 
 
@@ -83,29 +84,42 @@ class LoadingScreen:
     # ── Loading logic ─────────────────────────────────────
 
     def _start_loading(self):
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            # Go up one level from ui/ to project root
-            project_dir = os.path.dirname(script_dir)
-        except NameError:
-            project_dir = os.getcwd()
+        # Use get_base_path for PyInstaller compatibility
+        project_dir = get_base_path()
         cwd = os.getcwd()
 
         # Opening book candidates
         csv_candidates = []
-        for base in [cwd, project_dir]:
-            for sub in ["opening", "openings", ""]:
+        for base in [project_dir, cwd]:
+            for sub in ["openings", "opening", ""]:
                 for fname in ["openings_sheet.csv", "openings.csv"]:
                     p = (os.path.join(base, sub, fname) if sub
                          else os.path.join(base, fname))
                     csv_candidates.append(p)
 
-        # Analyzer engine candidates
+        # Analyzer engine candidates - search for various Stockfish filenames
         anal_candidates = []
+        stockfish_names = [
+            # Stockfish 18
+            "stockfish_18_x86-64.exe", "stockfish-18-x86-64.exe",
+            "stockfish_18.exe", "stockfish-18.exe",
+            # Stockfish 17
+            "stockfish_17_x86-64.exe", "stockfish-17-x86-64.exe",
+            "stockfish_17.exe", "stockfish-17.exe",
+            # Stockfish 16
+            "stockfish_16_x86-64.exe", "stockfish-16-x86-64.exe",
+            "stockfish_16.exe", "stockfish-16.exe",
+            # Generic names
+            "stockfish.exe", "stockfish_x86-64.exe", "stockfish-x86-64.exe",
+            "stockfish-windows-x86-64.exe", "stockfish-windows.exe",
+            "stockfish_avx2.exe", "stockfish-avx2.exe",
+            "stockfish_bmi2.exe", "stockfish-bmi2.exe",
+            # Linux/Mac
+            "stockfish", "stockfish_x86-64", "stockfish-x86-64",
+        ]
         for base in [project_dir, cwd]:
             for sub in ["analyzer", "engines", "stockfish", "engine", "."]:
-                for exe in ["stockfish_18_x86-64.exe", "stockfish.exe",
-                            "stockfish_x86-64.exe", "stockfish"]:
+                for exe in stockfish_names:
                     anal_candidates.append(os.path.join(base, sub, exe))
 
         threading.Thread(target=self._load_openings, args=(csv_candidates,), daemon=True).start()

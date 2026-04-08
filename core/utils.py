@@ -3,7 +3,39 @@
 # ═══════════════════════════════════════════════════════════
 
 import os
+import sys
 from core.constants import RANK_TIERS, QUALITY_COLORS
+
+
+def get_base_path():
+    """
+    Get the base path for resources, handling PyInstaller bundles.
+    
+    When running from source: returns the project root directory
+    When running as PyInstaller exe: returns the directory containing the exe
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable (PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # Running from source - go up from core/ to project root
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_resource_path(relative_path):
+    """
+    Get absolute path to a resource, works for dev and PyInstaller builds.
+    
+    Parameters
+    ----------
+    relative_path : str
+        Path relative to project root (e.g., "engines/gfruit.exe")
+    
+    Returns
+    -------
+    str : Absolute path to the resource
+    """
+    return os.path.join(get_base_path(), relative_path)
 
 
 def valid(r, c):

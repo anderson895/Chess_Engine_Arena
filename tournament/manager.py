@@ -447,6 +447,7 @@ class TournamentGame:
         self.status       = "pending"
         self.move_history = []
         self.eval_history = []
+        self.move_qualities = []  # Store move quality classifications
         self.id           = id(self)
 
     @property
@@ -690,7 +691,7 @@ class Tournament:
 
     def record_game_result(self, game: TournamentGame, result, reason,
                            move_history, pgn, duration, opening=None,
-                           eval_history=None):
+                           eval_history=None, move_qualities=None):
         game.result       = result
         game.reason       = reason
         game.pgn          = pgn
@@ -699,6 +700,7 @@ class Tournament:
         game.opening      = opening or ""
         game.move_history = move_history
         game.eval_history = eval_history or []
+        game.move_qualities = move_qualities or []
         game.status       = "done"
 
         pair_key = frozenset({game.white.name, game.black.name})
@@ -809,25 +811,27 @@ class Tournament:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class EvalBarWidget(tk.Frame):
-    BAR_W  = 22
+    BAR_W  = 32  # Much wider bar
     BAR_H  = 448
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, bar_height=None, **kwargs):
         super().__init__(parent, bg=BG, **kwargs)
         self._eval_cp   = 0.0
         self._eval_text = "0.0"
         self._mate      = None
+        self._bar_h = bar_height if bar_height else self.BAR_H
 
+        # Create canvas with border directly
         self.canvas = tk.Canvas(
-            self, width=self.BAR_W, height=self.BAR_H,
-            bg="#333", bd=0, highlightthickness=1,
-            highlightbackground="#555")
+            self, width=self.BAR_W, height=self._bar_h,
+            bg="#222", bd=2, relief='ridge',
+            highlightthickness=1, highlightbackground="#666")
         self.canvas.pack(side='top')
 
         self.lbl = tk.Label(
             self, text="0.0", bg=BG, fg=TEXT,
-            font=('Consolas', 7), width=4, anchor='center')
-        self.lbl.pack(side='top', pady=(1, 0))
+            font=('Consolas', 9, 'bold'), anchor='center')
+        self.lbl.pack(side='top', pady=(4, 0))
 
         self._draw(0)
 
@@ -845,26 +849,46 @@ class EvalBarWidget(tk.Frame):
         c  = self.canvas
         c.delete('all')
         w  = self.BAR_W
-        h  = self.BAR_H
-        c.create_rectangle(0, 0, w, h, fill="#222", outline='')
+        h  = self._bar_h
+        
         MAX_CP = 500
         if mate is not None:
             frac = 1.0 if mate > 0 else 0.0
         else:
             frac = max(0.0, min(1.0, (cp + MAX_CP) / (2 * MAX_CP)))
+        
         white_h = int(frac * h)
         black_h = h - white_h
-        c.create_rectangle(0, 0, w, black_h, fill="#2a2a2a", outline='')
-        c.create_rectangle(0, black_h, w, h, fill="#e8e8e8", outline='')
-        c.create_line(0, h//2, w, h//2, fill="#555", width=1)
-        c.create_line(0, black_h, w, black_h, fill=ACCENT, width=2)
+        
+        # Black's portion (top) - very dark
+        c.create_rectangle(0, 0, w, black_h, fill="#111111", outline='')
+        # White's portion (bottom) - very bright
+        c.create_rectangle(0, black_h, w, h, fill="#FFFFFF", outline='')
+        
+        # Center line (50-50 mark)
+        c.create_line(0, h//2, w, h//2, fill="#FF0000", width=2)
+        
+        # Current eval line (accent color)
+        if abs(black_h - h//2) > 5:
+            c.create_line(0, black_h, w, black_h, fill=ACCENT, width=3)
+        
+        # Update label
         if mate is not None:
             txt = f"M{abs(mate)}"
             col = "#00FF80" if mate > 0 else "#FF4444"
         else:
             pawn_val = cp / 100.0
             txt = f"{pawn_val:+.1f}"
-            col = "#FFD700" if cp > 30 else "#4444FF" if cp < -30 else "#AAAAAA"
+            if cp > 100:
+                col = "#00FF80"
+            elif cp < -100:
+                col = "#FF6666"
+            elif cp > 30:
+                col = "#AAFFAA"
+            elif cp < -30:
+                col = "#FFAAAA"
+            else:
+                col = "#AAAAAA"
         self.lbl.config(text=txt, fg=col)
 
 
@@ -964,26 +988,34 @@ class MiniBoardWidget(tk.Frame):
         self._replay_idx   = 0
         self._replay_board = None
         self._replay_evals = []
+        self._replay_qualities = []  # Store move qualities
         self._show_eval    = show_eval_bar
         self._build()
 
     def _build(self):
         sz = self.SQ
+        # Main container for board and eval bar
         outer = tk.Frame(self, bg=BG)
-        outer.pack(side='top')
+        outer.pack(side='top', fill='x')
+        
         if self._show_eval:
-            self.eval_bar = EvalBarWidget(outer)
-            self.eval_bar.pack(side='left', padx=(0, 3), anchor='n')
+            # Create eval bar to the LEFT of the board
+            self.eval_bar = EvalBarWidget(outer, bar_height=sz * 8)
+            self.eval_bar.pack(side='left', padx=(0, 4), anchor='n')
         else:
             self.eval_bar = None
+            
+        # Board frame on the right of eval bar
         board_frame = tk.Frame(outer, bg=BG)
-        board_frame.pack(side='left')
+        board_frame.pack(side='left', anchor='n')
         self.canvas = tk.Canvas(
             board_frame, width=sz*8, height=sz*8,
             bg=BG, bd=0, highlightthickness=2,
             highlightcolor=ACCENT,
             highlightbackground="#333")
         self.canvas.pack(side='top')
+        
+        # Controls below the board+eval bar
         ctrl = tk.Frame(self, bg=BG)
         ctrl.pack(fill='x', pady=2)
         for sym, cmd in [("⏮","_rep_start"),("◀","_rep_prev"),
@@ -996,6 +1028,10 @@ class MiniBoardWidget(tk.Frame):
         self.move_lbl = tk.Label(ctrl, text="", bg=BG, fg="#AAA",
                                 font=('Consolas',8), anchor='w')
         self.move_lbl.pack(side='left', padx=4, fill='x', expand=True)
+        # Add move quality label
+        self.quality_lbl = tk.Label(ctrl, text="", bg=BG, fg="#AAA",
+                                    font=('Segoe UI', 8, 'bold'), anchor='e')
+        self.quality_lbl.pack(side='right', padx=4)
 
     def update_live(self, board_rows, last_move=None, eval_cp=None, eval_mate=None):
         if hasattr(board_rows, 'board'):
@@ -1010,9 +1046,10 @@ class MiniBoardWidget(tk.Frame):
             if eval_cp is not None:
                 self.eval_bar.set_eval(eval_cp, eval_mate)
 
-    def set_replay(self, move_history, eval_history=None):
+    def set_replay(self, move_history, eval_history=None, move_qualities=None):
         self._replay_moves = [m[0] for m in move_history]
         self._replay_evals = eval_history or []
+        self._replay_qualities = move_qualities or []
         self._replay_idx   = len(self._replay_moves)
         self._in_replay    = True
         self._render_replay()
@@ -1049,6 +1086,20 @@ class MiniBoardWidget(tk.Frame):
                 self.eval_bar.reset()
         n = self._replay_idx
         total = len(self._replay_moves)
+        
+        # Display move quality if available
+        if hasattr(self, 'quality_lbl'):
+            idx = self._replay_idx - 1
+            if 0 <= idx < len(self._replay_qualities):
+                quality = self._replay_qualities[idx]
+                if quality:
+                    color = QUALITY_COLORS.get(quality, "#AAA")
+                    self.quality_lbl.config(text=quality, fg=color)
+                else:
+                    self.quality_lbl.config(text="")
+            else:
+                self.quality_lbl.config(text="")
+        
         if n > 0:
             san = ""
             try:
@@ -1139,29 +1190,33 @@ class TournamentRunner:
     def _run(self):
         analyzer_ref = self.t.analyzer_path
         if analyzer_ref is not None and AnalyzerEngine is not None:
+            analyzer_path = None
+            
+            # Extract path from analyzer reference
             if isinstance(analyzer_ref, str):
-                if os.path.isfile(analyzer_ref):
-                    try:
-                        self._analyzer = AnalyzerEngine(analyzer_ref, "Analyzer")
-                        self._analyzer.start()
-                        self._analyzer_is_external = False
-                        self.on_status(
-                            f"🔍 Analyzer ready: {os.path.basename(analyzer_ref)}")
-                    except Exception as e:
-                        self._analyzer = None
-                        self.on_status(f"⚠ Analyzer failed to start: {e}")
-                else:
-                    self.on_status("⚠ Analyzer path not found — running without analysis")
+                analyzer_path = analyzer_ref
+            elif hasattr(analyzer_ref, 'path') and isinstance(analyzer_ref.path, str):
+                # Extract path from AnalyzerEngine object - we'll create our own instance
+                analyzer_path = analyzer_ref.path
+            
+            if analyzer_path and os.path.isfile(analyzer_path):
+                try:
+                    # Always create a NEW analyzer instance for the tournament
+                    # This prevents conflicts with the main GUI's analyzer
+                    self._analyzer = AnalyzerEngine(analyzer_path, "TournamentAnalyzer")
+                    self._analyzer.start()
+                    self._analyzer_is_external = False
+                    self.on_status(f"🔍 Analyzer ready: {os.path.basename(analyzer_path)}")
+                except Exception as e:
+                    self._analyzer = None
+                    self.on_status(f"⚠ Analyzer failed to start: {e}")
+            elif analyzer_path:
+                self.on_status(f"⚠ Analyzer path not found: {analyzer_path}")
             else:
-                if hasattr(analyzer_ref, 'alive') and analyzer_ref.alive:
-                    self._analyzer = analyzer_ref
-                    self._analyzer_is_external = True
-                    name = ""
-                    if hasattr(analyzer_ref, 'path') and isinstance(analyzer_ref.path, str):
-                        name = os.path.basename(analyzer_ref.path)
-                    self.on_status(f"🔍 Using GUI analyzer{': ' + name if name else ''}")
-                else:
-                    self.on_status("⚠ GUI analyzer not alive — running without analysis")
+                self.on_status("⚠ Could not extract analyzer path")
+        else:
+            # No analyzer attached
+            self.on_status("ℹ️ No analyzer attached — eval data will not be recorded")
 
         if not self.t.started:
             self.t.start()
@@ -1256,6 +1311,7 @@ class TournamentRunner:
         last_move    = None
         start_t      = time.time()
         eval_history = []
+        move_qualities = []  # Track move quality classifications
         opening_name = None
         result       = None
         reason       = ""
@@ -1341,6 +1397,7 @@ class TournamentRunner:
 
             cp_val   = None
             mate_val = None
+            quality  = None
             if self._analyzer:
                 try:
                     mvs_for_eval = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
@@ -1351,12 +1408,38 @@ class TournamentRunner:
                             if score_type == 'mate':
                                 mate_val = cp_val // 30000 if cp_val != 0 else 0
                             eval_history.append(cp_val)
+                            # Classify move quality based on eval change
+                            if len(eval_history) >= 2:
+                                cp_before = eval_history[-2]
+                                cp_after  = eval_history[-1]
+                                is_white  = not is_white_turn  # Previous move was opposite color
+                                try:
+                                    from core.utils import classify_move_quality
+                                    quality = classify_move_quality(cp_before, cp_after, is_white)
+                                except ImportError:
+                                    pass
+                            move_qualities.append(quality)
                     elif hasattr(self._analyzer, 'get_eval'):
                         cp_val = self._analyzer.get_eval(mvs_for_eval, movetime_ms=150)
                         if cp_val is not None:
                             eval_history.append(cp_val)
+                            # Classify move quality based on eval change
+                            if len(eval_history) >= 2:
+                                cp_before = eval_history[-2]
+                                cp_after  = eval_history[-1]
+                                is_white  = not is_white_turn
+                                try:
+                                    from core.utils import classify_move_quality
+                                    quality = classify_move_quality(cp_before, cp_after, is_white)
+                                except ImportError:
+                                    pass
+                            move_qualities.append(quality)
                 except Exception:
                     pass
+            
+            # If no analyzer or no quality computed, add None placeholder
+            if quality is None and len(move_qualities) < len(board.move_history):
+                move_qualities.append(None)
 
             self.on_board_update(game, board, last_move, cp_val, mate_val, opening_name)
             time.sleep(max(0.02, self.t.delay))
@@ -1375,7 +1458,8 @@ class TournamentRunner:
 
         self.t.record_game_result(
             game, result, reason, board.move_history, pgn,
-            duration, opening=opening_name, eval_history=eval_history)
+            duration, opening=opening_name, eval_history=eval_history,
+            move_qualities=move_qualities)
 
         self._kill(e_white, e_black)
         self.on_game_end(game)
@@ -1686,8 +1770,10 @@ class TournamentHistoryWindow:
         else:
             self.vh_opening_lbl.config(text="")
 
+        # Pass move_qualities to mini_board for display
+        move_qualities = getattr(game, 'move_qualities', [])
         if game.move_history:
-            self.mini_board.set_replay(game.move_history, game.eval_history)
+            self.mini_board.set_replay(game.move_history, game.eval_history, move_qualities)
         if game.eval_history:
             self.eval_graph.set_evals(game.eval_history)
             avg     = sum(game.eval_history) / len(game.eval_history)
@@ -1705,14 +1791,28 @@ class TournamentHistoryWindow:
         if game.opening:
             self.move_box.insert('end', f"📖  {game.opening}\n\n", 'op')
 
+        # Configure tags for move quality colors
+        for quality, color in QUALITY_COLORS.items():
+            self.move_box.tag_config(f'q_{quality}', foreground=color)
+
         for i, (uci, san, fen) in enumerate(game.move_history):
             ply = i + 1
+            # Get move quality if available
+            quality = move_qualities[i] if i < len(move_qualities) else None
+            quality_tag = f'q_{quality}' if quality and quality in QUALITY_COLORS else None
+            
             if ply % 2 == 1:
                 move_num = (ply+1) // 2
                 self.move_box.insert('end', f"{move_num}. ", 'n')
-                self.move_box.insert('end', san + " ", 'w')
+                if quality_tag:
+                    self.move_box.insert('end', san + " ", quality_tag)
+                else:
+                    self.move_box.insert('end', san + " ", 'w')
             else:
-                self.move_box.insert('end', san + "  ", 'b')
+                if quality_tag:
+                    self.move_box.insert('end', san + "  ", quality_tag)
+                else:
+                    self.move_box.insert('end', san + "  ", 'b')
         self.move_box.insert('end', f"\n  ⇒ {game.result}  {game.reason}\n", 'res')
         self.move_box.see('1.0')
         self.move_box.config(state='disabled')

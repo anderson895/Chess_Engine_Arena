@@ -116,5 +116,5 @@ python main.py
 
 Windows CMD:
 ```cmd
-python -m PyInstaller --onefile --windowed --icon=assets/logo.ico --name="ChessEngineArena" --add-data="openings;opening" --add-data="analyzer;analyzer" --add-data="assets;assets" main.py
+python -m PyInstaller --onefile --windowed --icon=assets/logo.ico --name="ChessEngineArena" --add-data="openings;opening" --add-data="analyzer;analyzer" --add-data="engines;gfruit.exe" --add-data="assets;assets" main.py
 ```

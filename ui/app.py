@@ -19,7 +19,7 @@ from core.constants import (
 )
 from core.utils import (
     normalize_engine_name, get_db_path, get_tier,
-    classify_move_quality, build_pgn,
+    classify_move_quality, build_pgn, get_resource_path,
 )
 from core.elo import compute_elo_ratings
 from core.board import Board
@@ -689,8 +689,8 @@ class ChessGUI:
 
     def _on_mode_change(self):
         if self.play_mode.get() == "human_vs_engine":
-            default_engine = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "engines", "gfruit.exe")
+            # Use get_resource_path for PyInstaller compatibility
+            default_engine = get_resource_path(os.path.join("engines", "gfruit.exe"))
             if not self.e2_path.get().strip() and os.path.isfile(default_engine):
                 self.e2_path.set(default_engine)
                 name = os.path.splitext(os.path.basename(default_engine))[0]
