@@ -1,0 +1,564 @@
+# ═══════════════════════════════════════════════════════════
+#  webui/views.py — Rankings, Statistics, Opening stats,
+#  Game History and PGN replay viewer
+# ═══════════════════════════════════════════════════════════
+
+import re
+
+from nicegui import ui
+
+from core.board import Board
+from core.constants import RANK_TIERS
+from core.elo import compute_elo_history
+from core.utils import normalize_engine_name, get_tier
+from webui import widgets
+from webui.board import BoardView
+from webui.theme import COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_RED
+
+_TIER_CELL_SLOT = """
+<q-td :props="props">
+  <span :style="{color: props.row.tier_col}">{{ props.row.tier }}</span>
+</q-td>
+"""
+
+_RANK_CELL_SLOT = """
+<q-td :props="props" class="text-center">
+  <img v-if="props.row.rank <= 3"
+       :src="'/assets/ui/medal_' + props.row.rank + '.png'"
+       style="height: 26px; width: auto; vertical-align: middle;" />
+  <span v-else>#{{ props.row.rank }}</span>
+</q-td>
+"""
+
+
+# ═══════════════════════════════════════════════════════════
+#  Rankings
+# ═══════════════════════════════════════════════════════════
+
+def show_rankings(session):
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[900px] max-w-full h-[660px] flex flex-col"):
+        widgets.heading("ic_trophy", "ENGINE RANKINGS")
+        ui.label("Elo ratings from all recorded games — double-click a row "
+                 "for Elo history").classes("text-xs text-gray-500")
+
+        with ui.row().classes("gap-2 flex-wrap"):
+            for threshold, label, color in RANK_TIERS:
+                txt = f"{label} ≥{threshold}" if threshold > 0 else label
+                ui.label(txt).classes("text-xs").style(f"color: {color}")
+
+        search = widgets.search_input("Filter engines or tiers…") \
+            .classes("w-full")
+
+        columns = [
+            {"name": "rank",    "label": "#",     "field": "rank",  "align": "center", "sortable": True},
+            {"name": "engine",  "label": "Engine", "field": "engine", "align": "left",  "sortable": True},
+            {"name": "elo",     "label": "Elo",   "field": "elo",   "align": "center", "sortable": True},
+            {"name": "tier",    "label": "Tier",  "field": "tier",  "align": "left"},
+            {"name": "matches", "label": "Games", "field": "matches", "align": "center", "sortable": True},
+            {"name": "wins",    "label": "W",     "field": "wins",  "align": "center"},
+            {"name": "draws",   "label": "D",     "field": "draws", "align": "center"},
+            {"name": "loses",   "label": "L",     "field": "loses", "align": "center"},
+            {"name": "wr",      "label": "WR%",   "field": "wr",    "align": "center", "sortable": True},
+        ]
+        table = ui.table(columns=columns, rows=[], row_key="engine",
+                         pagination=15).classes("w-full flex-grow arena-log")
+        table.add_slot("body-cell-tier", _TIER_CELL_SLOT)
+        table.add_slot("body-cell-rank", _RANK_CELL_SLOT)
+
+        def refresh():
+            ratings, _, _ = session.elo_data()
+            stats_map = {s["engine"]: s for s in session.db.get_engine_stats()}
+            rows = []
+            ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
+            for i, (engine, elo) in enumerate(ordered, 1):
+                s = stats_map.get(engine, {})
+                tier_lbl, tier_col = get_tier(elo)
+                rows.append({
+                    "rank": i, "engine": engine, "elo": elo,
+                    "tier": tier_lbl, "tier_col": tier_col,
+                    "matches": s.get("matches", 0), "wins": s.get("wins", 0),
+                    "draws": s.get("draws", 0), "loses": s.get("loses", 0),
+                    "wr": f"{s.get('win_rate', 0.0):.1f}",
+                })
+            q = (search.value or "").lower()
+            if q:
+                rows = [r for r in rows
+                        if q in r["engine"].lower() or q in r["tier"].lower()]
+            table.rows = rows
+            table.update()
+
+        search.on_value_change(lambda e: refresh())
+        table.on("rowDblclick",
+                 lambda e: widgets.with_loader(
+                     lambda: show_elo_history(session, e.args[1]["engine"]),
+                     "Loading Elo history…"))
+
+        with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
+            widgets.icon_button("Refresh", "ic_refresh", on_click=refresh,
+                                secondary=True)
+            ui.button("Close", on_click=dialog.close) \
+                .props("flat color=grey no-caps")
+        refresh()
+    dialog.open()
+
+
+# ═══════════════════════════════════════════════════════════
+#  Elo history chart
+# ═══════════════════════════════════════════════════════════
+
+def show_elo_history(session, engine_name):
+    games = session.db.get_all_games_for_elo()
+    history = compute_elo_history(games, engine_name)
+    if not history:
+        ui.notify(f"No games found for {engine_name}", type="info")
+        return
+
+    elos = [e for _, e in history]
+    final_elo = elos[-1]
+    tier_lbl, tier_col = get_tier(final_elo)
+
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[780px] max-w-full"):
+        widgets.heading("ic_chart",
+                        f"Elo History — {normalize_engine_name(engine_name)}",
+                        text_cls="text-lg font-bold text-primary")
+        ui.label(f"Current: {final_elo}  ·  {tier_lbl}") \
+            .classes("font-bold").style(f"color: {tier_col}")
+
+        ui.echart({
+            "backgroundColor": "transparent",
+            "grid": {"left": 50, "right": 20, "top": 20, "bottom": 35},
+            "tooltip": {"trigger": "axis"},
+            "xAxis": {
+                "type": "category",
+                "data": [g for g, _ in history],
+                "name": "Game #",
+                "axisLine": {"lineStyle": {"color": "#666"}},
+            },
+            "yAxis": {
+                "type": "value",
+                "min": max(0, min(elos) - 50),
+                "max": max(elos) + 50,
+                "axisLine": {"lineStyle": {"color": "#666"}},
+                "splitLine": {"lineStyle": {"color": "#222"}},
+            },
+            "series": [{
+                "type": "line",
+                "data": elos,
+                "smooth": True,
+                "symbolSize": 6,
+                "lineStyle": {"color": tier_col, "width": 2},
+                "itemStyle": {"color": tier_col},
+                "areaStyle": {"opacity": 0.12, "color": tier_col},
+            }],
+        }).classes("w-full h-[360px]")
+
+        if len(elos) > 1:
+            change = elos[-1] - elos[0]
+            with ui.row().classes("w-full justify-around"):
+                for label, val, col in [
+                    ("Peak", str(max(elos)), COLOR_GOLD),
+                    ("Lowest", str(min(elos)), "#FF6B6B"),
+                    ("Change", f"{change:+d}",
+                     "#00FF80" if change >= 0 else COLOR_RED),
+                    ("Games", str(len(elos)), "#EAEAEA"),
+                ]:
+                    with ui.column().classes("items-center gap-0"):
+                        ui.label(label).classes("text-xs text-gray-500")
+                        ui.label(val).classes("text-lg font-bold") \
+                            .style(f"color: {col}")
+
+        ui.button("Close", on_click=dialog.close) \
+            .props("flat color=grey no-caps").classes("self-end dlg-foot")
+    dialog.open()
+
+
+# ═══════════════════════════════════════════════════════════
+#  Statistics
+# ═══════════════════════════════════════════════════════════
+
+def show_statistics(session):
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[820px] max-w-full h-[620px] flex flex-col"):
+        widgets.heading("ic_chart", "ENGINE STATISTICS")
+        ui.label(session.db.db_path).classes("text-xs text-gray-600 mono")
+        ui.label("Double-click a row for its game history") \
+            .classes("text-xs text-gray-500")
+
+        search = widgets.search_input("Filter engines…").classes("w-full")
+
+        columns = [
+            {"name": "engine",  "label": "Engine",   "field": "engine",
+             "align": "left", "sortable": True},
+            {"name": "matches", "label": "Matches",  "field": "matches",
+             "align": "center", "sortable": True},
+            {"name": "wins",    "label": "Win",      "field": "wins",
+             "align": "center", "sortable": True},
+            {"name": "draws",   "label": "Draw",     "field": "draws",
+             "align": "center", "sortable": True},
+            {"name": "loses",   "label": "Lose",     "field": "loses",
+             "align": "center", "sortable": True},
+            {"name": "wr",      "label": "WinRate%", "field": "wr",
+             "align": "center", "sortable": True},
+        ]
+        table = ui.table(columns=columns, rows=[], row_key="engine",
+                         pagination=15).classes("w-full flex-grow arena-log")
+
+        def refresh():
+            stats = session.db.get_engine_stats(search_query=search.value or "")
+            table.rows = [
+                {"engine": s["engine"], "matches": s["matches"],
+                 "wins": s["wins"], "draws": s["draws"], "loses": s["loses"],
+                 "wr": f"{s['win_rate']:.1f}"}
+                for s in stats
+            ]
+            table.update()
+
+        search.on_value_change(lambda e: refresh())
+        table.on("rowDblclick",
+                 lambda e: widgets.with_loader(
+                     lambda: show_game_history(
+                         session, filter_engine=e.args[1]["engine"]),
+                     "Loading game history…"))
+
+        with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
+            widgets.icon_button("Rankings", "ic_trophy",
+                                on_click=lambda: show_rankings(session))
+            widgets.icon_button("All Openings", "ic_book", secondary=True,
+                                on_click=lambda: show_opening_stats(session))
+            widgets.icon_button("Refresh", "ic_refresh", on_click=refresh,
+                                secondary=True)
+            ui.button("Close", on_click=dialog.close) \
+                .props("flat color=grey no-caps")
+        refresh()
+    dialog.open()
+
+
+# ═══════════════════════════════════════════════════════════
+#  Opening statistics
+# ═══════════════════════════════════════════════════════════
+
+def show_opening_stats(session, engine_name=None):
+    if engine_name:
+        data = session.db.get_opening_stats(engine_name)
+        title = f"Opening Stats — {normalize_engine_name(engine_name)}"
+    else:
+        data = session.db.get_opening_stats_all()
+        title = "Opening Stats — All Engines"
+
+    columns = [
+        {"name": "opening", "label": "Opening", "field": "opening",
+         "align": "left", "sortable": True},
+        {"name": "games",   "label": "Games",   "field": "games",
+         "align": "center", "sortable": True},
+        {"name": "wins",    "label": "W",       "field": "wins",  "align": "center"},
+        {"name": "draws",   "label": "D",       "field": "draws", "align": "center"},
+        {"name": "losses",  "label": "L",       "field": "losses", "align": "center"},
+        {"name": "wr",      "label": "WR%",     "field": "wr",
+         "align": "center", "sortable": True},
+        {"name": "bar",     "label": "",        "field": "bar", "align": "left",
+         "classes": "mono"},
+    ]
+
+    def rows_for(rows):
+        max_games = rows[0]["games"] if rows else 1
+        out = []
+        for r in rows:
+            filled = int(r["games"] / max_games * 20) if max_games else 0
+            out.append({**r, "wr": f"{r['win_rate']:.1f}",
+                        "bar": "█" * filled + "░" * (20 - filled)})
+        return out
+
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[940px] max-w-full h-[640px] flex flex-col"):
+        widgets.heading("ic_book", title)
+        with ui.tabs().classes("w-full") as tabs:
+            tab_w = ui.tab("As White")
+            tab_b = ui.tab("As Black")
+        with ui.tab_panels(tabs, value=tab_w).classes("w-full flex-grow"):
+            for tab, key in [(tab_w, "as_white"), (tab_b, "as_black")]:
+                with ui.tab_panel(tab):
+                    rows = data.get(key, [])
+                    if rows:
+                        ui.table(columns=columns, rows=rows_for(rows),
+                                 row_key="opening", pagination=12) \
+                            .classes("w-full arena-log")
+                    else:
+                        ui.label("No games recorded yet.") \
+                            .classes("text-gray-500 p-8")
+        ui.button("Close", on_click=dialog.close) \
+            .props("flat color=grey no-caps").classes("self-end dlg-foot")
+    dialog.open()
+
+
+# ═══════════════════════════════════════════════════════════
+#  Game history
+# ═══════════════════════════════════════════════════════════
+
+_RESULT_CELL_SLOT = """
+<q-td :props="props">
+  <span :style="{color: props.row.result_col}">{{ props.value }}</span>
+</q-td>
+"""
+
+
+def show_game_history(session, filter_engine=None):
+    norm_filter = normalize_engine_name(filter_engine) if filter_engine else None
+
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[1060px] max-w-full h-[680px] flex flex-col"):
+        with ui.row().classes("w-full items-center"):
+            widgets.heading("ic_calendar", "GAME HISTORY")
+            if norm_filter:
+                ui.label(f"· {norm_filter}").style(f"color: {COLOR_GOLD}")
+                ui.button("Clear filter",
+                          on_click=lambda: (dialog.close(),
+                                            show_game_history(session))) \
+                    .props("dense color=secondary no-caps")
+
+        with ui.row().classes("w-full items-center gap-4"):
+            source = ui.radio(
+                {"all": "All", "regular": "Regular", "tournament": "Tournament"},
+                value="all").props("inline dense")
+            search = widgets.search_input(
+                "Search engine, result, reason, date…").classes("flex-grow")
+
+        columns = [
+            {"name": "id",     "label": "ID",     "field": "id",     "align": "center", "sortable": True},
+            {"name": "date",   "label": "Date",   "field": "date",   "align": "center"},
+            {"name": "time",   "label": "Time",   "field": "time",   "align": "center"},
+            {"name": "white",  "label": "White",  "field": "white",  "align": "left"},
+            {"name": "black",  "label": "Black",  "field": "black",  "align": "left"},
+            {"name": "result", "label": "Result", "field": "result", "align": "center"},
+            {"name": "reason", "label": "Reason", "field": "reason", "align": "left"},
+            {"name": "moves",  "label": "Moves",  "field": "moves",  "align": "center"},
+            {"name": "dur",    "label": "Duration", "field": "dur",  "align": "center"},
+        ]
+        table = ui.table(columns=columns, rows=[], row_key="id",
+                         pagination=15).classes("w-full flex-grow arena-log")
+        table.add_slot("body-cell-result", _RESULT_CELL_SLOT)
+
+        games_cache = []
+        MAX_ROWS = 300   # SQL LIMIT — huge databases never flood the query
+
+        def refresh():
+            nonlocal games_cache
+            src = source.value if source.value != "all" else None
+            games_cache = session.db.get_all_games(
+                filter_engine=filter_engine,
+                search_query=search.value or "",
+                source_filter=src,
+                limit=MAX_ROWS)
+            total = session.db.count_games(
+                filter_engine=filter_engine,
+                search_query=search.value or "",
+                source_filter=src)
+            count_lbl.set_text(
+                f"Showing latest {len(games_cache)} of {total} — "
+                f"use search to narrow" if total > len(games_cache)
+                else f"{len(games_cache)} game(s)")
+            rows = []
+            for g in games_cache:
+                gid, white, black, result, reason, date, time_str, moves, dur = g[:9]
+                src_tag = g[9] if len(g) > 9 else "regular"
+                if result == "1/2-1/2":
+                    col = COLOR_BLUE
+                elif result == "1-0":
+                    col = (COLOR_RED if norm_filter and
+                           normalize_engine_name(black) == norm_filter
+                           else COLOR_GOLD)
+                elif result == "0-1":
+                    col = (COLOR_RED if norm_filter and
+                           normalize_engine_name(white) == norm_filter
+                           else COLOR_SILVER)
+                else:
+                    col = "#888"
+                rows.append({
+                    "id": gid, "date": date, "time": time_str,
+                    "white": white, "black": black,
+                    "result": result, "result_col": col,
+                    "reason": ("[T] " if src_tag == "tournament" else "") + (reason or ""),
+                    "moves": moves or 0,
+                    "dur": f"{dur // 60}m {dur % 60}s" if dur else "—",
+                })
+            table.rows = rows
+            table.update()
+
+        source.on_value_change(lambda e: refresh())
+        search.on_value_change(lambda e: refresh())
+        table.on("rowDblclick",
+                 lambda e: widgets.with_loader(
+                     lambda: show_pgn_viewer(session, e.args[1]["id"],
+                                             games_cache),
+                     "Loading game replay…"))
+
+        with ui.row().classes("w-full items-center"):
+            widgets.hint("Double-click a row to replay the game · "
+                         "[T] = tournament game")
+            ui.space()
+            count_lbl = ui.label("").classes("text-xs text-gray-500")
+        with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
+            widgets.icon_button("Refresh", "ic_refresh", on_click=refresh,
+                                secondary=True)
+            ui.button("Close", on_click=dialog.close) \
+                .props("flat color=grey no-caps")
+        refresh()
+    dialog.open()
+
+
+# ═══════════════════════════════════════════════════════════
+#  PGN replay viewer
+# ═══════════════════════════════════════════════════════════
+
+def parse_pgn_moves(pgn):
+    """Extract UCI moves from a PGN text using the Board SAN builder."""
+    body_lines = [l.strip() for l in pgn.split("\n")
+                  if l.strip() and not l.strip().startswith("[")]
+    text = " ".join(body_lines)
+    for tok in ["1-0", "0-1", "1/2-1/2", "*"]:
+        text = text.replace(tok, "")
+    text = re.sub(r"\d+\.", "", text)
+
+    board = Board()
+    uci_moves = []
+    for san in text.split():
+        try:
+            legal = board.legal_moves()
+            for fr, fc, tr, tc, promo in legal:
+                test = board._build_san(fr, fc, tr, tc, promo, legal)
+                if (test.replace("+", "").replace("#", "")
+                        == san.replace("+", "").replace("#", "")):
+                    uci = f"{chr(ord('a') + fc)}{8 - fr}{chr(ord('a') + tc)}{8 - tr}"
+                    if promo:
+                        uci += promo
+                    uci_moves.append(uci)
+                    board.apply_uci(uci)
+                    break
+        except Exception as e:
+            print(f"[parse_pgn_moves] error on {san}: {e}")
+    return uci_moves
+
+
+def show_pgn_viewer(session, game_id, all_games=None):
+    pgn = session.db.get_game_pgn(game_id)
+    if not pgn:
+        ui.notify("Could not load PGN.", type="negative")
+        return
+
+    all_games = all_games or []
+    ids = [g[0] for g in all_games]
+    idx = ids.index(game_id) if game_id in ids else None
+
+    moves = parse_pgn_moves(pgn)
+    replay = Board()
+    pos = {"i": 0}
+
+    def state():
+        last = moves[pos["i"] - 1] if pos["i"] > 0 else None
+        return {"board": replay, "last_move": last,
+                "selected": None, "legal_dests": set(), "check_sq": None}
+
+    def goto(i):
+        i = max(0, min(len(moves), i))
+        replay.reset()
+        for m in moves[:i]:
+            try:
+                replay.apply_uci(m)
+            except Exception:
+                break
+        pos["i"] = i
+        board_view.refresh()
+        update_label()
+
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[1000px] max-w-full h-[720px] flex flex-col"):
+        header = re.search(r'\[White\s+"([^"]+)"\]', pgn)
+        white = header.group(1) if header else "?"
+        header = re.search(r'\[Black\s+"([^"]+)"\]', pgn)
+        black = header.group(1) if header else "?"
+        header = re.search(r'\[Result\s+"([^"]+)"\]', pgn)
+        result = header.group(1) if header else "*"
+
+        async def _nav_game(delta):
+            dialog.close()
+            await widgets.with_loader(
+                lambda: show_pgn_viewer(session, ids[idx + delta], all_games),
+                "Loading game replay…")
+
+        with ui.row().classes("w-full items-center justify-between"):
+            prev_btn = widgets.icon_button(
+                "Prev game", "ic_play_rev", secondary=True, dense=True,
+                on_click=lambda: _nav_game(-1))
+            if idx is None or idx <= 0:
+                prev_btn.disable()
+            ui.label(f"Game #{game_id}   ·   {white} vs {black}   ·   {result}") \
+                .classes("font-bold text-primary")
+            next_btn = widgets.icon_button(
+                "Next game", "ic_play", secondary=True, dense=True,
+                on_click=lambda: _nav_game(1))
+            if idx is None or idx >= len(ids) - 1:
+                next_btn.disable()
+
+        with ui.row().classes("w-full flex-grow no-wrap gap-4"):
+            with ui.column().classes("w-1/2 items-center"):
+                board_view = BoardView(state)
+                move_label = ui.label("Start position") \
+                    .classes("font-bold text-primary")
+                opening_lbl = ui.label("").classes("text-xs italic") \
+                    .style(f"color: {COLOR_BLUE}")
+                with ui.row().classes("gap-1"):
+                    for icon, action, tip in [
+                        ("ic_rew",      lambda: goto(0),            "Start"),
+                        ("ic_play_rev", lambda: goto(pos["i"] - 1), "Previous move"),
+                        ("ic_play",     lambda: goto(pos["i"] + 1), "Next move"),
+                        ("ic_ff",       lambda: goto(len(moves)),   "End"),
+                    ]:
+                        with ui.button(on_click=action).props("dense").tooltip(tip):
+                            ui.element("img").props(
+                                f'src="/assets/ui/{icon}.png"').classes("btn-ic")
+                widgets.hint("Keys: ← → move · Home/End start/end")
+            with ui.column().classes("w-1/2 h-full"):
+                ui.label("PGN").classes("arena-heading")
+                ui.textarea(value=pgn).props("readonly autogrow") \
+                    .classes("w-full flex-grow arena-log mono text-xs")
+                with ui.row().classes("gap-2"):
+                    widgets.icon_button("Copy PGN", "ic_export", secondary=True,
+                                        dense=True, on_click=lambda: (
+                                            ui.clipboard.write(pgn),
+                                            ui.notify("PGN copied",
+                                                      type="positive")))
+                    widgets.icon_button("Download PGN", "ic_download",
+                                        secondary=True, dense=True,
+                                        on_click=lambda: ui.download.content(
+                                            pgn, f"game_{game_id}.pgn"))
+
+        def update_label():
+            i, total = pos["i"], len(moves)
+            if i == 0:
+                move_label.set_text("Start position")
+            elif i <= total:
+                side = "White" if i % 2 == 1 else "Black"
+                move_label.set_text(f"Move {(i + 1) // 2}: {side} — {moves[i - 1]}")
+            if session.opening_book.loaded:
+                eco, name = session.opening_book.lookup(replay.uci_moves_list())
+                opening_lbl.set_text(
+                    (f"{eco} · {name}" if eco else name) if name else "")
+
+        def on_key(e):
+            if not e.action.keydown:
+                return
+            if e.key.arrow_left:
+                goto(pos["i"] - 1)
+            elif e.key.arrow_right:
+                goto(pos["i"] + 1)
+            elif e.key.name == "Home":
+                goto(0)
+            elif e.key.name == "End":
+                goto(len(moves))
+        ui.keyboard(on_key=on_key)
+
+        ui.button("Close", on_click=dialog.close) \
+            .props("flat color=grey no-caps").classes("self-end dlg-foot")
+        update_label()
+    dialog.open()

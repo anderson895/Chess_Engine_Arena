@@ -6,115 +6,146 @@ https://chessengines.blogspot.com/
 
 
 
-# ♟ Chess Engine Arena — Enhanced
+# ♟ Chess Engine Arena
 
-A feature-rich desktop application for running chess engine matches, tournaments,
-and human-vs-engine games. Built with Python + Tkinter.
+A feature-rich desktop app for running chess engine matches, tournaments,
+and human-vs-engine games. Built with **Python + NiceGUI** — runs as a
+native desktop window (pywebview/WebView2) or in the browser.
+
+## Running
+
+```bash
+# activate the virtual environment first
+.\venv\Scripts\activate
+
+python main.py             # native desktop window (default)
+python main.py --browser   # open in the web browser (DevTools debugging)
+```
+
+First launch parses the opening book (a blocking loading screen is shown);
+the parsed book is cached to disk, so every launch after that is fast.
+
+## Requirements
+
+- Python 3.10+
+- `pip install -r requirements.txt` (NiceGUI + pywebview)
+- Windows: WebView2 runtime (built into Windows 11) for native mode
+
+## Features
+
+- **Engine vs Engine** — pit two UCI engines against each other
+- **Human vs Engine** — play as White or Black against any UCI engine
+- **Tournaments** — Swiss (Buchholz tiebreaks), Round Robin (single/double),
+  and Knockout brackets, with a live board, standings, schedule and
+  per-game replay; every game is saved to the database
+- **Move Quality Analysis** — a Stockfish analyzer rates every move
+  (Book / Brilliant / Best / Excellent / Great / Good / Inaccuracy /
+  Mistake / Blunder); opening-book moves are labeled "Book"
+- **Eval Bar** — real-time centipawn evaluation display
+- **Opening Book** — ECO openings CSV, auto-detected and disk-cached;
+  pick any opening as a forced starting position
+- **Elo Ratings** — automatic rating tracking with interactive history charts
+- **Rankings / Statistics / Game History** — searchable tables with
+  medals for the top 3 and per-engine opening statistics
+- **PGN Viewer** — interactive replay with keyboard navigation, copy and
+  download
+- **Sprite-based UI** — all pieces, nav cards, medals, badges and icons
+  come from `assets/Chess_packs.png` (no emoji dependence)
 
 ## Project Structure
 
 ```
 Chess_Engine_Arena/
 │
-├── main.py                    # ← Run this to start the app
+├── main.py                    # ← Run this to start the app (NiceGUI entry)
 │
 ├── engines/                   # ← Your UCI chess engines go here
-│   ├── stockfish.exe          #     (e.g., Stockfish, Komodo, Lc0, Fruit)
-│   ├── gfruit.exe             #     gfruit.exe = default for "Play vs Engine"
-│   └── README.txt
+│   └── gfruit.exe             #     default opponent for "Play vs Engine"
 │
-├── analyzer/                  # ← Stockfish for move quality analysis
-│   ├── stockfish.exe          #     (auto-detected on startup)
-│   └── README.txt
+├── analyzer/                  # ← Stockfish for move-quality analysis
+│   ├── stockfish_18_x86-64.exe#     (auto-detected on startup)
+│   └── nn-*.nnue              #     NNUE network files (required by SF)
 │
 ├── openings/                  # ← ECO opening book CSV
 │   ├── openings_sheet.csv     #     (auto-detected on startup)
-│   └── README.txt
+│   └── openings_sheet.csv.cache.json   # auto-generated parse cache
+│
+├── assets/                    # Sprite sheet + sliced UI assets
+│   ├── Chess_packs.png        #   master sprite sheet
+│   ├── pieces/                #   12 chess-piece PNGs (board rendering)
+│   └── ui/                    #   nav cards, medals, badges, icons
 │
 ├── core/                      # Game logic & engine communication
-│   ├── __init__.py
-│   ├── board.py               #   Full chess rules engine
-│   ├── constants.py           #   App-wide constants, colours, piece data
+│   ├── board.py               #   full chess rules engine
+│   ├── constants.py           #   app-wide constants, colours, tiers
 │   ├── elo.py                 #   Elo rating computation
 │   ├── engine.py              #   UCI engine wrapper & analyzer
-│   ├── opening_book.py        #   ECO/opening CSV loader & lookup
-│   └── utils.py               #   Shared utility functions
+│   ├── opening_book.py        #   ECO CSV loader + lookup + disk cache
+│   └── utils.py               #   shared utilities (PGN, move quality…)
 │
-├── data/                      # Persistence layer
-│   ├── __init__.py
-│   └── database.py            #   SQLite game/stats database
+├── data/
+│   └── database.py            #   SQLite games/tournaments database
 │
-├── ui/                        # User interface (Tkinter)
-│   ├── __init__.py
-│   ├── app.py                 #   Main ChessGUI window (responsive)
-│   ├── dialogs.py             #   Reusable dialog windows
-│   ├── loading_screen.py      #   Startup splash / loader
-│   ├── theme.py               #   Centralized fonts, colours, styles
-│   ├── views.py               #   Rankings, stats, history, PGN viewer
-│   └── widgets.py             #   Shared widget factories
+├── webui/                     # User interface (NiceGUI)
+│   ├── session.py             #   GameSession — UI-agnostic game controller
+│   ├── main_page.py           #   main layout, config panel, startup loading
+│   ├── board.py               #   board component + eval bar (diffed updates)
+│   ├── views.py               #   rankings, stats, history, PGN viewer
+│   ├── dialogs.py             #   promotion, stop-game, opening picker…
+│   ├── tournament.py          #   tournament list/setup/live/history UI
+│   ├── widgets.py             #   sprite-icon helpers, loader overlay
+│   └── theme.py               #   colours + global CSS
 │
-├── tournament/                # Tournament system
-│   ├── __init__.py
-│   └── manager.py             #   Round-robin & bracket tournaments
+├── tournament/
+│   └── manager.py             #   tournament logic: formats, pairing, runner
 │
-├── chess_arena.db             # SQLite database (auto-created)
-├── ChessEngineArena.spec      # PyInstaller spec (optional)
-└── README.md
+├── requirements.txt
+└── readme.md
 ```
+
+The database lives at `~/.chess_arena/chess_arena.db` (auto-created) and is
+shared by regular games and tournaments.
 
 ## Where to Put Your Files
 
-| File Type               | Folder        | Auto-detected?                          |
-|--------------------------|---------------|-----------------------------------------|
-| Chess engines (.exe)     | `engines/`    | No — browse via the "…" button          |
-| Analyzer (Stockfish)     | `analyzer/`   | ✅ Yes, on startup                       |
-| Opening book (.csv)      | `openings/`   | ✅ Yes, on startup                       |
+| File Type              | Folder      | Auto-detected?                          |
+|------------------------|-------------|-----------------------------------------|
+| Chess engines (.exe)   | `engines/`  | ✅ Shown in the engine dropdown          |
+| Analyzer (Stockfish)   | `analyzer/` | ✅ Yes, on startup                       |
+| Opening book (.csv)    | `openings/` | ✅ Yes, on startup                       |
 
-### Analyzer (auto-detected filenames)
-Place any of these in `analyzer/` or `engines/`:
-- `stockfish.exe`
-- `stockfish_18_x86-64.exe`
-- `stockfish_x86-64.exe`
-- `stockfish` (Linux/Mac)
+Engines placed in `engines/`, `engine/`, `analyzer/` or `stockfish/` appear
+automatically in the **Engine dropdown**; anything else can be picked with
+the **…** browse button (a real file-explorer dialog in both native and
+browser modes).
+
+> **Stockfish note:** small Stockfish builds need their NNUE network files
+> (`nn-*.nnue`) next to the .exe. The app starts engines from their own
+> folder so these are found automatically, and the analyzer is probed at
+> startup — a build that can't search is reported instead of failing
+> silently.
 
 ### Opening Book (auto-detected filenames)
 Place any of these in `openings/`:
 - `openings_sheet.csv` (preferred)
 - `openings.csv`
 
-### Game Engines
-Place engine executables in `engines/`. You load them manually via the
-browse button in the Configuration panel. For "Play vs Engine" mode,
-`engines/gfruit.exe` is auto-loaded as the default opponent if present.
+Delete the `.cache.json` next to it to force a re-parse (it also
+invalidates automatically when the CSV changes).
 
-## Running
+## Building a Standalone .exe
 
-```bash
-python main.py
-```
+NiceGUI ships its own PyInstaller wrapper that knows all the hidden
+imports:
 
-## Requirements
-
-- Python 3.8+
-- Tkinter (included with most Python installations)
-- No external pip packages required
-
-## Features
-
-- **Engine vs Engine** — Pit two UCI engines against each other
-- **Human vs Engine** — Play as White or Black against any UCI engine
-- **Move Quality Analysis** — Stockfish analyzer rates every move
-- **Eval Bar** — Real-time centipawn evaluation display
-- **Opening Book** — ECO openings CSV with automatic detection
-- **Elo Ratings** — Automatic rating tracking with history charts
-- **Tournaments** — Round-robin and bracket tournament modes
-- **PGN Viewer** — Interactive game replay with board navigation
-- **Responsive Layout** — Resizable window with dynamic board scaling
-
-
-## Full Build Command (copy-paste)
-
-Windows CMD:
 ```cmd
-python -m PyInstaller --onefile --windowed --icon=assets/logo.ico --name="ChessEngineArena" --add-data="openings;opening" --add-data="analyzer;analyzer" --add-data="engines;gfruit.exe" --add-data="assets;assets" main.py
+nicegui-pack --onefile --windowed --name "ChessEngineArena" ^
+  --add-data "assets;assets" ^
+  --add-data "openings;openings" ^
+  --add-data "analyzer;analyzer" ^
+  --add-data "engines;engines" ^
+  main.py
 ```
+
+(Or run plain `pyinstaller` with `ChessEngineArena.spec` as a starting
+point — but `nicegui-pack` is the supported path for NiceGUI apps.)

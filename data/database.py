@@ -183,105 +183,128 @@ class Database:
             return []
 
     def get_engine_stats(self, search_query=''):
+        """
+        Aggregate W/D/L stats per engine in a single pass over the games
+        table (the previous version issued 4 queries per engine).
+
+        Notes
+        -----
+        - Engine names are normalised in Python so legacy rows that were
+          stored with color suffixes still aggregate correctly.
+        - Games without a decisive/draw result ('*', aborted) are skipped,
+          matching how Elo is computed.
+        """
         try:
             conn   = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-
-            cursor.execute('SELECT DISTINCT white_engine FROM games')
-            whites = {normalize_engine_name(r[0]) for r in cursor.fetchall()}
-            cursor.execute('SELECT DISTINCT black_engine FROM games')
-            blacks = {normalize_engine_name(r[0]) for r in cursor.fetchall()}
-            engines = sorted(whites | blacks)
-
-            if search_query:
-                q = search_query.lower()
-                engines = [e for e in engines if q in e.lower()]
-
-            stats = []
-            for engine in engines:
-                cursor.execute(
-                    'SELECT COUNT(*) FROM games '
-                    'WHERE white_engine = ? OR black_engine = ?',
-                    (engine, engine))
-                matches = cursor.fetchone()[0]
-
-                cursor.execute(
-                    "SELECT COUNT(*) FROM games "
-                    "WHERE white_engine = ? AND result = '1-0'",
-                    (engine,))
-                wins_white = cursor.fetchone()[0]
-
-                cursor.execute(
-                    "SELECT COUNT(*) FROM games "
-                    "WHERE black_engine = ? AND result = '0-1'",
-                    (engine,))
-                wins_black = cursor.fetchone()[0]
-
-                wins  = wins_white + wins_black
-                cursor.execute(
-                    "SELECT COUNT(*) FROM games "
-                    "WHERE (white_engine = ? OR black_engine = ?) "
-                    "AND result = '1/2-1/2'",
-                    (engine, engine))
-                draws = cursor.fetchone()[0]
-                loses = matches - wins - draws
-                win_rate = (wins / matches * 100) if matches > 0 else 0
-
-                stats.append({
-                    'engine':   engine,
-                    'matches':  matches,
-                    'wins':     wins,
-                    'draws':    draws,
-                    'loses':    loses,
-                    'win_rate': win_rate,
-                })
-
+            cursor.execute('SELECT white_engine, black_engine, result FROM games')
+            rows = cursor.fetchall()
             conn.close()
-            return stats
         except Exception as e:
             print(f"[Database] get_engine_stats error: {e}")
             return []
 
+        agg = {}
+
+        def rec(name):
+            return agg.setdefault(
+                normalize_engine_name(name),
+                {'matches': 0, 'wins': 0, 'draws': 0, 'loses': 0})
+
+        for white, black, result in rows:
+            if result not in ('1-0', '0-1', '1/2-1/2'):
+                continue   # aborted / unfinished games don't count
+            w, b = rec(white), rec(black)
+            w['matches'] += 1
+            b['matches'] += 1
+            if result == '1-0':
+                w['wins']  += 1
+                b['loses'] += 1
+            elif result == '0-1':
+                b['wins']  += 1
+                w['loses'] += 1
+            else:
+                w['draws'] += 1
+                b['draws'] += 1
+
+        engines = sorted(agg)
+        if search_query:
+            q = search_query.lower()
+            engines = [e for e in engines if q in e.lower()]
+
+        return [
+            {
+                'engine':   engine,
+                'win_rate': (agg[engine]['wins'] / agg[engine]['matches'] * 100)
+                            if agg[engine]['matches'] else 0.0,
+                **agg[engine],
+            }
+            for engine in engines
+        ]
+
+    @staticmethod
+    def _games_where(filter_engine=None, search_query='', source_filter=None):
+        """Build the shared WHERE clause + params for game queries."""
+        params = []
+        conditions = []
+        if filter_engine:
+            norm = normalize_engine_name(filter_engine)
+            conditions.append('(white_engine = ? OR black_engine = ?)')
+            params.extend([norm, norm])
+        if source_filter:
+            conditions.append("COALESCE(source, 'regular') = ?")
+            params.append(source_filter)
+        if search_query and search_query.strip():
+            q = f'%{search_query.strip()}%'
+            conditions.append(
+                '(white_engine LIKE ? OR black_engine LIKE ? OR result LIKE ? '
+                'OR reason LIKE ? OR date LIKE ?)')
+            params.extend([q] * 5)
+        where = (' WHERE ' + ' AND '.join(conditions)) if conditions else ''
+        return where, params
+
     def get_all_games(self, filter_engine=None, search_query='',
-                      source_filter=None):
+                      source_filter=None, limit=None):
+        """
+        Fetch games newest-first. Search runs in SQL and *limit* caps the
+        result set so huge databases never flood the query or the UI.
+        """
         try:
             conn   = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-
-            base_query = '''
+            where, params = self._games_where(
+                filter_engine, search_query, source_filter)
+            query = ('''
                 SELECT id, white_engine, black_engine, result, reason,
                        date, time, move_count, duration_seconds,
                        COALESCE(source, 'regular') as source
-                FROM games
-            '''
-            params = []
-            conditions = []
-
-            if filter_engine:
-                norm = normalize_engine_name(filter_engine)
-                conditions.append('(white_engine = ? OR black_engine = ?)')
-                params.extend([norm, norm])
-
-            if source_filter:
-                conditions.append('source = ?')
-                params.append(source_filter)
-
-            if conditions:
-                base_query += ' WHERE ' + ' AND '.join(conditions)
-
-            base_query += ' ORDER BY id DESC'
-            cursor.execute(base_query, params)
+                FROM games''' + where + ' ORDER BY id DESC')
+            if limit:
+                query += ' LIMIT ?'
+                params = params + [int(limit)]
+            cursor.execute(query, params)
             games = cursor.fetchall()
             conn.close()
-
-            if search_query:
-                q = search_query.lower()
-                games = [g for g in games
-                         if q in ' '.join(str(v) for v in g).lower()]
             return games
         except Exception as e:
             print(f"[Database] get_all_games error: {e}")
             return []
+
+    def count_games(self, filter_engine=None, search_query='',
+                    source_filter=None):
+        """Total games matching the same filters as get_all_games."""
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            where, params = self._games_where(
+                filter_engine, search_query, source_filter)
+            cursor.execute('SELECT COUNT(*) FROM games' + where, params)
+            n = cursor.fetchone()[0]
+            conn.close()
+            return n
+        except Exception as e:
+            print(f"[Database] count_games error: {e}")
+            return 0
 
     def get_game_pgn(self, game_id):
         """
@@ -430,19 +453,22 @@ class Database:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            cursor.execute("SELECT pgn, result FROM games")
+            rows = cursor.fetchall()
+            conn.close()
+
+            # Parse the Opening tag once per game, then aggregate per color.
+            parsed = []
+            for pgn, res in rows:
+                m = re.search(r'\[Opening\s+"([^"]+)"\]', pgn or '')
+                opening = m.group(1).strip() if m else "Unknown / No Opening"
+                parsed.append((opening, res))
 
             for color, win_result in [('as_white', '1-0'), ('as_black', '0-1')]:
-                cursor.execute("SELECT pgn, result FROM games")
-                rows = cursor.fetchall()
-
                 opening_counts = {}
-                for pgn, res in rows:
-                    m = re.search(r'\[Opening\s+"([^"]+)"\]', pgn or '')
-                    opening = m.group(1).strip() if m else "Unknown / No Opening"
-                    if opening not in opening_counts:
-                        opening_counts[opening] = {'games': 0, 'wins': 0,
-                                                   'draws': 0, 'losses': 0}
-                    d = opening_counts[opening]
+                for opening, res in parsed:
+                    d = opening_counts.setdefault(
+                        opening, {'games': 0, 'wins': 0, 'draws': 0, 'losses': 0})
                     d['games'] += 1
                     if res == win_result:
                         d['wins'] += 1
@@ -468,7 +494,6 @@ class Database:
                     }
                     for name, d in sorted_openings
                 ]
-            conn.close()
         except Exception as e:
             print(f"[Database] get_opening_stats_all error: {e}")
         return result

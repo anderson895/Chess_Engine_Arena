@@ -29,25 +29,27 @@ INFO_BG  = "#0A0A18"
 
 # ── Move quality colours ──────────────────────────────────
 QUALITY_COLORS = {
-    "Brilliant": "#1BECA0",
-    "Best":      "#5BC0EB",
-    "Excellent": "#7FFF00",
-    "Great":     "#A8D8A8",
-    "Good":      "#FFDD57",
-    "Mistake":   "#FFA500",
-    "Blunder":   "#FF4444",
+    "Book":       "#00BFFF",
+    "Brilliant":  "#1BECA0",
+    "Best":       "#5BC0EB",
+    "Excellent":  "#7FFF00",
+    "Great":      "#A8D8A8",
+    "Good":       "#FFDD57",
+    "Inaccuracy": "#E8C547",
+    "Mistake":    "#FFA500",
+    "Blunder":    "#FF4444",
 }
 
 # ── Rank tiers ────────────────────────────────────────────
 RANK_TIERS = [
-    (2900, "💻 Super Computer",  "#FF0000"),
-    (2700, "🌟 Super GM",        "#FFE600"),
-    (2400, "🏆 GM",              "#57FF35"),
-    (2000, "📘 IM",              "#42FF8A"),
-    (1800, "🎯 FM",              "#4274FF"),
-    (1600, "📝 Candidate",       "#CF87EB"),
-    (1400, "🔰 Beta",            "#AAAAAA"),
-    (   0, "❓ Unrated",          "#DBDBDB"),
+    (2900, "Super Computer", "#FF0000"),
+    (2700, "Super GM",       "#FFE600"),
+    (2400, "GM",             "#57FF35"),
+    (2000, "IM",             "#42FF8A"),
+    (1800, "FM",             "#4274FF"),
+    (1600, "Candidate",      "#CF87EB"),
+    (1400, "Beta",           "#AAAAAA"),
+    (   0, "Unrated",        "#DBDBDB"),
 ]
 
 # ── Piece movement directions ─────────────────────────────

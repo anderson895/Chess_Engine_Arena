@@ -388,7 +388,9 @@ class Board:
 
         cap = ep_removed or (target if target != '.' else None)
         if cap and cap != '.':
-            if self.turn == 'w':
+            # self.turn has already flipped to the next player,
+            # so if it is now Black's turn, White made the capture.
+            if self.turn == 'b':
                 self.cap_white.append(cap)
             else:
                 self.cap_black.append(cap)

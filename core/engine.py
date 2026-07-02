@@ -2,6 +2,7 @@
 #  engine.py — UCI engine wrapper and dedicated analyzer
 # ═══════════════════════════════════════════════════════════
 
+import os
 import queue
 import subprocess
 import sys
@@ -40,6 +41,11 @@ class UCIEngine:
             universal_newlines=True,
             bufsize=1,
         )
+        # Run the engine from its own directory so it can find data files
+        # placed next to the binary (NNUE networks, opening books, …).
+        eng_dir = os.path.dirname(os.path.abspath(self.path))
+        if os.path.isdir(eng_dir):
+            kw['cwd'] = eng_dir
         if sys.platform == 'win32':
             kw['creationflags'] = subprocess.CREATE_NO_WINDOW
         try:
@@ -62,16 +68,28 @@ class UCIEngine:
 
     def stop(self):
         """Send quit command and terminate the engine subprocess."""
-        if self.process:
-            try:
-                self._send("stop"); time.sleep(0.1)
-                self._send("quit")
-                self.process.terminate()
-                self.process.wait(timeout=3)
-            except Exception:
-                pass
-            self.process = None
-            self.ready   = False
+        proc = self.process
+        self.process = None
+        self.ready   = False
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                try:
+                    proc.stdin.write("stop\nquit\n")
+                    proc.stdin.flush()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=1.5)
+                except subprocess.TimeoutExpired:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=1.5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+        except Exception:
+            pass
 
     @property
     def alive(self):
@@ -175,16 +193,18 @@ class UCIEngine:
 
         return best
 
-    def get_eval(self, moves_str, movetime_ms=200):
+    def _search_score(self, moves_str, movetime_ms):
         """
-        Ask the engine to evaluate a position and return the centipawn score.
+        Run a fixed-time search and return the last reported score.
 
         Returns
         -------
-        int | None  — centipawn score from White's perspective, or None.
+        (score: int | None, score_type: str)
+            Score is from the *side to move*'s perspective, as reported
+            by the engine. score_type is 'cp' or 'mate'.
         """
         if not self.ready or not self.alive:
-            return None
+            return None, 'cp'
         self._drain()
 
         cmd = (f"position startpos moves {moves_str}"
@@ -213,11 +233,35 @@ class UCIEngine:
             elif line.startswith('bestmove'):
                 break
 
-        if last_score is None:
-            return None
-        if last_score_type == 'mate':
-            return 30000 if last_score > 0 else -30000
-        return last_score
+        return last_score, last_score_type
+
+    def get_eval(self, moves_str, movetime_ms=200):
+        """
+        Ask the engine to evaluate a position and return the centipawn score.
+
+        Returns
+        -------
+        int | None  — centipawn score from White's perspective, or None.
+        """
+        cp, _ = self._eval_white_pov(moves_str, movetime_ms)
+        return cp
+
+    def _eval_white_pov(self, moves_str, movetime_ms):
+        """Evaluate a position; return (cp, score_type) from White's perspective."""
+        score, score_type = self._search_score(moves_str, movetime_ms)
+        if score is None:
+            return None, None
+
+        if score_type == 'mate':
+            cp = 30000 if score > 0 else -30000
+        else:
+            cp = score
+
+        # Engines report from the side to move; flip when Black is to move.
+        n_moves = len(moves_str.split()) if moves_str else 0
+        if n_moves % 2 == 1:
+            cp = -cp
+        return cp, score_type
 
     # ── Info parsing ──────────────────────────────────────
 
@@ -267,6 +311,20 @@ class AnalyzerEngine(UCIEngine):
     analysis.  Returns scores always from White's perspective.
     """
 
+    def probe(self):
+        """
+        Run a minimal search to verify the engine can actually evaluate.
+
+        Some builds pass the UCI handshake but die on their first search
+        (e.g. Stockfish without its NNUE network file next to the binary).
+
+        Returns
+        -------
+        bool — True if the engine produced a score and is still alive.
+        """
+        cp, _ = self.eval_position("", movetime_ms=60)
+        return cp is not None and self.alive
+
     def eval_position(self, moves_str, movetime_ms=150):
         """
         Evaluate a position and return the score from White's perspective.
@@ -284,50 +342,4 @@ class AnalyzerEngine(UCIEngine):
             cp is the centipawn score from White's perspective.
             score_type is 'cp' or 'mate'.
         """
-        if not self.ready or not self.alive:
-            return None, None
-        self._drain()
-
-        cmd = (f"position startpos moves {moves_str}"
-               if moves_str else "position startpos")
-        self._send(cmd)
-        self._send(f"go movetime {movetime_ms}")
-
-        end  = time.time() + movetime_ms / 1000 + 5
-        last_score      = None
-        last_score_type = 'cp'
-
-        # Determine which side is to move (needed to flip the engine score)
-        n_moves     = len(moves_str.split()) if moves_str else 0
-        side_to_move = 'w' if n_moves % 2 == 0 else 'b'
-
-        while time.time() < end:
-            try:
-                line = self.q.get(timeout=0.2)
-            except queue.Empty:
-                if self.process and self.process.poll() is not None:
-                    break
-                continue
-            if not line:
-                continue
-            if line.startswith('info '):
-                info = self._parse_info(line)
-                if 'score' in info:
-                    last_score      = info['score']
-                    last_score_type = info.get('score_type', 'cp')
-            elif line.startswith('bestmove'):
-                break
-
-        if last_score is None:
-            return None, None
-
-        # Engine always reports score for the side to move; convert to White's POV
-        if last_score_type == 'mate':
-            cp = 30000 if last_score > 0 else -30000
-        else:
-            cp = last_score
-
-        if side_to_move == 'b':
-            cp = -cp
-
-        return cp, last_score_type
+        return self._eval_white_pov(moves_str, movetime_ms)

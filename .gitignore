@@ -1,1 +1,17 @@
-/venv/**/*
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.pyc
+venv/
+
+# ── Build artifacts ───────────────────────────────────────
+build/
+dist/
+*.zip
+*.profraw
+
+# ── Large engine data (see analyzer/README.txt for links) ─
+*.nnue
+
+# ── Generated caches / local tools ────────────────────────
+openings/*.cache.json
+.claude/

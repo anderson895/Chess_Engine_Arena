@@ -3,6 +3,7 @@
 # ═══════════════════════════════════════════════════════════
 
 import csv
+import json
 import os
 from core.board import Board
 
@@ -24,6 +25,11 @@ class OpeningBook:
     # ── Loading ───────────────────────────────────────────
 
     def _load(self, path):
+        # SAN→UCI conversion of thousands of lines is expensive, so the
+        # parsed book is cached on disk keyed by the CSV's mtime/size.
+        # First load: seconds; every load after that: near-instant.
+        if self._load_cache(path):
+            return
         try:
             with open(path, newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
@@ -39,8 +45,44 @@ class OpeningBook:
                         self._entries.append((tuple(uci_seq), eco, name))
             # Longest sequences first so lookup returns the most specific opening
             self._entries.sort(key=lambda x: len(x[0]), reverse=True)
+            self._save_cache(path)
         except Exception as e:
             print(f"[OpeningBook] Failed to load {path}: {e}")
+
+    @staticmethod
+    def _cache_path(csv_path):
+        return csv_path + ".cache.json"
+
+    def _load_cache(self, path):
+        """Load the pre-parsed book if the cache matches the CSV. → bool"""
+        try:
+            st = os.stat(path)
+            cache = self._cache_path(path)
+            if not os.path.isfile(cache):
+                return False
+            with open(cache, encoding='utf-8') as f:
+                data = json.load(f)
+            if (data.get('mtime') != st.st_mtime
+                    or data.get('size') != st.st_size):
+                return False
+            self._entries = [(tuple(seq), eco, name)
+                             for seq, eco, name in data['entries']]
+            return len(self._entries) > 0
+        except Exception:
+            return False
+
+    def _save_cache(self, path):
+        try:
+            st = os.stat(path)
+            with open(self._cache_path(path), 'w', encoding='utf-8') as f:
+                json.dump({
+                    'mtime': st.st_mtime,
+                    'size': st.st_size,
+                    'entries': [[list(seq), eco, name]
+                                for seq, eco, name in self._entries],
+                }, f)
+        except Exception as e:
+            print(f"[OpeningBook] Could not write cache: {e}")
 
     def _tokens_to_uci(self, tokens):
         """Convert a token list (SAN or UCI) to a list of UCI move strings."""
@@ -110,6 +152,25 @@ class OpeningBook:
             if len(played) >= n and played[:n] == seq:
                 return eco, name
         return None, None
+
+    def in_book(self, uci_moves):
+        """
+        Return True while the played sequence is still opening theory,
+        i.e. it is a prefix of (or equal to) at least one known book line.
+
+        Parameters
+        ----------
+        uci_moves : list[str]
+            The game's move history as UCI strings.
+        """
+        played = tuple(uci_moves)
+        n = len(played)
+        if n == 0:
+            return True
+        for seq, _, _ in self._entries:
+            if len(seq) >= n and seq[:n] == played:
+                return True
+        return False
 
     # ── Properties ────────────────────────────────────────
 

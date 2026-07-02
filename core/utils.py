@@ -45,7 +45,9 @@ def valid(r, c):
 
 def normalize_engine_name(name):
     """Strip color suffixes so the same engine is always one record."""
-    for suffix in [' (White)', ' (Black)', ' (white)', ' (black)',  
+    if not name:
+        return ''
+    for suffix in [' (White)', ' (Black)', ' (white)', ' (black)',
                    '(White)', '(Black)', '(white)', '(black)']:
         if name.endswith(suffix):
             name = name[:-len(suffix)].strip()
@@ -62,10 +64,11 @@ def get_db_path():
 
 def get_tier(rating):
     """Return the (label, color) tier tuple for a given Elo rating."""
-    for threshold, label, color in RANK_TIERS:
-        if rating >= threshold:
-            return label, color
-    return "🌱 Novice", "#90EE90"
+    if rating is not None:
+        for threshold, label, color in RANK_TIERS:
+            if rating >= threshold:
+                return label, color
+    return "Novice", "#90EE90"
 
 
 def classify_move_quality(cp_before, cp_after, is_white_moving):
@@ -87,17 +90,27 @@ def classify_move_quality(cp_before, cp_after, is_white_moving):
     """
     if cp_before is None or cp_after is None:
         return None
+
+    # Clamp mate scores (±30000) so "already winning → still winning"
+    # doesn't register as a huge swing.
+    cp_before = max(-1000, min(1000, cp_before))
+    cp_after  = max(-1000, min(1000, cp_after))
+
     if is_white_moving:
         loss = cp_before - cp_after
     else:
         loss = cp_after - cp_before
 
-    if   loss <= -50:  return "Brilliant"
-    elif loss <=   0:  return "Best"
-    elif loss <=  10:  return "Excellent"
-    elif loss <=  25:  return "Great"
-    elif loss <=  50:  return "Good"
-    elif loss <= 100:  return "Mistake"
+    # Thresholds roughly follow the cp-loss scale used by popular sites
+    # (inaccuracy ≈ 50–100, mistake ≈ 100–300, blunder ≈ 300+). Short
+    # analysis searches carry noise, so small swings must stay "good".
+    if   loss <= -30:  return "Brilliant"
+    elif loss <=   5:  return "Best"
+    elif loss <=  20:  return "Excellent"
+    elif loss <=  40:  return "Great"
+    elif loss <=  90:  return "Good"
+    elif loss <= 150:  return "Inaccuracy"
+    elif loss <= 300:  return "Mistake"
     else:              return "Blunder"
 
 

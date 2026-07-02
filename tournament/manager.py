@@ -1436,7 +1436,17 @@ class TournamentRunner:
                             move_qualities.append(quality)
                 except Exception:
                     pass
-            
+
+            # Opening-book moves are theory — grade them as "Book"
+            if (book is not None and getattr(book, 'loaded', False)
+                    and hasattr(book, 'in_book')
+                    and book.in_book(board.uci_moves_list())):
+                quality = "Book"
+                if len(move_qualities) >= len(board.move_history) and move_qualities:
+                    move_qualities[-1] = "Book"
+                else:
+                    move_qualities.append("Book")
+
             # If no analyzer or no quality computed, add None placeholder
             if quality is None and len(move_qualities) < len(board.move_history):
                 move_qualities.append(None)
