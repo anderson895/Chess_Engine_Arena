@@ -11,11 +11,15 @@ def get_base_path():
     """
     Get the base path for resources, handling PyInstaller bundles.
     
-    When running from source: returns the project root directory
-    When running as PyInstaller exe: returns the directory containing the exe
+    - Onefile PyInstaller build: returns the temp extraction folder (_MEIPASS)
+    - Onedir PyInstaller build / frozen fallback: returns exe's folder
+    - Running from source: returns the project root directory
     """
     if getattr(sys, 'frozen', False):
-        # Running as compiled executable (PyInstaller)
+        # PyInstaller onefile mode extracts data files here at runtime
+        if hasattr(sys, '_MEIPASS'):
+            return sys._MEIPASS
+        # Fallback for onedir builds
         return os.path.dirname(sys.executable)
     else:
         # Running from source - go up from core/ to project root

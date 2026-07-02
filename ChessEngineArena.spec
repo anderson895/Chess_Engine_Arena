@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('D:\\Chess_engine\\Chess_Engine_Arena\\venv\\lib\\site-packages\\nicegui', 'nicegui'), ('assets', 'assets'), ('openings', 'openings'), ('analyzer', 'analyzer'), ('engines', 'engines')],
+    datas=[('D:\\Chess_engine\\Chess_Engine_Arena\\venv\\Lib\\site-packages\\nicegui', 'nicegui'), ('assets', 'assets'), ('openings', 'openings'), ('analyzer', 'analyzer'), ('engines', 'engines')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
