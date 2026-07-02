@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('openings', 'openings'), ('analyzer', 'analyzer'), ('engines', 'engines'), ('assets', 'assets')],
+    datas=[('D:\\Chess_engine\\Chess_Engine_Arena\\venv\\lib\\site-packages\\nicegui', 'nicegui'), ('assets', 'assets'), ('openings', 'openings'), ('analyzer', 'analyzer'), ('engines', 'engines')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets\\logo.ico'],
 )
