@@ -19,6 +19,56 @@ COLOR_GREEN   = "#1BECA0"
 COLOR_ORANGE  = "#FF8800"
 COLOR_RED     = "#FF4444"
 
+# ── Selectable piece designs (folder under assets/ → label) ──
+PIECE_SETS = {
+    "pieces":   "Classic",
+    "pieces_1": "Golden Oak",
+    "pieces_2": "Fantasy",
+    "pieces_3": "Marble",
+}
+_piece_state = {"folder": "pieces"}
+
+
+def piece_folder():
+    return _piece_state["folder"]
+
+
+def set_piece_folder(folder):
+    if folder in PIECE_SETS:
+        _piece_state["folder"] = folder
+
+
+def piece_src(code):
+    """URL of a piece sprite in the active design, e.g. piece_src('wK')."""
+    return f"/assets/{piece_folder()}/{code}.png"
+
+
+# ── Selectable board styles (key → label, light sq, dark sq) ─
+BOARD_THEMES = {
+    "walnut":  ("Walnut",  LIGHT_SQ,  DARK_SQ),      # original default
+    "green":   ("Green",   "#EBECD0", "#739552"),
+    "blue":    ("Blue",    "#DEE3E6", "#8CA2AD"),
+    "slate":   ("Slate",   "#CACDD1", "#5F6B77"),
+    "coral":   ("Coral",   "#F1E9DD", "#B37360"),
+    "midnight": ("Midnight", "#7A8494", "#3D4757"),
+}
+_board_state = {"theme": "walnut"}
+
+
+def board_theme():
+    return _board_state["theme"]
+
+
+def set_board_theme(key):
+    if key in BOARD_THEMES:
+        _board_state["theme"] = key
+
+
+def board_colors():
+    _, light, dark = BOARD_THEMES[_board_state["theme"]]
+    return light, dark
+
+
 GLOBAL_CSS = f"""
 :root {{
     --bg: {BG};
@@ -220,4 +270,14 @@ def apply_theme():
               dark=BG, positive=COLOR_GREEN, negative=COLOR_RED,
               warning=COLOR_ORANGE, info=COLOR_BLUE)
     ui.add_css(GLOBAL_CSS)
+    light, dark = board_colors()
+    ui.add_css(f":root {{ --light-sq: {light}; --dark-sq: {dark}; }}")
     ui.query("body").style(f"background: {BG}")
+
+
+def push_board_colors():
+    """Apply the active board style to the connected client immediately."""
+    light, dark = board_colors()
+    ui.run_javascript(
+        f"document.documentElement.style.setProperty('--light-sq', '{light}');"
+        f"document.documentElement.style.setProperty('--dark-sq', '{dark}');")

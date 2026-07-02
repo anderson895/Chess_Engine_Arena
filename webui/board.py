@@ -10,11 +10,12 @@ import math
 
 from nicegui import ui
 
-PIECE_URL = {
-    c: f"/assets/pieces/{'w' if c.isupper() else 'b'}{c.upper()}.png"
-    for c in "PNBRQKpnbrqk"
-}
-KING_ICON = {"w": PIECE_URL["K"], "b": PIECE_URL["k"]}
+from webui.theme import piece_src
+
+
+def piece_url(pc):
+    """Sprite URL for a board piece letter, honoring the active design."""
+    return piece_src(("w" if pc.isupper() else "b") + pc.upper())
 
 
 def uci_to_squares(uci):
@@ -86,6 +87,12 @@ class BoardView:
         self.flipped = not self.flipped
         self.refresh()
 
+    def redraw_pieces(self):
+        """Re-apply every piece sprite (the piece design changed)."""
+        for cell in self._squares:
+            if cell.get("pc"):
+                cell["piece"].props(f'src="{piece_url(cell["pc"])}"')
+
     # ── Rendering ─────────────────────────────────────────
 
     def refresh(self):
@@ -133,7 +140,7 @@ class BoardView:
                 new_pc = pc if has_piece else None
                 if cell.get("pc") != new_pc:
                     if new_pc:
-                        cell["piece"].props(f'src="{PIECE_URL.get(new_pc)}"')
+                        cell["piece"].props(f'src="{piece_url(new_pc)}"')
                         cell["piece"].set_visibility(True)
                     else:
                         cell["piece"].set_visibility(False)

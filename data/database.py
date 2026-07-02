@@ -498,6 +498,45 @@ class Database:
             print(f"[Database] get_opening_stats_all error: {e}")
         return result
 
+    def get_top_openings(self):
+        """
+        Return each engine's most-played opening (both colors combined).
+
+        Returns
+        -------
+        dict: {engine_name: {'opening': str, 'games': int}}
+        Games without an [Opening "..."] tag are ignored, so an engine that
+        never played a book line simply has no entry.
+        """
+        import re
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT white_engine, black_engine, pgn FROM games')
+            rows = cursor.fetchall()
+            conn.close()
+        except Exception as e:
+            print(f"[Database] get_top_openings error: {e}")
+            return {}
+
+        counts = {}   # engine -> {opening: games}
+        for white, black, pgn in rows:
+            m = re.search(r'\[Opening\s+"([^"]+)"\]', pgn or '')
+            if not m:
+                continue
+            opening = m.group(1).strip()
+            for name in (white, black):
+                eng = normalize_engine_name(name)
+                per = counts.setdefault(eng, {})
+                per[opening] = per.get(opening, 0) + 1
+
+        return {
+            eng: {'opening': top[0], 'games': top[1]}
+            for eng, per in counts.items()
+            for top in [max(per.items(), key=lambda x: x[1])]
+        }
+
     def get_tournament_list(self):
         """
         Return a summary list of all tournaments stored in the database.

@@ -41,8 +41,9 @@ def icon(name, size=16, cls=""):
 
 
 def piece(code, size=18):
-    """Inline chess-piece sprite, e.g. piece('wK')."""
-    return ui.element("img").props(f'src="/assets/pieces/{code}.png"') \
+    """Inline chess-piece sprite in the active design, e.g. piece('wK')."""
+    from webui.theme import piece_src
+    return ui.element("img").props(f'src="{piece_src(code)}"') \
         .style(f"height: {size}px; width: auto;") \
         .classes("pointer-events-none")
 

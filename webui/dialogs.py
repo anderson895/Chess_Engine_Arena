@@ -10,7 +10,7 @@ from nicegui import ui
 from core.utils import normalize_engine_name, get_tier
 from core.constants import QUALITY_COLORS
 from webui import widgets
-from webui.theme import COLOR_BLUE
+from webui.theme import COLOR_BLUE, piece_src
 
 
 # ═══════════════════════════════════════════════════════════
@@ -28,7 +28,7 @@ async def ask_promotion(color):
                     with ui.button(on_click=lambda p=p: dialog.submit(p)) \
                             .props("flat"):
                         ui.element("img").props(
-                            f'src="/assets/pieces/{color}{p.upper()}.png"') \
+                            f'src="{piece_src(color + p.upper())}"') \
                             .style("height: 56px; width: auto;")
                     ui.label(name).classes("text-xs text-gray-500")
     result = await dialog
@@ -295,6 +295,9 @@ def show_game_over(session, result, reason, winner_name,
             if q not in ("Good", "Book"))
         if summary:
             ui.label(f"Move quality: {summary}").classes("text-xs text-gray-400")
+
+        ui.label("⇄ Colors swapped for the next game") \
+            .classes("text-xs italic").style(f"color: {COLOR_BLUE}")
 
         with ui.row().classes("w-full justify-center gap-2 mt-2"):
             if on_new_game:

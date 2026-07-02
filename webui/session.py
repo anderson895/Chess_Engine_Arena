@@ -391,6 +391,7 @@ class GameSession:
             self._emit("status",
                        f"Stopped — {clean} wins ({result})" if clean
                        else f"Stopped — {result}  ({reason})")
+            self.swap_colors()      # reversed colors for the rematch
             self._emit("game_over", result, reason, winner)
         self._emit("banners")
 
@@ -412,6 +413,32 @@ class GameSession:
         self._emit("quality", None)
         self._emit("board_changed")
         self._emit("status", "New game — load engines and press START")
+
+    def swap_colors(self):
+        """Swap sides for the next game (between games only).
+
+        EvE: engine1/engine2 exchange colors.  HvE: the human's color flips.
+        """
+        if self.game_running:
+            return False
+        if self.play_mode == self.MODE_HVE:
+            self.player_color = ("black" if self.player_color == "white"
+                                 else "white")
+            self._emit("engine_log",
+                       f"⇄ Colors swapped — you now play "
+                       f"{self.player_color.capitalize()}", "E")
+            self._emit("banners")
+            return True
+        self.e1_path, self.e2_path = self.e2_path, self.e1_path
+        old_black = normalize_engine_name(self.e1_name) or "Engine 1"
+        old_white = normalize_engine_name(self.e2_name) or "Engine 2"
+        self.e1_name = f"{old_white} (Black)"
+        self.e2_name = f"{old_black} (White)"
+        self._emit("engine_log",
+                   f"⇄ Colors swapped — {old_white} is now Black, "
+                   f"{old_black} is now White", "E")
+        self._emit("banners")
+        return True
 
     async def kill_engines(self):
         for eng in (self.engine1, self.engine2):
@@ -657,6 +684,7 @@ class GameSession:
         msg = (f"{normalize_engine_name(winner)} wins by {reason}"
                if winner else f"{result} — {reason}")
         self._emit("status", msg)
+        self.swap_colors()          # reversed colors for the rematch
         self._emit("banners")
         self._emit("game_over", result, reason, winner)
 

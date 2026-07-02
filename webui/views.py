@@ -32,22 +32,23 @@ _RANK_CELL_SLOT = """
 
 
 # ═══════════════════════════════════════════════════════════
-#  Rankings
+#  Rankings & Statistics (merged view)
 # ═══════════════════════════════════════════════════════════
 
 def show_rankings(session):
-    with ui.dialog() as dialog, ui.card().classes(
-            "arena-panel w-[900px] max-w-full h-[660px] flex flex-col"):
-        widgets.heading("ic_trophy", "ENGINE RANKINGS")
-        ui.label("Elo ratings from all recorded games — double-click a row "
-                 "for Elo history").classes("text-xs text-gray-500")
+    with ui.dialog().props("maximized") as dialog, ui.card().classes(
+            "arena-panel w-full h-full flex flex-col"):
+        widgets.heading("ic_trophy", "RANKINGS & STATISTICS")
+        ui.label("Elo ratings and W/D/L from all recorded games — use the "
+                 "History buttons for an engine's games and Elo chart") \
+            .classes("text-xs text-gray-500")
 
         with ui.row().classes("gap-2 flex-wrap"):
             for threshold, label, color in RANK_TIERS:
                 txt = f"{label} ≥{threshold}" if threshold > 0 else label
                 ui.label(txt).classes("text-xs").style(f"color: {color}")
 
-        search = widgets.search_input("Filter engines or tiers…") \
+        search = widgets.search_input("Filter engines, tiers or openings…") \
             .classes("w-full")
 
         columns = [
@@ -60,31 +61,52 @@ def show_rankings(session):
             {"name": "draws",   "label": "D",     "field": "draws", "align": "center"},
             {"name": "loses",   "label": "L",     "field": "loses", "align": "center"},
             {"name": "wr",      "label": "WR%",   "field": "wr",    "align": "center", "sortable": True},
+            {"name": "top_opening", "label": "Top Opening",
+             "field": "top_opening", "align": "left", "sortable": True},
+            {"name": "actions", "label": "History", "field": "engine",
+             "align": "center"},
         ]
         table = ui.table(columns=columns, rows=[], row_key="engine",
-                         pagination=15).classes("w-full flex-grow arena-log")
+                         pagination=20).classes("w-full flex-grow arena-log")
         table.add_slot("body-cell-tier", _TIER_CELL_SLOT)
         table.add_slot("body-cell-rank", _RANK_CELL_SLOT)
+        table.add_slot("body-cell-actions", """
+<q-td :props="props" class="text-center">
+  <q-btn dense flat size="sm" icon="history" color="secondary"
+         @click="$parent.$emit('games', props.row)">
+    <q-tooltip>Game history</q-tooltip>
+  </q-btn>
+  <q-btn dense flat size="sm" icon="show_chart" color="primary"
+         @click="$parent.$emit('elo', props.row)">
+    <q-tooltip>Elo history</q-tooltip>
+  </q-btn>
+</q-td>
+""")
 
         def refresh():
             ratings, _, _ = session.elo_data()
             stats_map = {s["engine"]: s for s in session.db.get_engine_stats()}
+            top_map = session.db.get_top_openings()
             rows = []
             ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
             for i, (engine, elo) in enumerate(ordered, 1):
                 s = stats_map.get(engine, {})
                 tier_lbl, tier_col = get_tier(elo)
+                top = top_map.get(engine)
                 rows.append({
                     "rank": i, "engine": engine, "elo": elo,
                     "tier": tier_lbl, "tier_col": tier_col,
                     "matches": s.get("matches", 0), "wins": s.get("wins", 0),
                     "draws": s.get("draws", 0), "loses": s.get("loses", 0),
                     "wr": f"{s.get('win_rate', 0.0):.1f}",
+                    "top_opening": (f"{top['opening']} ({top['games']}×)"
+                                    if top else "—"),
                 })
             q = (search.value or "").lower()
             if q:
                 rows = [r for r in rows
-                        if q in r["engine"].lower() or q in r["tier"].lower()]
+                        if q in r["engine"].lower() or q in r["tier"].lower()
+                        or q in r["top_opening"].lower()]
             table.rows = rows
             table.update()
 
@@ -93,8 +115,19 @@ def show_rankings(session):
                  lambda e: widgets.with_loader(
                      lambda: show_elo_history(session, e.args[1]["engine"]),
                      "Loading Elo history…"))
+        table.on("games",
+                 lambda e: widgets.with_loader(
+                     lambda: show_game_history(
+                         session, filter_engine=e.args["engine"]),
+                     "Loading game history…"))
+        table.on("elo",
+                 lambda e: widgets.with_loader(
+                     lambda: show_elo_history(session, e.args["engine"]),
+                     "Loading Elo history…"))
 
         with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
+            widgets.icon_button("All Openings", "ic_book", secondary=True,
+                                on_click=lambda: show_opening_stats(session))
             widgets.icon_button("Refresh", "ic_refresh", on_click=refresh,
                                 secondary=True)
             ui.button("Close", on_click=dialog.close) \
@@ -171,67 +204,6 @@ def show_elo_history(session, engine_name):
 
         ui.button("Close", on_click=dialog.close) \
             .props("flat color=grey no-caps").classes("self-end dlg-foot")
-    dialog.open()
-
-
-# ═══════════════════════════════════════════════════════════
-#  Statistics
-# ═══════════════════════════════════════════════════════════
-
-def show_statistics(session):
-    with ui.dialog() as dialog, ui.card().classes(
-            "arena-panel w-[820px] max-w-full h-[620px] flex flex-col"):
-        widgets.heading("ic_chart", "ENGINE STATISTICS")
-        ui.label(session.db.db_path).classes("text-xs text-gray-600 mono")
-        ui.label("Double-click a row for its game history") \
-            .classes("text-xs text-gray-500")
-
-        search = widgets.search_input("Filter engines…").classes("w-full")
-
-        columns = [
-            {"name": "engine",  "label": "Engine",   "field": "engine",
-             "align": "left", "sortable": True},
-            {"name": "matches", "label": "Matches",  "field": "matches",
-             "align": "center", "sortable": True},
-            {"name": "wins",    "label": "Win",      "field": "wins",
-             "align": "center", "sortable": True},
-            {"name": "draws",   "label": "Draw",     "field": "draws",
-             "align": "center", "sortable": True},
-            {"name": "loses",   "label": "Lose",     "field": "loses",
-             "align": "center", "sortable": True},
-            {"name": "wr",      "label": "WinRate%", "field": "wr",
-             "align": "center", "sortable": True},
-        ]
-        table = ui.table(columns=columns, rows=[], row_key="engine",
-                         pagination=15).classes("w-full flex-grow arena-log")
-
-        def refresh():
-            stats = session.db.get_engine_stats(search_query=search.value or "")
-            table.rows = [
-                {"engine": s["engine"], "matches": s["matches"],
-                 "wins": s["wins"], "draws": s["draws"], "loses": s["loses"],
-                 "wr": f"{s['win_rate']:.1f}"}
-                for s in stats
-            ]
-            table.update()
-
-        search.on_value_change(lambda e: refresh())
-        table.on("rowDblclick",
-                 lambda e: widgets.with_loader(
-                     lambda: show_game_history(
-                         session, filter_engine=e.args[1]["engine"]),
-                     "Loading game history…"))
-
-        with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
-            widgets.icon_button("Rankings", "ic_trophy",
-                                on_click=lambda: show_rankings(session))
-            widgets.icon_button("All Openings", "ic_book", secondary=True,
-                                on_click=lambda: show_opening_stats(session))
-            widgets.icon_button("Refresh", "ic_refresh", on_click=refresh,
-                                secondary=True)
-            ui.button("Close", on_click=dialog.close) \
-                .props("flat color=grey no-caps")
-        refresh()
     dialog.open()
 
 

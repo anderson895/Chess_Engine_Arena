@@ -15,6 +15,8 @@ from webui.session import GameSession, parse_opening_book
 from webui.theme import (
     apply_theme, COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN,
     COLOR_ORANGE, COLOR_MUTED,
+    PIECE_SETS, piece_folder, set_piece_folder,
+    BOARD_THEMES, board_theme, set_board_theme, push_board_colors,
 )
 
 # One desktop app → one shared session
@@ -203,7 +205,9 @@ def main_page():
     session.clear_handlers()   # page rebuild → drop stale widget subscribers
 
     # ── Header ────────────────────────────────────────────
-    with ui.header().classes("items-center bg-[#0F0F1E] px-4 py-2 gap-3"):
+    # "row" is explicit: NiceGUI 3.x headers no longer default to it
+    with ui.header().classes(
+            "row no-wrap items-center bg-[#0F0F1E] px-4 py-2 gap-3"):
         ui.element("img").props('src="/assets/pieces/wN.png"') \
             .style("height: 34px; width: auto;")
         ui.label("ENGINE ARENA").classes("text-lg font-bold text-primary")
@@ -212,11 +216,7 @@ def main_page():
             ("rankings",
              lambda: widgets.with_loader(
                  lambda: views.show_rankings(session), "Loading rankings…"),
-             "Engine rankings"),
-            ("statistics",
-             lambda: widgets.with_loader(
-                 lambda: views.show_statistics(session), "Loading statistics…"),
-             "W/D/L statistics"),
+             "Rankings & statistics"),
             ("openings",
              lambda: widgets.with_loader(
                  lambda: views.show_opening_stats(session),
@@ -264,6 +264,11 @@ def main_page():
                 def config_ui():
                     if session.play_mode == GameSession.MODE_EVE:
                         _engine_config("BLACK", "e1", COLOR_SILVER, "bK")
+                        with ui.row().classes("w-full justify-center"):
+                            ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
+                                .props("dense flat size=sm") \
+                                .classes("text-xs") \
+                                .tooltip("Ipagpalit ang kulay ng dalawang engine")
                         _engine_config("WHITE", "e2", COLOR_GOLD, "wK")
                     else:
                         with ui.row().classes("items-center gap-1 no-wrap"):
@@ -279,6 +284,11 @@ def main_page():
                                  on_change=lambda e: setattr(
                                      session, "player_color", e.value)) \
                             .props("inline dense")
+                        with ui.row().classes("w-full justify-center"):
+                            ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
+                                .props("dense flat size=sm") \
+                                .classes("text-xs") \
+                                .tooltip("Ipagpalit ang kulay mo at ng engine")
                         _engine_config("OPPONENT", "e2", COLOR_GOLD, "wK")
 
                 def _engine_config(title, prefix, color, piece_code=None):
@@ -335,6 +345,14 @@ def main_page():
                                  refresh_banners())) \
                         .props("dense").classes("w-full text-xs")
 
+                def _swap_colors():
+                    if session.game_running:
+                        ui.notify("Itigil muna ang laro bago magpalit ng kulay",
+                                  type="warning")
+                        return
+                    if session.swap_colors():
+                        config_ui.refresh()
+
                 def on_mode_change(e):
                     session.play_mode = e.value
                     if (session.play_mode == GameSession.MODE_HVE
@@ -364,6 +382,23 @@ def main_page():
                           on_change=lambda e: setattr(
                               session, "delay_s", float(e.value or 0.5))) \
                     .props("dense").classes("w-full")
+
+                def on_piece_set(e):
+                    set_piece_folder(e.value)
+                    board_view.redraw_pieces()
+                    config_ui.refresh()      # sidebar king icons follow
+                ui.select(PIECE_SETS, value=piece_folder(),
+                          label="Piece design", on_change=on_piece_set) \
+                    .props("dense options-dense").classes("w-full")
+
+                def on_board_theme(e):
+                    set_board_theme(e.value)
+                    push_board_colors()
+                ui.select({k: label for k, (label, _, _)
+                           in BOARD_THEMES.items()},
+                          value=board_theme(), label="Board style",
+                          on_change=on_board_theme) \
+                    .props("dense options-dense").classes("w-full")
 
             with ui.card().classes("arena-panel w-full gap-1 p-3"):
                 _action_btn("ic_play",    "START GAME",     session.start_game,
@@ -522,13 +557,14 @@ def main_page():
                                               multi_line=True))
     session.on("eval", lambda side, ev, dp: eng_log.push(
         f"[{side.upper()}] eval {ev}  depth {dp}"))
-    session.on("game_over", lambda result, reason, winner:
-               dialogs.show_game_over(
-                   session, result, reason, winner,
-                   on_new_game=lambda: ui.timer(
-                       0.05, session.new_game, once=True),
-                   on_rankings=lambda: views.show_rankings(session),
-                   on_export=_export_pgn))
+    session.on("game_over", lambda result, reason, winner: (
+        config_ui.refresh(),        # auto color-swap changed the selectors
+        dialogs.show_game_over(
+            session, result, reason, winner,
+            on_new_game=lambda: ui.timer(
+                0.05, session.new_game, once=True),
+            on_rankings=lambda: views.show_rankings(session),
+            on_export=_export_pgn)))
 
     # Startup: banner + assets. On first launch a persistent overlay blocks
     # the UI until the opening book and analyzer are ready — interacting
