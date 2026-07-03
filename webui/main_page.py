@@ -11,7 +11,7 @@ from core.opening_book import OpeningBook
 from core.utils import get_base_path, get_resource_path
 from webui import dialogs, tournament, views, widgets
 from webui.board import BoardView, EvalBar
-from webui.session import GameSession, parse_opening_book
+from webui.session import GameSession, parse_opening_book, TIME_CONTROLS
 from webui.theme import (
     apply_theme, COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN,
     COLOR_ORANGE, COLOR_MUTED,
@@ -372,42 +372,13 @@ def main_page():
 
                 ui.separator()
                 widgets.heading("ic_settings", "SETTINGS", size=15, text_cls="arena-heading")
-                def on_time_mode(e):
-                    session.time_mode = e.value
-                    time_settings.refresh()
-                ui.select({"movetime": "Fixed move time",
-                           "clock": "Clock (base + increment)"},
-                          value=session.time_mode, label="Time control",
-                          on_change=on_time_mode) \
+                ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
+                          value=session.time_control, label="Time control",
+                          on_change=lambda e: setattr(
+                              session, "time_control", e.value)) \
                     .props("dense options-dense").classes("w-full") \
-                    .tooltip("Clock: engines manage their own time and can "
-                             "lose on time (Engine vs Engine only)")
-
-                @ui.refreshable
-                def time_settings():
-                    if session.time_mode == "clock":
-                        ui.number(label="Base time (min)",
-                                  value=session.base_min,
-                                  min=0.1, max=180, step=0.5,
-                                  on_change=lambda e: setattr(
-                                      session, "base_min",
-                                      float(e.value or 5))) \
-                            .props("dense").classes("w-full")
-                        ui.number(label="Increment (s)", value=session.inc_s,
-                                  min=0.0, max=60.0, step=0.5,
-                                  on_change=lambda e: setattr(
-                                      session, "inc_s",
-                                      float(e.value or 0))) \
-                            .props("dense").classes("w-full")
-                    else:
-                        ui.number(label="Move time (ms)",
-                                  value=session.movetime_ms,
-                                  min=100, max=60000, step=100,
-                                  on_change=lambda e: setattr(
-                                      session, "movetime_ms",
-                                      int(e.value or 1000))) \
-                            .props("dense").classes("w-full")
-                time_settings()
+                    .tooltip("Engines manage their own clock and lose "
+                             "the game when it runs out")
                 ui.number(label="Move delay (s)", value=session.delay_s,
                           min=0.0, max=10.0, step=0.1,
                           on_change=lambda e: setattr(

@@ -23,6 +23,16 @@ from core.utils import (
 from data.database import Database
 
 
+# Time-control presets: key → (label, base minutes, increment seconds).
+# Engines always play on a real clock ("go wtime/btime winc/binc") so
+# they manage their own time and lose on time when the clock runs out.
+TIME_CONTROLS = {
+    "bullet": ("Bullet (1+0)",  1.0, 0.0),
+    "blitz":  ("Blitz (3+2)",   3.0, 2.0),
+    "rapid":  ("Rapid (10+5)", 10.0, 5.0),
+}
+
+
 async def parse_opening_book(path):
     """
     Parse an openings CSV in a separate *process*: the SAN→UCI conversion
@@ -79,14 +89,12 @@ class GameSession:
         self.e2_name      = "Engine 2 (White)"
         self.player_name  = "Player"
         self.player_color = "white"
-        self.movetime_ms  = 1000
+        self.movetime_ms  = 1000   # analyzer/tournament fallback only
         self.delay_s      = 0.5
-        # Time control: "movetime" = fixed ms/move, "clock" = real chess
-        # clock (base + increment, engines manage their own time). Clock
-        # mode applies to Engine-vs-Engine games only.
-        self.time_mode    = "movetime"
-        self.base_min     = 5.0
-        self.inc_s        = 2.0
+        # Selected TIME_CONTROLS preset; base/inc are derived at start_game
+        self.time_control = "blitz"
+        self.base_min     = TIME_CONTROLS["blitz"][1]
+        self.inc_s        = TIME_CONTROLS["blitz"][2]
 
         # Preset opening
         self.preset_moves: list[str] = []
@@ -104,9 +112,9 @@ class GameSession:
         self._game_task: asyncio.Task | None = None
         self._start_time = 0.0
 
-        # Clock state (clock mode only)
-        self.wtime_ms = 0.0
-        self.btime_ms = 0.0
+        # Clock state
+        self.wtime_ms = self.base_min * 60000
+        self.btime_ms = self.base_min * 60000
         self._think_start = None   # time.time() when current search began
 
         # Analysis state
@@ -189,8 +197,8 @@ class GameSession:
                 f"Plies: {len(self.board.move_history)}")
 
     def uses_clock(self):
-        """True when the current config plays with a real chess clock."""
-        return self.time_mode == "clock" and self.play_mode == self.MODE_EVE
+        """Engines always play on a real chess clock."""
+        return True
 
     def clock_strings(self):
         """Formatted (white, black) clock texts, live during a search."""
@@ -320,10 +328,11 @@ class GameSession:
         self._elo_cache = None           # tournaments may have added games
         self.current_opening_name = None
 
-        # Reset clocks
+        # Reset clocks from the selected time-control preset
         self._think_start = None
-        if self.uses_clock():
-            self.wtime_ms = self.btime_ms = self.base_min * 60000
+        self._game_tc_label, self.base_min, self.inc_s = TIME_CONTROLS.get(
+            self.time_control, TIME_CONTROLS["blitz"])
+        self.wtime_ms = self.btime_ms = self.base_min * 60000
         self._emit("clock")
 
         # Apply preset opening
@@ -768,7 +777,8 @@ class GameSession:
             opening_name=self.current_opening_name)
         await run.io_bound(
             self.db.save_game, white, black, result, reason, pgn,
-            len(self.board.move_history), duration)
+            len(self.board.move_history), duration, 'regular',
+            getattr(self, "_game_tc_label", ""))
         self._elo_cache = None
 
     # ═══════════════════════════════════════════════════════
