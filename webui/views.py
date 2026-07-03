@@ -305,8 +305,8 @@ _RESULT_CELL_SLOT = """
 def show_game_history(session, filter_engine=None):
     norm_filter = normalize_engine_name(filter_engine) if filter_engine else None
 
-    with ui.dialog() as dialog, ui.card().classes(
-            "arena-panel w-[1060px] max-w-full h-[680px] flex flex-col"):
+    with ui.dialog().props("maximized") as dialog, ui.card().classes(
+            "arena-panel w-full h-full flex flex-col"):
         with ui.row().classes("w-full items-center"):
             widgets.heading("ic_calendar", "GAME HISTORY")
             if norm_filter:
