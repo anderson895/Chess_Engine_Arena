@@ -20,6 +20,9 @@ def main():
     # Allow "Export PGN" downloads inside the native (pywebview) window
     app.native.settings["ALLOW_DOWNLOADS"] = True
 
+    # Open maximized (fills the screen, keeps the title bar)
+    app.native.window_args["maximized"] = True
+
     # Serve piece sprites and UI icons
     app.add_static_files("/assets", get_resource_path("assets"))
 
