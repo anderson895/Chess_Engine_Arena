@@ -90,6 +90,10 @@ def show_rankings(session):
          @click="$parent.$emit('elo', props.row)">
     <q-tooltip>Elo history</q-tooltip>
   </q-btn>
+  <q-btn dense flat size="sm" icon="edit" color="warning"
+         @click="$parent.$emit('rename', props.row)">
+    <q-tooltip>Rename engine</q-tooltip>
+  </q-btn>
 </q-td>
 """)
 
@@ -151,6 +155,45 @@ def show_rankings(session):
                  lambda e: widgets.with_loader(
                      lambda: show_elo_history(session, e.args["engine"]),
                      "Loading Elo history…"))
+
+        def on_rename(e):
+            engine = e.args["engine"]
+            with ui.dialog() as dlg, ui.card().classes(
+                    "arena-panel w-[460px] max-w-full gap-3 p-5"):
+                widgets.heading("ic_settings", "RENAME ENGINE",
+                                text_cls="text-lg font-bold text-primary")
+                ui.label(f"Current name:  {engine}") \
+                    .classes("text-sm text-gray-400 mono")
+                name_in = ui.input(label="New name", value=engine) \
+                    .props("dense outlined autofocus").classes("w-full")
+                widgets.hint("All games in history (including PGN headers) "
+                             "will be updated.")
+                widgets.hint("Renaming to an existing engine's name merges "
+                             "their records.")
+                with ui.row().classes("w-full justify-end gap-2 mt-1 dlg-foot"):
+                    ui.button("Cancel", on_click=dlg.close) \
+                        .props("flat color=grey no-caps")
+
+                    def do_rename():
+                        new = normalize_engine_name(
+                            (name_in.value or "").strip())
+                        if not new or new == engine:
+                            dlg.close()
+                            return
+                        n = session.db.rename_engine(engine, new)
+                        dlg.close()
+                        if n < 0:
+                            ui.notify("Rename failed — see console log.",
+                                      type="negative")
+                            return
+                        session._elo_cache = None
+                        ui.notify(f"Renamed to \"{new}\" — {n} game(s) "
+                                  f"updated", type="positive")
+                        refresh()
+                    ui.button("Rename", on_click=do_rename) \
+                        .props("color=primary no-caps")
+            dlg.open()
+        table.on("rename", on_rename)
 
         with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
             widgets.icon_button("All Openings", "ic_book", secondary=True,
@@ -334,10 +377,19 @@ def show_game_history(session, filter_engine=None):
             {"name": "reason", "label": "Reason", "field": "reason", "align": "left"},
             {"name": "moves",  "label": "Moves",  "field": "moves",  "align": "center"},
             {"name": "dur",    "label": "Duration", "field": "dur",  "align": "center"},
+            {"name": "actions", "label": "", "field": "id", "align": "center"},
         ]
         table = ui.table(columns=columns, rows=[], row_key="id",
                          pagination=15).classes("w-full flex-grow arena-log")
         table.add_slot("body-cell-result", _RESULT_CELL_SLOT)
+        table.add_slot("body-cell-actions", """
+<q-td :props="props" class="text-center">
+  <q-btn dense flat size="sm" icon="delete" color="negative"
+         @click="$parent.$emit('del', props.row)">
+    <q-tooltip>Delete game record</q-tooltip>
+  </q-btn>
+</q-td>
+""")
 
         games_cache = []
         MAX_ROWS = 300   # SQL LIMIT — huge databases never flood the query
@@ -394,6 +446,36 @@ def show_game_history(session, filter_engine=None):
                      lambda: show_pgn_viewer(session, e.args[1]["id"],
                                              games_cache),
                      "Loading game replay…"))
+
+        def on_delete(e):
+            row = e.args
+            with ui.dialog() as dlg, ui.card().classes(
+                    "arena-panel w-[460px] max-w-full gap-3 p-5"):
+                widgets.heading("ic_stop", "DELETE GAME RECORD",
+                                text_cls="text-lg font-bold text-primary")
+                ui.label(f"#{row['id']}  ·  {row['white']} vs {row['black']} "
+                         f"·  {row['result']}").classes("text-sm mono")
+                widgets.hint("This also removes it from Elo ratings and "
+                             "statistics. This cannot be undone.")
+                with ui.row().classes("w-full justify-end gap-2 mt-1 dlg-foot"):
+                    ui.button("Cancel", on_click=dlg.close) \
+                        .props("flat color=grey no-caps")
+
+                    def do_delete():
+                        ok = session.db.delete_game(row["id"])
+                        dlg.close()
+                        if not ok:
+                            ui.notify("Delete failed — see console log.",
+                                      type="negative")
+                            return
+                        session._elo_cache = None
+                        ui.notify(f"Game #{row['id']} deleted",
+                                  type="positive")
+                        refresh()
+                    ui.button("Delete", on_click=do_delete) \
+                        .props("color=negative no-caps")
+            dlg.open()
+        table.on("del", on_delete)
 
         with ui.row().classes("w-full items-center"):
             widgets.hint("Double-click a row to replay the game · "

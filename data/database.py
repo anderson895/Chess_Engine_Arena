@@ -182,6 +182,80 @@ class Database:
             print(f"[Database] save_tournament_game error: {e}")
             return None, None
 
+    def rename_engine(self, old_name, new_name):
+        """
+        Rename an engine everywhere: games, tournament_games and the
+        [White]/[Black] tags inside stored PGN text.
+
+        Returns the number of game rows that referenced the engine,
+        or -1 on error.
+        """
+        import re
+        old = normalize_engine_name(old_name)
+        new = normalize_engine_name(new_name)
+        if not old or not new or old == new:
+            return 0
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL")
+            cursor = conn.cursor()
+
+            count = cursor.execute(
+                "SELECT COUNT(*) FROM games "
+                "WHERE white_engine = ? OR black_engine = ?",
+                (old, old)).fetchone()[0]
+
+            for table in ("games", "tournament_games"):
+                cursor.execute(
+                    f"UPDATE {table} SET white_engine = ? WHERE white_engine = ?",
+                    (new, old))
+                cursor.execute(
+                    f"UPDATE {table} SET black_engine = ? WHERE black_engine = ?",
+                    (new, old))
+
+                # Rewrite PGN [White]/[Black] tags (values may still carry
+                # color suffixes, so compare normalized)
+                def _fix_pgn(pgn):
+                    def repl(m):
+                        if normalize_engine_name(m.group(2)) == old:
+                            return f'[{m.group(1)} "{new}"]'
+                        return m.group(0)
+                    return re.sub(r'\[(White|Black)\s+"([^"]*)"\]',
+                                  repl, pgn or '')
+
+                id_col = "id"
+                for gid, pgn in cursor.execute(
+                        f"SELECT {id_col}, pgn FROM {table}").fetchall():
+                    fixed = _fix_pgn(pgn)
+                    if fixed != pgn:
+                        cursor.execute(
+                            f"UPDATE {table} SET pgn = ? WHERE {id_col} = ?",
+                            (fixed, gid))
+
+            conn.commit()
+            conn.close()
+            return count
+        except Exception as e:
+            print(f"[Database] rename_engine error: {e}")
+            return -1
+
+    def delete_game(self, game_id):
+        """Delete a game (and its tournament metadata). Returns True on success."""
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA journal_mode=WAL")
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM tournament_games WHERE game_id = ?", (game_id,))
+            cursor.execute("DELETE FROM games WHERE id = ?", (game_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+            return deleted
+        except Exception as e:
+            print(f"[Database] delete_game error: {e}")
+            return False
+
     # ── Read ──────────────────────────────────────────────
 
     def get_all_games_for_elo(self):
