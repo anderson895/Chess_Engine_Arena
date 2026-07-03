@@ -63,10 +63,14 @@ def show_rankings(session):
             {"name": "draws",   "label": "D",     "field": "draws", "align": "center"},
             {"name": "loses",   "label": "L",     "field": "loses", "align": "center"},
             {"name": "wr",      "label": "WR%",   "field": "wr",    "align": "center", "sortable": True},
-            {"name": "bullet",  "label": "Bullet", "field": "bullet", "align": "center"},
-            {"name": "blitz",   "label": "Blitz",  "field": "blitz",  "align": "center"},
-            {"name": "rapid",   "label": "Rapid",  "field": "rapid",  "align": "center"},
-            {"name": "classic", "label": "Classic", "field": "classic", "align": "center"},
+            {"name": "bullet",  "label": "Bullet", "field": "bullet", "align": "center",
+             "sortable": True, ":format": "val => val > 0 ? val : '—'"},
+            {"name": "blitz",   "label": "Blitz",  "field": "blitz",  "align": "center",
+             "sortable": True, ":format": "val => val > 0 ? val : '—'"},
+            {"name": "rapid",   "label": "Rapid",  "field": "rapid",  "align": "center",
+             "sortable": True, ":format": "val => val > 0 ? val : '—'"},
+            {"name": "classic", "label": "Classic", "field": "classic", "align": "center",
+             "sortable": True, ":format": "val => val > 0 ? val : '—'"},
             {"name": "top_opening", "label": "Top Opening",
              "field": "top_opening", "align": "left", "sortable": True},
             {"name": "actions", "label": "History", "field": "engine",
@@ -103,8 +107,8 @@ def show_rankings(session):
                           for key, games in tc_games.items()}
 
             def tc_rating(engine, key):
-                elo = tc_ratings.get(key, {}).get(engine)
-                return str(elo) if elo is not None else "—"
+                """Numeric Elo for sorting; 0 renders as '—' via :format."""
+                return tc_ratings.get(key, {}).get(engine) or 0
 
             rows = []
             ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
