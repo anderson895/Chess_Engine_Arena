@@ -13,6 +13,7 @@ from datetime import datetime
 
 from nicegui import app, ui
 
+from core.constants import TIME_CONTROLS
 from core.utils import normalize_engine_name
 from tournament.manager import (
     Tournament, TournamentPlayer, TournamentRunner,
@@ -119,7 +120,9 @@ class TournamentSession:
                 move_count=game.move_count,
                 duration_sec=game.duration,
                 opening=game.opening or None,
-                time_control=f"{self.t.movetime_ms}ms/move",
+                time_control=TIME_CONTROLS.get(
+                    getattr(self.t, "time_control", "classic"),
+                    TIME_CONTROLS["classic"])[0],
             )
             game.db_game_id = game_id
         with self.lock:
@@ -303,12 +306,22 @@ def show_tournament_setup(session):
         fmt.on_value_change(on_fmt)
 
         with ui.row().classes("w-full items-center gap-4"):
+            tc_sel = ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
+                               value="classic", label="Time control") \
+                .props("dense options-dense").classes("w-36") \
+                .tooltip("Bullet/Blitz/Rapid: engines manage their own "
+                         "clock and lose on time. Classic: fixed think "
+                         "time per move")
             movetime_in = ui.number(label="Move time (ms)", value=500,
                                     min=100, max=60000, step=100) \
                 .props("dense").classes("w-32")
             delay_in = ui.number(label="Move delay (s)", value=0.1,
                                  min=0.0, max=5.0, step=0.1) \
                 .props("dense").classes("w-32")
+
+        # Move time only applies to the clockless Classic preset
+        tc_sel.on_value_change(
+            lambda e: movetime_in.set_visibility(e.value == "classic"))
 
         ui.separator()
         ui.label("PLAYERS (engines)").classes("arena-heading")
@@ -388,6 +401,7 @@ def show_tournament_setup(session):
                 players=players,
                 rounds=int(rounds_in.value or 5),
                 movetime_ms=int(movetime_in.value or 500),
+                time_control=tc_sel.value or "classic",
                 double_rr=bool(double_rr.value),
                 delay=float(delay_in.value or 0.1),
                 analyzer_path=session.analyzer_path,
@@ -666,8 +680,8 @@ def show_tournament_history(session, tournament_id, name):
     standings = sorted(scores.items(), key=lambda x: -x[1]["score"])
     fmt = rows[0]["format"]
 
-    with ui.dialog() as dialog, ui.card().classes(
-            "arena-panel w-[980px] max-w-full h-[680px] flex flex-col"):
+    with ui.dialog().props("maximized") as dialog, ui.card().classes(
+            "arena-panel w-full h-full flex flex-col"):
         with ui.row().classes("w-full items-center gap-2"):
             ui.element("img").props('src="/assets/ui/st_finished.png"') \
                 .style("height: 20px; width: auto;")
@@ -676,7 +690,7 @@ def show_tournament_history(session, tournament_id, name):
                 .classes("text-xs text-gray-500")
 
         with ui.row().classes("w-full flex-grow no-wrap gap-4 min-h-0"):
-            with ui.column().classes("w-[38%]"):
+            with ui.column().classes("w-[38%] min-h-0 overflow-auto"):
                 ui.label("FINAL STANDINGS").classes("arena-heading")
                 stand_cols = [
                     {"name": "rank",   "label": "#",      "field": "rank",
@@ -696,7 +710,7 @@ def show_tournament_history(session, tournament_id, name):
                     .classes("w-full flex-grow arena-log")
                 st.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
 
-            with ui.column().classes("flex-grow min-w-0"):
+            with ui.column().classes("flex-grow min-w-0 min-h-0 overflow-auto"):
                 ui.label("GAMES — double-click to replay") \
                     .classes("arena-heading")
                 game_cols = [

@@ -23,17 +23,8 @@ from core.utils import (
 from data.database import Database
 
 
-# Time-control presets: key → (label, base minutes, increment seconds).
-# Clocked presets use "go wtime/btime winc/binc" so engines manage their
-# own time and lose on time when the clock runs out. "Classic" has no
-# clock (base is None): engines get a fixed think time per move and can
-# never lose on time.
-TIME_CONTROLS = {
-    "bullet":  ("Bullet (1+0)",  1.0, 0.0),
-    "blitz":   ("Blitz (3+2)",   3.0, 2.0),
-    "rapid":   ("Rapid (10+5)", 10.0, 5.0),
-    "classic": ("Classic",       None, None),
-}
+# Re-exported for the UI modules that import it from here
+from core.constants import TIME_CONTROLS  # noqa: E402
 
 
 async def parse_opening_book(path):

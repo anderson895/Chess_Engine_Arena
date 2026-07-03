@@ -597,13 +597,14 @@ class Tournament:
 
     def __init__(self, name, fmt, players, rounds, movetime_ms=1000,
                 double_rr=False, delay=0.3, analyzer_path=None,
-                opening_book=None):
+                opening_book=None, time_control="classic"):
         self.name          = name
         self.format        = fmt
         self.players       = {p.name: p for p in players}
         self.player_list   = list(players)
         self.rounds        = rounds
         self.movetime_ms   = movetime_ms
+        self.time_control  = time_control   # TIME_CONTROLS preset key
         self.double_rr     = double_rr
         self.delay         = delay
         self.analyzer_path = analyzer_path
@@ -1320,6 +1321,16 @@ class TournamentRunner:
         book_moves_used = 0
         MAX_BOOK_MOVES  = 20
 
+        # Time control: clocked presets give each side a real chess clock;
+        # "Classic" (base None) falls back to fixed movetime per move.
+        from core.constants import TIME_CONTROLS
+        _, tc_base, tc_inc = TIME_CONTROLS.get(
+            getattr(self.t, "time_control", "classic"),
+            TIME_CONTROLS["classic"])
+        use_clock = tc_base is not None
+        wtime = btime = (tc_base or 0) * 60000
+        inc_ms = int((tc_inc or 0) * 1000)
+
         while True:
             if self._stop_flag: break
             while self._pause_flag and not self._stop_flag:
@@ -1362,7 +1373,26 @@ class TournamentRunner:
                     engine._drain()
                 except Exception:
                     pass
-                uci = engine.get_best_move(mvs, self.t.movetime_ms)
+                clock = None
+                if use_clock:
+                    clock = {"wtime": max(1, int(wtime)),
+                             "btime": max(1, int(btime)),
+                             "winc": inc_ms, "binc": inc_ms}
+                t0 = time.time()
+                uci = engine.get_best_move(mvs, self.t.movetime_ms,
+                                           None, clock)
+                if use_clock:
+                    elapsed = (time.time() - t0) * 1000
+                    remaining = (wtime if is_white_turn else btime) - elapsed
+                    if remaining <= 0:
+                        result = '0-1' if is_white_turn else '1-0'
+                        reason = f"{player.name} lost on time"
+                        break
+                    remaining += inc_ms
+                    if is_white_turn:
+                        wtime = remaining
+                    else:
+                        btime = remaining
                 if uci:
                     uci = uci.strip().lower()
 
