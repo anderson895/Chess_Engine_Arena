@@ -119,6 +119,7 @@ class TournamentSession:
                 move_count=game.move_count,
                 duration_sec=game.duration,
                 opening=game.opening or None,
+                time_control=f"{self.t.movetime_ms}ms/move",
             )
             game.db_game_id = game_id
         with self.lock:

@@ -41,7 +41,8 @@ class Database:
                 pgn               TEXT    NOT NULL,
                 move_count        INTEGER,
                 duration_seconds  INTEGER,
-                source            TEXT    DEFAULT 'regular'
+                source            TEXT    DEFAULT 'regular',
+                time_control      TEXT    DEFAULT ''
             )
         ''')
 
@@ -73,13 +74,20 @@ class Database:
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Add 'time_control' column if missing (migration)
+        try:
+            conn.execute("ALTER TABLE games ADD COLUMN time_control TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         conn.commit()
         conn.close()
 
     # ── Write ─────────────────────────────────────────────
 
     def save_game(self, white_name, black_name, result, reason,
-                  pgn, move_count, duration_sec, source='regular'):
+                  pgn, move_count, duration_sec, source='regular',
+                  time_control=''):
         """Save a game to the games table. Returns the new row id, or None on error."""
         try:
             conn   = sqlite3.connect(self.db_path)
@@ -90,8 +98,9 @@ class Database:
             cursor.execute('''
                 INSERT INTO games
                     (white_engine, black_engine, result, reason,
-                     date, time, pgn, move_count, duration_seconds, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     date, time, pgn, move_count, duration_seconds, source,
+                     time_control)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 normalize_engine_name(white_name),
                 normalize_engine_name(black_name),
@@ -99,6 +108,7 @@ class Database:
                 date_str, time_str,
                 pgn, move_count, duration_sec,
                 source,
+                time_control or '',
             ))
             conn.commit()
             game_id = cursor.lastrowid
@@ -111,7 +121,7 @@ class Database:
     def save_tournament_game(self, tournament_id, tournament_name, fmt,
                              round_num, white_name, black_name, result,
                              reason, pgn, move_count, duration_sec,
-                             opening=None):
+                             opening=None, time_control=''):
         try:
             # 1. Save to main games table so Elo / stats pick it up
             game_id = self.save_game(
@@ -123,6 +133,7 @@ class Database:
                 move_count   = move_count,
                 duration_sec = duration_sec,
                 source       = 'tournament',
+                time_control = time_control,
             )
             if game_id is None:
                 return None, None
@@ -241,6 +252,44 @@ class Database:
             }
             for engine in engines
         ]
+
+    def get_time_control_stats(self):
+        """
+        Per-engine W/D/L records grouped by time control.
+
+        Returns
+        -------
+        dict: {engine: {time_control_label: {'wins', 'draws', 'loses'}}}
+        Games saved before time controls existed group under 'Unknown'.
+        """
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT white_engine, black_engine, result, "
+                "COALESCE(time_control, '') FROM games")
+            rows = cursor.fetchall()
+            conn.close()
+        except Exception as e:
+            print(f"[Database] get_time_control_stats error: {e}")
+            return {}
+
+        stats = {}
+        for white, black, result, tc in rows:
+            if result not in ('1-0', '0-1', '1/2-1/2'):
+                continue
+            tc = tc or 'Unknown'
+            for name, win_res in ((white, '1-0'), (black, '0-1')):
+                rec = stats.setdefault(
+                    normalize_engine_name(name), {}).setdefault(
+                    tc, {'wins': 0, 'draws': 0, 'loses': 0})
+                if result == '1/2-1/2':
+                    rec['draws'] += 1
+                elif result == win_res:
+                    rec['wins'] += 1
+                else:
+                    rec['loses'] += 1
+        return stats
 
     @staticmethod
     def _games_where(filter_engine=None, search_query='', source_filter=None):

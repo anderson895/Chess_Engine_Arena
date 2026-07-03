@@ -39,8 +39,9 @@ def show_rankings(session):
     with ui.dialog().props("maximized") as dialog, ui.card().classes(
             "arena-panel w-full h-full flex flex-col"):
         widgets.heading("ic_trophy", "RANKINGS & STATISTICS")
-        ui.label("Elo ratings and W/D/L from all recorded games — use the "
-                 "History buttons for an engine's games and Elo chart") \
+        ui.label("Elo ratings and W/D/L from all recorded games — "
+                 "Bullet/Blitz/Rapid columns show each engine's W-D-L "
+                 "record per time control") \
             .classes("text-xs text-gray-500")
 
         with ui.row().classes("gap-2 flex-wrap"):
@@ -61,6 +62,9 @@ def show_rankings(session):
             {"name": "draws",   "label": "D",     "field": "draws", "align": "center"},
             {"name": "loses",   "label": "L",     "field": "loses", "align": "center"},
             {"name": "wr",      "label": "WR%",   "field": "wr",    "align": "center", "sortable": True},
+            {"name": "bullet",  "label": "Bullet", "field": "bullet", "align": "center"},
+            {"name": "blitz",   "label": "Blitz",  "field": "blitz",  "align": "center"},
+            {"name": "rapid",   "label": "Rapid",  "field": "rapid",  "align": "center"},
             {"name": "top_opening", "label": "Top Opening",
              "field": "top_opening", "align": "left", "sortable": True},
             {"name": "actions", "label": "History", "field": "engine",
@@ -87,6 +91,18 @@ def show_rankings(session):
             ratings, _, _ = session.elo_data()
             stats_map = {s["engine"]: s for s in session.db.get_engine_stats()}
             top_map = session.db.get_top_openings()
+            tc_map = session.db.get_time_control_stats()
+
+            def tc_record(engine, prefix):
+                """'W-D-L' record for all time controls matching *prefix*."""
+                w = d = l = 0
+                for tc, rec in tc_map.get(engine, {}).items():
+                    if tc.lower().startswith(prefix):
+                        w += rec["wins"]
+                        d += rec["draws"]
+                        l += rec["loses"]
+                return f"{w}-{d}-{l}" if (w or d or l) else "—"
+
             rows = []
             ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
             for i, (engine, elo) in enumerate(ordered, 1):
@@ -99,6 +115,9 @@ def show_rankings(session):
                     "matches": s.get("matches", 0), "wins": s.get("wins", 0),
                     "draws": s.get("draws", 0), "loses": s.get("loses", 0),
                     "wr": f"{s.get('win_rate', 0.0):.1f}",
+                    "bullet": tc_record(engine, "bullet"),
+                    "blitz":  tc_record(engine, "blitz"),
+                    "rapid":  tc_record(engine, "rapid"),
                     "top_opening": (f"{top['opening']} ({top['games']}×)"
                                     if top else "—"),
                 })
