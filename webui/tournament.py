@@ -525,6 +525,38 @@ def show_tournament_window(session, tsess: TournamentSession):
                         .classes("text-2xl font-bold") \
                         .style(f"color: {COLOR_GOLD}")
                 _sync_controls()
+                _show_final_modal()
+
+        def _show_final_modal():
+            """Result modal shown once when the tournament finishes."""
+            standings = t.get_standings()
+            with ui.dialog() as fdlg, ui.card().classes(
+                    "arena-panel items-center w-[460px] max-w-full gap-2 p-6"):
+                ui.element("img").props('src="/assets/ui/badge_crown.png"') \
+                    .style("height: 72px; width: auto;")
+                ui.label("TOURNAMENT CHAMPION") \
+                    .classes("text-2xl font-bold text-primary")
+                ui.label(t.winner.name if t.winner else "?") \
+                    .classes("text-xl font-bold").style(f"color: {COLOR_GOLD}")
+                ui.label(f"{t.name}  ·  {t.format}  ·  "
+                         f"{len(t.all_games)} games") \
+                    .classes("text-xs text-gray-500")
+                ui.separator()
+                ui.label("FINAL STANDINGS").classes("arena-heading")
+                for i, p in enumerate(standings[:3], 1):
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        ui.element("img").props(
+                            f'src="/assets/ui/medal_{i}.png"') \
+                            .style("height: 22px; width: auto;")
+                        ui.label(f"{p.name}") \
+                            .classes("font-bold text-sm")
+                        ui.label(f"{p.score} pts "
+                                 f"({p.wins}/{p.draws}/{p.losses})") \
+                            .classes("text-xs text-gray-500")
+                with ui.row().classes("w-full justify-end gap-2 mt-2 dlg-foot"):
+                    ui.button("Close", on_click=fdlg.close) \
+                        .props("flat color=grey no-caps")
+            fdlg.open()
 
         def _tick():
             with tsess.lock:
