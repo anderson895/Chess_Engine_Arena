@@ -115,7 +115,9 @@ body {{
     grid-template-rows: repeat(8, 1fr);
     aspect-ratio: 1 / 1;
     width: 100%;
-    max-width: min(78vh, 100%);
+    /* 100vh minus header, status/opening rows, both player banners and
+       gaps — keeps board + both banners visible without scrolling */
+    max-width: min(calc(100vh - 250px), 100%);
     margin: 0 auto;
     border: 2px solid #333;
     border-radius: 4px;

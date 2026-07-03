@@ -457,7 +457,9 @@ def main_page():
 
             black_banner, black_name_lbl, black_rank_lbl = _banner(COLOR_SILVER)
 
-            with ui.row().classes("w-full no-wrap flex-grow gap-2 "
+            # No flex-grow: the row hugs the board so the white banner sits
+            # right below it instead of being pushed to the column bottom.
+            with ui.row().classes("w-full no-wrap gap-2 "
                                   "justify-center items-stretch"):
                 with ui.column().classes("items-center gap-0 py-1 self-stretch"):
                     ui.element("img").props('src="/assets/pieces/bK.png"') \
