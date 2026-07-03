@@ -372,11 +372,42 @@ def main_page():
 
                 ui.separator()
                 widgets.heading("ic_settings", "SETTINGS", size=15, text_cls="arena-heading")
-                ui.number(label="Move time (ms)", value=session.movetime_ms,
-                          min=100, max=60000, step=100,
-                          on_change=lambda e: setattr(
-                              session, "movetime_ms", int(e.value or 1000))) \
-                    .props("dense").classes("w-full")
+                def on_time_mode(e):
+                    session.time_mode = e.value
+                    time_settings.refresh()
+                ui.select({"movetime": "Fixed move time",
+                           "clock": "Clock (base + increment)"},
+                          value=session.time_mode, label="Time control",
+                          on_change=on_time_mode) \
+                    .props("dense options-dense").classes("w-full") \
+                    .tooltip("Clock: engines manage their own time and can "
+                             "lose on time (Engine vs Engine only)")
+
+                @ui.refreshable
+                def time_settings():
+                    if session.time_mode == "clock":
+                        ui.number(label="Base time (min)",
+                                  value=session.base_min,
+                                  min=0.1, max=180, step=0.5,
+                                  on_change=lambda e: setattr(
+                                      session, "base_min",
+                                      float(e.value or 5))) \
+                            .props("dense").classes("w-full")
+                        ui.number(label="Increment (s)", value=session.inc_s,
+                                  min=0.0, max=60.0, step=0.5,
+                                  on_change=lambda e: setattr(
+                                      session, "inc_s",
+                                      float(e.value or 0))) \
+                            .props("dense").classes("w-full")
+                    else:
+                        ui.number(label="Move time (ms)",
+                                  value=session.movetime_ms,
+                                  min=100, max=60000, step=100,
+                                  on_change=lambda e: setattr(
+                                      session, "movetime_ms",
+                                      int(e.value or 1000))) \
+                            .props("dense").classes("w-full")
+                time_settings()
                 ui.number(label="Move delay (s)", value=session.delay_s,
                           min=0.0, max=10.0, step=0.1,
                           on_change=lambda e: setattr(
@@ -455,7 +486,8 @@ def main_page():
                 .style(f"color: {COLOR_BLUE}; background: #0D1B2A; "
                        f"border: 1px solid #003366")
 
-            black_banner, black_name_lbl, black_rank_lbl = _banner(COLOR_SILVER)
+            black_banner, black_name_lbl, black_rank_lbl, black_clock_lbl = \
+                _banner(COLOR_SILVER)
 
             # No flex-grow: the row hugs the board so the white banner sits
             # right below it instead of being pushed to the column bottom.
@@ -470,7 +502,8 @@ def main_page():
                 with ui.element("div").classes("flex-grow min-w-0"):
                     board_view = BoardView(_board_state, on_click=_square_clicked)
 
-            white_banner, white_name_lbl, white_rank_lbl = _banner(COLOR_GOLD)
+            white_banner, white_name_lbl, white_rank_lbl, white_clock_lbl = \
+                _banner(COLOR_GOLD)
 
             check_lbl = ui.label("").classes("text-center font-bold w-full") \
                 .style("color: #FF4444")
@@ -539,6 +572,15 @@ def main_page():
             check_lbl.set_text("")
         refresh_banners()
 
+    def _update_clocks():
+        if not session.uses_clock():
+            white_clock_lbl.set_text("")
+            black_clock_lbl.set_text("")
+            return
+        w, b = session.clock_strings()
+        white_clock_lbl.set_text(w)
+        black_clock_lbl.set_text(b)
+
     def on_quality(quality):
         if not quality:
             quality_lbl.set_text("")
@@ -555,6 +597,9 @@ def main_page():
     session.on("eval_bar", eval_bar.set_cp)
     session.on("quality", on_quality)
     session.on("banners", refresh_banners)
+    session.on("clock", _update_clocks)
+    # Live countdown while an engine is thinking (clock mode)
+    ui.timer(0.25, _update_clocks)
     session.on("error", lambda msg: ui.notify(msg, type="negative",
                                               multi_line=True))
     session.on("eval", lambda side, ev, dp: eng_log.push(
@@ -621,8 +666,9 @@ def _banner(color):
     banner = ui.row().classes("player-banner w-full items-center justify-between")
     with banner:
         name_lbl = ui.label("").classes("font-bold").style(f"color: {color}")
+        clock_lbl = ui.label("").classes("mono font-bold text-base")
         rank_lbl = ui.label("").classes("text-xs")
-    return banner, name_lbl, rank_lbl
+    return banner, name_lbl, rank_lbl, clock_lbl
 
 
 def _action_btn(icon, text, on_click, primary=False):

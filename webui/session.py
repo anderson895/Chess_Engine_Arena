@@ -51,6 +51,7 @@ class GameSession:
       quality(label)                       — move quality label ('Book', 'Best', …)
       opening(text)                        — opening display line
       game_over(result, reason, winner)    — game finished
+      clock()                              — clock values changed (clock mode)
       banners()                            — names/ranks may have changed
       error(msg)                           — user-facing error
     """
@@ -80,6 +81,12 @@ class GameSession:
         self.player_color = "white"
         self.movetime_ms  = 1000
         self.delay_s      = 0.5
+        # Time control: "movetime" = fixed ms/move, "clock" = real chess
+        # clock (base + increment, engines manage their own time). Clock
+        # mode applies to Engine-vs-Engine games only.
+        self.time_mode    = "movetime"
+        self.base_min     = 5.0
+        self.inc_s        = 2.0
 
         # Preset opening
         self.preset_moves: list[str] = []
@@ -96,6 +103,11 @@ class GameSession:
         self._engine_thinking = False
         self._game_task: asyncio.Task | None = None
         self._start_time = 0.0
+
+        # Clock state (clock mode only)
+        self.wtime_ms = 0.0
+        self.btime_ms = 0.0
+        self._think_start = None   # time.time() when current search began
 
         # Analysis state
         self._analyzer_alock = asyncio.Lock()
@@ -175,6 +187,25 @@ class GameSession:
         return (f"Move {self.board.fullmove} | {t} to move | "
                 f"50-move: {self.board.halfmove}/100 | "
                 f"Plies: {len(self.board.move_history)}")
+
+    def uses_clock(self):
+        """True when the current config plays with a real chess clock."""
+        return self.time_mode == "clock" and self.play_mode == self.MODE_EVE
+
+    def clock_strings(self):
+        """Formatted (white, black) clock texts, live during a search."""
+        w, b = self.wtime_ms, self.btime_ms
+        if self._think_start is not None and self.game_running:
+            elapsed = (time.time() - self._think_start) * 1000
+            if self.board.turn == "w":
+                w -= elapsed
+            else:
+                b -= elapsed
+
+        def fmt(ms):
+            s = max(0, int(ms / 1000))
+            return f"{s // 60}:{s % 60:02d}"
+        return fmt(w), fmt(b)
 
     # ═══════════════════════════════════════════════════════
     #  Elo / ranking data (cached)
@@ -289,6 +320,12 @@ class GameSession:
         self._elo_cache = None           # tournaments may have added games
         self.current_opening_name = None
 
+        # Reset clocks
+        self._think_start = None
+        if self.uses_clock():
+            self.wtime_ms = self.btime_ms = self.base_min * 60000
+        self._emit("clock")
+
         # Apply preset opening
         if self.preset_moves:
             self.current_opening_name = self.preset_name
@@ -375,6 +412,7 @@ class GameSession:
         self.game_running = False
         self.game_paused = False
         self._engine_thinking = False
+        self._think_start = None
         asyncio.create_task(self.kill_engines())
 
         if self.board.move_history or result != "*":
@@ -399,6 +437,7 @@ class GameSession:
         self.game_running = False
         self.game_paused = False
         self._engine_thinking = False
+        self._think_start = None
         asyncio.create_task(self.kill_engines())
         self.board.reset()
         self.last_move = None
@@ -515,15 +554,46 @@ class GameSession:
         moves_before = self.board.uci_moves_str()
         was_white = not is_black
 
+        # Real-clock mode: hand the engine both clocks and let it manage
+        # its own thinking time; we account for what it actually spent.
+        clock = None
+        if self.uses_clock():
+            inc = int(self.inc_s * 1000)
+            clock = {"wtime": max(1, int(self.wtime_ms)),
+                     "btime": max(1, int(self.btime_ms)),
+                     "winc": inc, "binc": inc}
+            self._think_start = time.time()
+            self._emit("clock")
+
         try:
             uci = await run.io_bound(
-                engine.get_best_move, moves_before, self.movetime_ms)
+                engine.get_best_move, moves_before, self.movetime_ms,
+                None, clock)
         except Exception as e:
             self._emit("engine_log", f"[ERR] {e}", tag)
             uci = None
 
+        if clock:
+            elapsed_ms = (time.time() - self._think_start) * 1000
+            self._think_start = None
+
         if not self.game_running:
             return False
+
+        if clock:
+            remaining = (self.btime_ms if is_black else self.wtime_ms) \
+                - elapsed_ms
+            if remaining <= 0:
+                self._emit("clock")
+                await self._finish(forfeit_result, f"{name} lost on time",
+                                   "black" if not is_black else "white")
+                return False
+            remaining += self.inc_s * 1000
+            if is_black:
+                self.btime_ms = remaining
+            else:
+                self.wtime_ms = remaining
+            self._emit("clock")
         if not uci:
             await self._finish(forfeit_result, f"{name} returned no move",
                                "black" if not is_black else "white")
@@ -673,6 +743,7 @@ class GameSession:
         self.game_running = False
         self.game_result = result
         self._engine_thinking = False
+        self._think_start = None
         asyncio.create_task(self.kill_engines())
 
         white, black = self.player_names()

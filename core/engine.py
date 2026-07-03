@@ -140,7 +140,8 @@ class UCIEngine:
 
     # ── Move / eval requests ──────────────────────────────
 
-    def get_best_move(self, moves_str, movetime_ms=1000, on_info=None):
+    def get_best_move(self, moves_str, movetime_ms=1000, on_info=None,
+                      clock=None):
         """
         Ask the engine for its best move.
 
@@ -149,9 +150,13 @@ class UCIEngine:
         moves_str : str
             Space-separated UCI move history from the starting position.
         movetime_ms : int
-            Milliseconds the engine is allowed to think.
+            Milliseconds the engine is allowed to think (fixed-time mode).
         on_info : callable | None
             Optional callback invoked with each parsed ``info`` dict.
+        clock : dict | None
+            Real-clock mode: ``{"wtime", "btime", "winc", "binc"}`` in ms.
+            When given, the engine manages its own time (``go wtime …``)
+            and *movetime_ms* is ignored.
 
         Returns
         -------
@@ -165,9 +170,13 @@ class UCIEngine:
         cmd = (f"position startpos moves {moves_str}"
                if moves_str else "position startpos")
         self._send(cmd)
-        self._send(f"go movetime {movetime_ms}")
-
-        max_wait = (movetime_ms / 1000) + 10
+        if clock:
+            self._send(f"go wtime {clock['wtime']} btime {clock['btime']} "
+                       f"winc {clock['winc']} binc {clock['binc']}")
+            max_wait = max(clock['wtime'], clock['btime']) / 1000 + 10
+        else:
+            self._send(f"go movetime {movetime_ms}")
+            max_wait = (movetime_ms / 1000) + 10
         end  = time.time() + max_wait
         best = None
 
