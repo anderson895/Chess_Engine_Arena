@@ -211,7 +211,7 @@ def main_page():
         ui.element("img").props('src="/assets/pieces/wN.png"') \
             .style("height: 34px; width: auto;")
         ui.label("ENGINE ARENA").classes("text-lg font-bold text-primary")
-        ui.element("div").classes("w-px h-10 bg-primary mx-1")
+        ui.space()
         for card, handler, tip in [
             ("rankings",
              lambda: widgets.with_loader(
