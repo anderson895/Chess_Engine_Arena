@@ -80,6 +80,11 @@ class Database:
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Games recorded before time controls existed were played without
+        # a clock — label them 'Classic' (idempotent: only fills blanks)
+        conn.execute("UPDATE games SET time_control = 'Classic' "
+                     "WHERE COALESCE(time_control, '') = ''")
+
         conn.commit()
         conn.close()
 
@@ -260,16 +265,10 @@ class Database:
         Returns
         -------
         dict: {engine: {time_control_label: {'wins', 'draws', 'loses'}}}
-        Games saved before time controls existed group under 'Unknown'.
+        Games saved before time controls existed group under 'Classic'.
         """
         try:
-            conn   = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT white_engine, black_engine, result, "
-                "COALESCE(time_control, '') FROM games")
-            rows = cursor.fetchall()
-            conn.close()
+            rows = self.get_all_games_for_elo_tc()
         except Exception as e:
             print(f"[Database] get_time_control_stats error: {e}")
             return {}
@@ -278,7 +277,7 @@ class Database:
         for white, black, result, tc in rows:
             if result not in ('1-0', '0-1', '1/2-1/2'):
                 continue
-            tc = tc or 'Unknown'
+            tc = tc or 'Classic'
             for name, win_res in ((white, '1-0'), (black, '0-1')):
                 rec = stats.setdefault(
                     normalize_engine_name(name), {}).setdefault(
@@ -290,6 +289,22 @@ class Database:
                 else:
                     rec['loses'] += 1
         return stats
+
+    def get_all_games_for_elo_tc(self):
+        """Elo input rows with time control: (white, black, result, tc),
+        ordered oldest-first."""
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT white_engine, black_engine, result, "
+                "COALESCE(time_control, '') FROM games ORDER BY id ASC")
+            rows = cursor.fetchall()
+            conn.close()
+            return rows
+        except Exception as e:
+            print(f"[Database] get_all_games_for_elo_tc error: {e}")
+            return []
 
     @staticmethod
     def _games_where(filter_engine=None, search_query='', source_filter=None):
@@ -326,7 +341,8 @@ class Database:
             query = ('''
                 SELECT id, white_engine, black_engine, result, reason,
                        date, time, move_count, duration_seconds,
-                       COALESCE(source, 'regular') as source
+                       COALESCE(source, 'regular') as source,
+                       COALESCE(time_control, '') as time_control
                 FROM games''' + where + ' ORDER BY id DESC')
             if limit:
                 query += ' LIMIT ?'

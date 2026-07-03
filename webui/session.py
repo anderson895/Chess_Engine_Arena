@@ -24,12 +24,15 @@ from data.database import Database
 
 
 # Time-control presets: key → (label, base minutes, increment seconds).
-# Engines always play on a real clock ("go wtime/btime winc/binc") so
-# they manage their own time and lose on time when the clock runs out.
+# Clocked presets use "go wtime/btime winc/binc" so engines manage their
+# own time and lose on time when the clock runs out. "Classic" has no
+# clock (base is None): engines get a fixed think time per move and can
+# never lose on time.
 TIME_CONTROLS = {
-    "bullet": ("Bullet (1+0)",  1.0, 0.0),
-    "blitz":  ("Blitz (3+2)",   3.0, 2.0),
-    "rapid":  ("Rapid (10+5)", 10.0, 5.0),
+    "bullet":  ("Bullet (1+0)",  1.0, 0.0),
+    "blitz":   ("Blitz (3+2)",   3.0, 2.0),
+    "rapid":   ("Rapid (10+5)", 10.0, 5.0),
+    "classic": ("Classic",       None, None),
 }
 
 
@@ -197,8 +200,9 @@ class GameSession:
                 f"Plies: {len(self.board.move_history)}")
 
     def uses_clock(self):
-        """Engines always play on a real chess clock."""
-        return True
+        """True unless the selected preset is clockless (Classic)."""
+        return TIME_CONTROLS.get(
+            self.time_control, TIME_CONTROLS["blitz"])[1] is not None
 
     def clock_strings(self):
         """Formatted (white, black) clock texts, live during a search."""
@@ -332,7 +336,7 @@ class GameSession:
         self._think_start = None
         self._game_tc_label, self.base_min, self.inc_s = TIME_CONTROLS.get(
             self.time_control, TIME_CONTROLS["blitz"])
-        self.wtime_ms = self.btime_ms = self.base_min * 60000
+        self.wtime_ms = self.btime_ms = (self.base_min or 0) * 60000
         self._emit("clock")
 
         # Apply preset opening

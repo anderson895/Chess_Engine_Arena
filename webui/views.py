@@ -3,16 +3,17 @@
 #  Game History and PGN replay viewer
 # ═══════════════════════════════════════════════════════════
 
+import asyncio
 import re
 
-from nicegui import ui
+from nicegui import ui, run
 
 from core.board import Board
-from core.constants import RANK_TIERS
-from core.elo import compute_elo_history
-from core.utils import normalize_engine_name, get_tier
+from core.constants import RANK_TIERS, QUALITY_COLORS
+from core.elo import compute_elo_history, compute_elo_ratings
+from core.utils import normalize_engine_name, get_tier, classify_move_quality
 from webui import widgets
-from webui.board import BoardView
+from webui.board import BoardView, EvalBar
 from webui.theme import COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_RED
 
 _TIER_CELL_SLOT = """
@@ -40,8 +41,8 @@ def show_rankings(session):
             "arena-panel w-full h-full flex flex-col"):
         widgets.heading("ic_trophy", "RANKINGS & STATISTICS")
         ui.label("Elo ratings and W/D/L from all recorded games — "
-                 "Bullet/Blitz/Rapid columns show each engine's W-D-L "
-                 "record per time control") \
+                 "Bullet/Blitz/Rapid/Classic columns show each engine's "
+                 "Elo rating per time control") \
             .classes("text-xs text-gray-500")
 
         with ui.row().classes("gap-2 flex-wrap"):
@@ -65,6 +66,7 @@ def show_rankings(session):
             {"name": "bullet",  "label": "Bullet", "field": "bullet", "align": "center"},
             {"name": "blitz",   "label": "Blitz",  "field": "blitz",  "align": "center"},
             {"name": "rapid",   "label": "Rapid",  "field": "rapid",  "align": "center"},
+            {"name": "classic", "label": "Classic", "field": "classic", "align": "center"},
             {"name": "top_opening", "label": "Top Opening",
              "field": "top_opening", "align": "left", "sortable": True},
             {"name": "actions", "label": "History", "field": "engine",
@@ -91,17 +93,18 @@ def show_rankings(session):
             ratings, _, _ = session.elo_data()
             stats_map = {s["engine"]: s for s in session.db.get_engine_stats()}
             top_map = session.db.get_top_openings()
-            tc_map = session.db.get_time_control_stats()
+            # Per-time-control Elo: bucket games by TC prefix and run an
+            # independent Elo computation over each bucket.
+            tc_games = {}
+            for white, black, result, tc in session.db.get_all_games_for_elo_tc():
+                key = (tc or "Classic").split(" ")[0].split("(")[0].lower()
+                tc_games.setdefault(key, []).append((white, black, result))
+            tc_ratings = {key: compute_elo_ratings(games)
+                          for key, games in tc_games.items()}
 
-            def tc_record(engine, prefix):
-                """'W-D-L' record for all time controls matching *prefix*."""
-                w = d = l = 0
-                for tc, rec in tc_map.get(engine, {}).items():
-                    if tc.lower().startswith(prefix):
-                        w += rec["wins"]
-                        d += rec["draws"]
-                        l += rec["loses"]
-                return f"{w}-{d}-{l}" if (w or d or l) else "—"
+            def tc_rating(engine, key):
+                elo = tc_ratings.get(key, {}).get(engine)
+                return str(elo) if elo is not None else "—"
 
             rows = []
             ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
@@ -115,9 +118,10 @@ def show_rankings(session):
                     "matches": s.get("matches", 0), "wins": s.get("wins", 0),
                     "draws": s.get("draws", 0), "loses": s.get("loses", 0),
                     "wr": f"{s.get('win_rate', 0.0):.1f}",
-                    "bullet": tc_record(engine, "bullet"),
-                    "blitz":  tc_record(engine, "blitz"),
-                    "rapid":  tc_record(engine, "rapid"),
+                    "bullet":  tc_rating(engine, "bullet"),
+                    "blitz":   tc_rating(engine, "blitz"),
+                    "rapid":   tc_rating(engine, "rapid"),
+                    "classic": tc_rating(engine, "classic"),
                     "top_opening": (f"{top['opening']} ({top['games']}×)"
                                     if top else "—"),
                 })
@@ -322,6 +326,7 @@ def show_game_history(session, filter_engine=None):
             {"name": "white",  "label": "White",  "field": "white",  "align": "left"},
             {"name": "black",  "label": "Black",  "field": "black",  "align": "left"},
             {"name": "result", "label": "Result", "field": "result", "align": "center"},
+            {"name": "tc",     "label": "Time Control", "field": "tc", "align": "center", "sortable": True},
             {"name": "reason", "label": "Reason", "field": "reason", "align": "left"},
             {"name": "moves",  "label": "Moves",  "field": "moves",  "align": "center"},
             {"name": "dur",    "label": "Duration", "field": "dur",  "align": "center"},
@@ -353,6 +358,7 @@ def show_game_history(session, filter_engine=None):
             for g in games_cache:
                 gid, white, black, result, reason, date, time_str, moves, dur = g[:9]
                 src_tag = g[9] if len(g) > 9 else "regular"
+                tc = g[10] if len(g) > 10 else ""
                 if result == "1/2-1/2":
                     col = COLOR_BLUE
                 elif result == "1-0":
@@ -369,6 +375,7 @@ def show_game_history(session, filter_engine=None):
                     "id": gid, "date": date, "time": time_str,
                     "white": white, "black": black,
                     "result": result, "result_col": col,
+                    "tc": tc or "—",
                     "reason": ("[T] " if src_tag == "tournament" else "") + (reason or ""),
                     "moves": moves or 0,
                     "dur": f"{dur // 60}m {dur % 60}s" if dur else "—",
@@ -461,6 +468,7 @@ def show_pgn_viewer(session, game_id, all_games=None):
         pos["i"] = i
         board_view.refresh()
         update_label()
+        asyncio.create_task(analyze_current())
 
     with ui.dialog() as dialog, ui.card().classes(
             "arena-panel w-[1000px] max-w-full h-[720px] flex flex-col"):
@@ -493,21 +501,28 @@ def show_pgn_viewer(session, game_id, all_games=None):
 
         with ui.row().classes("w-full flex-grow no-wrap gap-4"):
             with ui.column().classes("w-1/2 items-center"):
-                board_view = BoardView(state)
+                with ui.row().classes("w-full no-wrap gap-2 justify-center "
+                                      "items-stretch"):
+                    with ui.column().classes("gap-0 py-1 self-stretch"):
+                        eval_bar = EvalBar()
+                    with ui.element("div").classes("flex-grow min-w-0"):
+                        board_view = BoardView(state)
                 move_label = ui.label("Start position") \
                     .classes("font-bold text-primary")
+                with ui.row().classes("items-center gap-3"):
+                    eval_lbl = ui.label("").classes("mono text-sm")
+                    quality_lbl = ui.label("").classes("font-bold")
                 opening_lbl = ui.label("").classes("text-xs italic") \
                     .style(f"color: {COLOR_BLUE}")
                 with ui.row().classes("gap-1"):
                     for icon, action, tip in [
-                        ("ic_rew",      lambda: goto(0),            "Start"),
-                        ("ic_play_rev", lambda: goto(pos["i"] - 1), "Previous move"),
-                        ("ic_play",     lambda: goto(pos["i"] + 1), "Next move"),
-                        ("ic_ff",       lambda: goto(len(moves)),   "End"),
+                        ("first_page",    lambda: goto(0),            "Start"),
+                        ("chevron_left",  lambda: goto(pos["i"] - 1), "Previous move"),
+                        ("chevron_right", lambda: goto(pos["i"] + 1), "Next move"),
+                        ("last_page",     lambda: goto(len(moves)),   "End"),
                     ]:
-                        with ui.button(on_click=action).props("dense").tooltip(tip):
-                            ui.element("img").props(
-                                f'src="/assets/ui/{icon}.png"').classes("btn-ic")
+                        ui.button(icon=icon, on_click=action) \
+                            .props("dense").tooltip(tip)
                 widgets.hint("Keys: ← → move · Home/End start/end")
             with ui.column().classes("w-1/2 h-full"):
                 ui.label("PGN").classes("arena-heading")
@@ -536,6 +551,53 @@ def show_pgn_viewer(session, game_id, all_games=None):
                 opening_lbl.set_text(
                     (f"{eco} · {name}" if eco else name) if name else "")
 
+        # ── Analyzer: eval bar + move quality while navigating ─
+        evals = {}              # ply index → cp (White POV), cached
+        anal_token = {"n": 0}   # drops stale results on fast navigation
+
+        async def analyze_current():
+            if not (session.analyzer and session.analyzer.alive):
+                eval_lbl.set_text("No analyzer loaded")
+                return
+            i = pos["i"]
+            anal_token["n"] += 1
+            tok = anal_token["n"]
+            eval_lbl.set_text("Analyzing…")
+
+            # Evaluate previous + current position (quality needs both)
+            for j in (i - 1, i):
+                if j >= 0 and j not in evals:
+                    moves_str = " ".join(moves[:j])
+                    async with session._analyzer_alock:
+                        res = await run.io_bound(
+                            session.analyzer.eval_position, moves_str, 200)
+                    if res and res[0] is not None:
+                        evals[j] = res[0]
+            if tok != anal_token["n"]:
+                return          # user already navigated elsewhere
+
+            cp = evals.get(i)
+            if cp is None:
+                eval_lbl.set_text("—")
+                return
+            eval_bar.set_cp(cp)
+            eval_lbl.set_text(f"Eval: {cp / 100:+.2f}")
+
+            if i == 0:
+                quality_lbl.set_text("")
+            elif (session.opening_book.loaded and
+                    session.opening_book.in_book(replay.uci_moves_list())):
+                quality_lbl.set_text("Book")
+                quality_lbl.style(f"color: {QUALITY_COLORS.get('Book', '#EAEAEA')}")
+            elif (i - 1) in evals:
+                was_white = (i % 2 == 1)
+                q = classify_move_quality(evals[i - 1], cp, was_white)
+                quality_lbl.set_text(q or "")
+                quality_lbl.style(
+                    f"color: {QUALITY_COLORS.get(q, '#EAEAEA')}")
+            else:
+                quality_lbl.set_text("")
+
         def on_key(e):
             if not e.action.keydown:
                 return
@@ -552,4 +614,5 @@ def show_pgn_viewer(session, game_id, all_games=None):
         ui.button("Close", on_click=dialog.close) \
             .props("flat color=grey no-caps").classes("self-end dlg-foot")
         update_label()
+        asyncio.create_task(analyze_current())
     dialog.open()
