@@ -268,7 +268,7 @@ def main_page():
                             ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
                                 .props("dense flat size=sm") \
                                 .classes("text-xs") \
-                                .tooltip("Ipagpalit ang kulay ng dalawang engine")
+                                .tooltip("Swap the colors of the two engines")
                         _engine_config("WHITE", "e2", COLOR_GOLD, "wK")
                     else:
                         with ui.row().classes("items-center gap-1 no-wrap"):
@@ -288,7 +288,7 @@ def main_page():
                             ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
                                 .props("dense flat size=sm") \
                                 .classes("text-xs") \
-                                .tooltip("Ipagpalit ang kulay mo at ng engine")
+                                .tooltip("Swap colors with the engine")
                         _engine_config("OPPONENT", "e2", COLOR_GOLD, "wK")
 
                 def _engine_config(title, prefix, color, piece_code=None):
@@ -347,7 +347,7 @@ def main_page():
 
                 def _swap_colors():
                     if session.game_running:
-                        ui.notify("Itigil muna ang laro bago magpalit ng kulay",
+                        ui.notify("Stop the game before switching colors",
                                   type="warning")
                         return
                     if session.swap_colors():
@@ -580,7 +580,7 @@ def main_page():
                 .classes("text-xl font-bold text-primary")
             ui.spinner(size="46px", color="primary")
             boot_status = ui.label("Preparing…").classes("text-sm text-gray-400")
-            widgets.hint("Unang takbo lang matagal — naka-cache na pagkatapos")
+            widgets.hint("Only the first run is slow — cached after that")
         boot_dlg.open()
 
         async def _boot():
