@@ -30,7 +30,7 @@ def main():
         None)
 
     ui.run(
-        title="♟ Chess Engine Arena",
+        title="Chess Engine Arena",
         favicon=favicon,
         dark=True,
         native=native,
