@@ -9,6 +9,7 @@
 
 import os
 import threading
+import time
 from datetime import datetime
 
 from nicegui import app, ui
@@ -43,6 +44,12 @@ _RANK_MEDAL_SLOT = """
   <span v-else>#{{ props.row.rank }}</span>
 </q-td>
 """
+
+
+def _fmt_clock(ms):
+    """mm:ss for a clock value in milliseconds (never negative)."""
+    s = max(0, int(ms / 1000))
+    return f"{s // 60}:{s % 60:02d}"
 
 
 class SnapshotBoard:
@@ -81,6 +88,17 @@ class TournamentSession:
         self.status_msg = "Ready — press Start"
         self.state = "ready"          # ready | running | paused | stopped | finished
 
+        # Current-game banner/clock snapshot
+        self.white_name = ""
+        self.black_name = ""
+        _, base, _ = TIME_CONTROLS.get(
+            getattr(tournament, "time_control", "classic"),
+            TIME_CONTROLS["classic"])
+        self.use_clock = base is not None          # Classic → no clocks
+        self.wtime_ms = self.btime_ms = (base or 0) * 60000
+        self.turn = "w"                            # side thinking right now
+        self.clock_at = time.time()                # when the snapshot was taken
+
         self.board_dirty = True
         self.tables_dirty = True
 
@@ -88,8 +106,15 @@ class TournamentSession:
 
     def _cb_game_start(self, game):
         with self.lock:
-            self.game_label = (f"Round {game.round_num}:  "
-                               f"{game.white.name}  vs  {game.black.name}")
+            self.game_label = f"Round {game.round_num}"
+            self.white_name = game.white.name
+            self.black_name = game.black.name
+            _, base, _ = TIME_CONTROLS.get(
+                getattr(self.t, "time_control", "classic"),
+                TIME_CONTROLS["classic"])
+            self.wtime_ms = self.btime_ms = (base or 0) * 60000
+            self.turn = "w"
+            self.clock_at = time.time()
             self.board = SnapshotBoard()
             self.last_move = None
             self.cp = None
@@ -103,6 +128,11 @@ class TournamentSession:
             self.last_move = last_move
             self.cp = cp
             self.opening = opening or ""
+            self.use_clock = getattr(game, "use_clock", self.use_clock)
+            self.wtime_ms = getattr(game, "wtime_ms", self.wtime_ms)
+            self.btime_ms = getattr(game, "btime_ms", self.btime_ms)
+            self.turn = board.turn        # side to move = thinking next
+            self.clock_at = time.time()
             self.board_dirty = True
 
     def _cb_game_end(self, game):
@@ -178,6 +208,12 @@ class TournamentSession:
             self.runner.stop()
         if self.state != "finished":
             self.state = "stopped"
+
+    def adjudicate(self, result):
+        """End the current game with a user-decided result; play continues."""
+        if self.runner and self.state in ("running", "paused"):
+            self.runner.adjudicate(result)
+            self.state = "running"     # adjudicating releases a pause
 
 
 def stop_all_tournaments():
@@ -449,6 +485,10 @@ def show_tournament_window(session, tsess: TournamentSession):
             pause_btn = widgets.icon_button(
                 "Pause", "ic_pause", secondary=True,
                 on_click=lambda: (tsess.pause(), _sync_controls()))
+            decide_btn = ui.button(
+                "Decide Result", on_click=lambda: _open_decide()) \
+                .props("no-caps color=secondary") \
+                .tooltip("Stop the current game and set its result yourself")
             stop_btn = widgets.icon_button(
                 "Stop", "ic_stop", secondary=True,
                 on_click=lambda: (tsess.stop(), _sync_controls()))
@@ -457,12 +497,16 @@ def show_tournament_window(session, tsess: TournamentSession):
 
         with ui.row().classes("w-full flex-grow no-wrap gap-4 min-h-0"):
 
-            # ── Left: live board ──────────────────────────
+            # ── Left: live board (Black on top, White below) ──
             with ui.column().classes("w-[46%] items-center gap-1 min-w-0"):
                 game_lbl = ui.label(tsess.game_label) \
                     .classes("font-bold text-center w-full")
                 opening_lbl = ui.label("").classes("text-xs italic") \
                     .style(f"color: {COLOR_BLUE}")
+
+                black_banner, black_name_lbl, black_rank_lbl, \
+                    black_clock_lbl = widgets.banner(COLOR_SILVER)
+
                 with ui.row().classes("w-full no-wrap flex-grow gap-2 "
                                       "justify-center items-stretch"):
                     with ui.column().classes(
@@ -476,6 +520,9 @@ def show_tournament_window(session, tsess: TournamentSession):
                             "legal_dests": set(),
                             "check_sq": None,
                         })
+
+                white_banner, white_name_lbl, white_rank_lbl, \
+                    white_clock_lbl = widgets.banner(COLOR_GOLD)
 
             # ── Right: standings / schedule / bracket ─────
             with ui.column().classes("flex-grow min-w-0"):
@@ -505,7 +552,70 @@ def show_tournament_window(session, tsess: TournamentSession):
             start_lbl.set_text("Resume" if tsess.state == "paused" else "Start")
             start_btn.set_visibility(tsess.state in ("ready", "paused"))
             pause_btn.set_visibility(tsess.state == "running")
+            decide_btn.set_visibility(tsess.state in ("running", "paused"))
             stop_btn.set_visibility(tsess.state in ("running", "paused"))
+
+        # Adjudication dialog: stop the current game, user picks the result
+        with ui.dialog() as decide_dlg, ui.card().classes(
+                "arena-panel items-center gap-3 p-6"):
+            ui.label("DECIDE GAME RESULT").classes("arena-heading")
+            decide_lbl = ui.label("").classes("text-sm text-gray-400")
+            with ui.row().classes("gap-2 no-wrap"):
+                ui.button("1-0  White wins",
+                          on_click=lambda: _decide("1-0")).props("no-caps")
+                ui.button("½-½  Draw",
+                          on_click=lambda: _decide("1/2-1/2")) \
+                    .props("no-caps color=secondary")
+                ui.button("0-1  Black wins",
+                          on_click=lambda: _decide("0-1")).props("no-caps")
+            ui.button("Cancel", on_click=decide_dlg.close) \
+                .props("flat color=grey no-caps")
+
+        def _open_decide():
+            with tsess.lock:
+                white, black = tsess.white_name, tsess.black_name
+            if not white:
+                ui.notify("No game in progress.", type="info")
+                return
+            decide_lbl.set_text(f"{white}  vs  {black}")
+            decide_dlg.open()
+
+        def _decide(result):
+            tsess.adjudicate(result)
+            decide_dlg.close()
+            _sync_controls()
+
+        def _refresh_banners():
+            with tsess.lock:
+                white, black = tsess.white_name, tsess.black_name
+                use_clock = tsess.use_clock
+                wtime, btime = tsess.wtime_ms, tsess.btime_ms
+                turn, clock_at = tsess.turn, tsess.clock_at
+            white_name_lbl.set_text(white or "—")
+            black_name_lbl.set_text(black or "—")
+            for raw, lbl in ((white, white_rank_lbl), (black, black_rank_lbl)):
+                text, color = session.rank_line(raw) if raw else ("", "#555")
+                lbl.set_text(text)
+                lbl.style(f"color: {color}")
+            if use_clock and white:
+                # live countdown for the side currently thinking
+                if tsess.state == "running":
+                    elapsed = (time.time() - clock_at) * 1000
+                    if turn == "w":
+                        wtime -= elapsed
+                    else:
+                        btime -= elapsed
+                white_clock_lbl.set_text(_fmt_clock(wtime))
+                black_clock_lbl.set_text(_fmt_clock(btime))
+            else:
+                white_clock_lbl.set_text("")
+                black_clock_lbl.set_text("")
+            if turn == "b":
+                black_banner.classes(add="active")
+                white_banner.classes(remove="active")
+            else:
+                white_banner.classes(add="active")
+                black_banner.classes(remove="active")
 
         def _refresh_tables():
             fmt_lbl.set_text(
@@ -569,6 +679,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                 opening = tsess.opening
                 game_label = tsess.game_label
             status_lbl.set_text(status)
+            _refresh_banners()          # names/ranks + live clock countdown
             if board_dirty:
                 board_view.refresh()
                 game_lbl.set_text(game_label)
@@ -576,6 +687,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                 if cp is not None:
                     eval_bar.set_cp(cp)
             if tables_dirty:
+                session._elo_cache = None   # a game was saved → ranks moved
                 _refresh_tables()
             if tsess.state == "finished":
                 _sync_controls()

@@ -605,7 +605,7 @@ def main_page():
                        f"border: 1px solid #003366")
 
             black_banner, black_name_lbl, black_rank_lbl, black_clock_lbl = \
-                _banner(COLOR_SILVER)
+                widgets.banner(COLOR_SILVER)
 
             # No flex-grow: the row hugs the board so the white banner sits
             # right below it instead of being pushed to the column bottom.
@@ -621,7 +621,7 @@ def main_page():
                     board_view = BoardView(_board_state, on_click=_square_clicked)
 
             white_banner, white_name_lbl, white_rank_lbl, white_clock_lbl = \
-                _banner(COLOR_GOLD)
+                widgets.banner(COLOR_GOLD)
 
             check_lbl = ui.label("").classes("text-center font-bold w-full") \
                 .style("color: #FF4444")
@@ -792,15 +792,6 @@ def _board_state():
 
 async def _square_clicked(br, bc):
     await session.click_square(br, bc)
-
-
-def _banner(color):
-    banner = ui.row().classes("player-banner w-full items-center justify-between")
-    with banner:
-        name_lbl = ui.label("").classes("font-bold").style(f"color: {color}")
-        clock_lbl = ui.label("").classes("mono font-bold text-base")
-        rank_lbl = ui.label("").classes("text-xs")
-    return banner, name_lbl, rank_lbl, clock_lbl
 
 
 def _action_btn(icon, text, on_click, primary=False):

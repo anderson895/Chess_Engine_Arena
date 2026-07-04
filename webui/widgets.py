@@ -33,6 +33,16 @@ async def with_loader(builder, message="Loading…"):
         overlay.close()
 
 
+def banner(color):
+    """Player banner row: name + clock + rank line (see .player-banner CSS)."""
+    row = ui.row().classes("player-banner w-full items-center justify-between")
+    with row:
+        name_lbl = ui.label("").classes("font-bold").style(f"color: {color}")
+        clock_lbl = ui.label("").classes("mono font-bold text-base")
+        rank_lbl = ui.label("").classes("text-xs")
+    return row, name_lbl, rank_lbl, clock_lbl
+
+
 def icon(name, size=16, cls=""):
     """Inline sprite icon <img> from /assets/ui/<name>.png."""
     return ui.element("img").props(f'src="/assets/ui/{name}.png"') \

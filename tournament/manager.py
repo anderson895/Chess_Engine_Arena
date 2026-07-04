@@ -1173,6 +1173,7 @@ class TournamentRunner:
         self.on_status       = on_status
         self._stop_flag      = False
         self._pause_flag     = False
+        self._adjudicate     = None    # (result, reason) set by the UI
         self._thread         = None
         self.current_engines = []
         self._analyzer       = None
@@ -1187,6 +1188,15 @@ class TournamentRunner:
     def pause(self):  self._pause_flag = True
     def resume(self): self._pause_flag = False
     def stop(self):   self._stop_flag = True; self._pause_flag = False
+
+    def adjudicate(self, result, reason="Adjudicated by user"):
+        """End the game in progress with *result* ('1-0'|'1/2-1/2'|'0-1').
+
+        Takes effect after the move currently being searched; the game is
+        recorded normally and the tournament moves on to the next pairing.
+        """
+        self._adjudicate = (result, reason)
+        self._pause_flag = False   # release a paused loop so it can apply
 
     def _run(self):
         analyzer_ref = self.t.analyzer_path
@@ -1282,6 +1292,7 @@ class TournamentRunner:
 
     def _play_game(self, game: TournamentGame):
         game.status = "running"
+        self._adjudicate = None      # drop a stale request from a past game
         self.on_game_start(game)
         self.on_status(
             f"Round {game.round_num}: {game.white.name}  vs  {game.black.name}")
@@ -1333,8 +1344,13 @@ class TournamentRunner:
 
         while True:
             if self._stop_flag: break
-            while self._pause_flag and not self._stop_flag:
+            while (self._pause_flag and not self._stop_flag
+                   and not self._adjudicate):
                 time.sleep(0.1)
+            if self._adjudicate:
+                result, reason = self._adjudicate
+                self._adjudicate = None
+                break
 
             over, result, reason, winner_color = board.game_result()
             if over: break
@@ -1481,6 +1497,10 @@ class TournamentRunner:
             if quality is None and len(move_qualities) < len(board.move_history):
                 move_qualities.append(None)
 
+            # Snapshot the clock on the game so UI callbacks can display it
+            game.use_clock = use_clock
+            game.wtime_ms  = wtime
+            game.btime_ms  = btime
             self.on_board_update(game, board, last_move, cp_val, mate_val, opening_name)
             time.sleep(max(0.02, self.t.delay))
 
