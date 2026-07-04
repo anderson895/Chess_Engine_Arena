@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════
 #  tools/slice_pieces.py — one-off sprite-sheet slicer
 #
-#  Cuts assets/chess_pcs_collection.png (3 designs stacked in rows;
+#  Cuts art_src/chess_pcs_collection.png (3 designs stacked in rows;
 #  each row = 6 white pieces then 6 black pieces, order P R N B Q K,
 #  true alpha background) into transparent 88×88 sprites compatible
 #  with assets/pieces/, written to assets/pieces_<n>/.
@@ -16,7 +16,7 @@ import sys
 
 from PIL import Image
 
-SHEET = os.path.join("assets", "chess_pcs_collection.png")
+SHEET = os.path.join("art_src", "chess_pcs_collection.png")
 PROBE_DIR = os.path.join("build", "piece_probe")
 
 # Left→right piece order inside each 6-piece group (verified w/ --probe)

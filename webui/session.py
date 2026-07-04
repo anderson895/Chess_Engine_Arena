@@ -58,6 +58,10 @@ class GameSession:
       clock()                              — clock values changed (clock mode)
       banners()                            — names/ranks may have changed
       error(msg)                           — user-facing error
+      sound(kind)                          — play a sound effect ('move',
+                                             'move_opp', 'capture', 'castle',
+                                             'promote', 'check', 'game_start',
+                                             'game_end', 'illegal')
     """
 
     MODE_EVE = "engine_vs_engine"
@@ -89,6 +93,7 @@ class GameSession:
         self.time_control = "blitz"
         self.base_min     = TIME_CONTROLS["blitz"][1]
         self.inc_s        = TIME_CONTROLS["blitz"][2]
+        self.sound_muted  = False
 
         # Preset opening
         self.preset_moves: list[str] = []
@@ -363,6 +368,7 @@ class GameSession:
         self.game_running = True
         self.game_paused = False
         self._emit("banners")
+        self._emit("sound", "game_start")
 
         if self.play_mode == self.MODE_HVE:
             base = self.e2_name.split("(")[0].strip()
@@ -578,7 +584,10 @@ class GameSession:
             uci = None
 
         if clock:
-            elapsed_ms = (time.time() - self._think_start) * 1000
+            # stop_game/new_game may have nulled _think_start mid-search
+            think_start = self._think_start
+            elapsed_ms = ((time.time() - think_start) * 1000
+                          if think_start is not None else 0.0)
             self._think_start = None
 
         if not self.game_running:
@@ -678,6 +687,7 @@ class GameSession:
             san, _cap = self.board.apply_uci(uci)
         except ValueError as e:
             self._emit("board_changed")
+            self._emit("sound", "illegal")
             self._emit("error", f"Invalid move: {e}")
             return
 
@@ -698,6 +708,12 @@ class GameSession:
                 await asyncio.sleep(0.1)
             if not self.game_running:
                 return
+            # Breathe between the player's move and the reply — a fast engine
+            # would otherwise answer in the same UI batch, so both move sounds
+            # overlap into one and the board flashes two moves at once.
+            await asyncio.sleep(max(0.3, self.delay_s))
+            if not self.game_running:
+                return
             is_black = (self.player_color == "white")
             if not await self._play_engine_move(self.engine2, self.e2_name, is_black):
                 return
@@ -714,7 +730,28 @@ class GameSession:
     #  Shared post-move / end-game plumbing
     # ═══════════════════════════════════════════════════════
 
+    def _sound_for_san(self, san, was_white):
+        """Sound effect kind for a SAN move (priority: check first).
+
+        Plain moves use chess.com's two distinct sounds: 'move' (move-self)
+        for White / the human player, 'move_opp' (move-opponent) otherwise —
+        so both sides are clearly audible as different sounds.
+        """
+        if "+" in san or "#" in san:
+            return "check"
+        if "=" in san:
+            return "promote"
+        if san.startswith("O-O"):
+            return "castle"
+        if "x" in san:
+            return "capture"
+        if self.play_mode == self.MODE_HVE:
+            human_moved = (self.player_color == "white") == was_white
+            return "move" if human_moved else "move_opp"
+        return "move" if was_white else "move_opp"
+
     def _after_move(self, moves_before, was_white, san):
+        self._emit("sound", self._sound_for_san(san, was_white))
         self._emit("board_changed")
         self._refresh_opening_display()
         ply = len(self.board.move_history)
@@ -761,6 +798,7 @@ class GameSession:
         self._emit("status", msg)
         self.swap_colors()          # reversed colors for the rematch
         self._emit("banners")
+        self._emit("sound", "game_end")
         self._emit("game_over", result, reason, winner)
 
     async def _save_game(self, result, reason):

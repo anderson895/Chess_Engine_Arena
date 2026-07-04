@@ -204,6 +204,141 @@ def main_page():
     apply_theme()
     session.clear_handlers()   # page rebuild → drop stale widget subscribers
 
+    # Sound effects (assets/sounds/default, chess.com-style pack).
+    # Web Audio API, not <audio> elements: each file is fetched and decoded
+    # once, then every play is a cheap buffer source. Audio elements would
+    # hit Chromium's ~75 WebMediaPlayer-per-page cap after a minute of
+    # engine-vs-engine play and go permanently silent.
+    ui.add_body_html(f"""
+    <script>
+    window.arenaSoundMuted = {str(session.sound_muted).lower()};
+    window.arenaSoundBuffers = {{}};
+    window.arenaAudioCtx = null;
+    // WAV (raw PCM) instead of mp3: decodeAudioData needs no codec, so a
+    // flaky WebView2 mp3 decoder can never leave a sound silently missing.
+    const arenaSoundFiles = {{
+        move: 'move-self', move_opp: 'move-opponent', capture: 'capture',
+        castle: 'castle', promote: 'promote', check: 'move-check',
+        game_start: 'game-start', game_end: 'game-end', illegal: 'illegal',
+    }};
+    // Report sound problems back to the server terminal (the native
+    // window has no visible devtools console).
+    function arenaSoundLog(msg) {{
+        console.warn('[arena] ' + msg);
+        try {{
+            if (window.did_handshake) window.socket.emit('log', {{
+                client_id: window.clientId, level: 'warning',
+                message: '[arena-sound] ' + msg,
+            }});
+        }} catch (e) {{}}
+    }}
+    // (Re)create the context if it is missing or was closed, and try to
+    // resume it whenever it is not running. resume() without a user
+    // gesture may be rejected by the autoplay policy — swallow that and
+    // keep retrying on every play/gesture instead of dying silently.
+    function arenaEnsureCtx() {{
+        let ctx = window.arenaAudioCtx;
+        if (!ctx || ctx.state === 'closed') {{
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+            window.arenaAudioCtx = ctx;
+            arenaStartKeepAlive(ctx);
+        }}
+        if (ctx.state !== 'running')
+            ctx.resume().catch(() => {{}});
+        return ctx;
+    }}
+    // Permanent, inaudible keep-alive tone (40 Hz at -54 dB). Chromium
+    // closes the physical audio stream after a few seconds of *silence*
+    // (especially when the window is occluded / another screen is up),
+    // and the ~100-200 ms reopen latency swallows entire 0.15 s move
+    // sounds. A continuously non-silent context keeps the stream open,
+    // so every move sound starts instantly.
+    function arenaStartKeepAlive(ctx) {{
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 40;
+        gain.gain.value = 0.002;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+    }}
+    // Fetch + decode one sound; on failure the slot is cleared so the
+    // next play attempt retries instead of staying silent forever
+    // (startup is busy parsing books/engines, so first loads can fail).
+    function arenaLoadSound(kind) {{
+        const file = arenaSoundFiles[kind];
+        if (!file || window.arenaSoundBuffers[kind]) return;
+        window.arenaSoundBuffers[kind] = 'loading';
+        fetch('/assets/sounds/default/' + file + '.wav')
+            .then((r) => {{
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.arrayBuffer();
+            }})
+            .then((buf) => arenaEnsureCtx().decodeAudioData(buf))
+            .then((decoded) => {{ window.arenaSoundBuffers[kind] = decoded; }})
+            .catch((e) => {{
+                delete window.arenaSoundBuffers[kind];
+                arenaSoundLog('sound load failed: ' + kind + ' — ' + e);
+            }});
+    }}
+    // One status line per page load (and on every game start) so the
+    // terminal always shows whether this JS version is live and healthy —
+    // "no warnings" alone can't distinguish success from stale code.
+    function arenaSoundStatus(when) {{
+        const total = Object.keys(arenaSoundFiles).length;
+        const ready = Object.values(window.arenaSoundBuffers)
+            .filter((b) => b && b !== 'loading').length;
+        const st = window.arenaAudioCtx ? window.arenaAudioCtx.state : 'none';
+        arenaSoundLog('v2 status (' + when + '): ctx=' + st +
+                      ', sounds=' + ready + '/' + total);
+    }}
+    arenaEnsureCtx();
+    for (const kind of Object.keys(arenaSoundFiles)) arenaLoadSound(kind);
+    setTimeout(() => arenaSoundStatus('page load'), 4000);
+    // any user gesture unlocks/resumes the context (autoplay policy)
+    for (const ev of ['pointerdown', 'keydown', 'touchend'])
+        document.addEventListener(ev, arenaEnsureCtx);
+    // Watchdog: report state changes; the keep-alive tone does the rest.
+    let arenaLastState = '';
+    setInterval(() => {{
+        const ctx = arenaEnsureCtx();
+        if (ctx.state !== arenaLastState) {{
+            if (ctx.state !== 'running')
+                arenaSoundLog('audio context state: ' + ctx.state);
+            arenaLastState = ctx.state;
+        }}
+    }}, 10000);
+    // Diagnostic: correlate sound loss with the window being hidden or
+    // covered by another screen (Chromium throttles occluded windows).
+    document.addEventListener('visibilitychange', () => {{
+        arenaSoundLog('window became ' + document.visibilityState);
+        if (document.visibilityState === 'visible') arenaEnsureCtx();
+    }});
+    window.arenaPlaySound = function(kind) {{
+        if (window.arenaSoundMuted) return;
+        if (kind === 'game_start') arenaSoundStatus('game start');
+        try {{
+            const buf = window.arenaSoundBuffers[kind];
+            if (!buf || buf === 'loading') {{
+                arenaSoundLog('no decoded buffer yet for: ' + kind);
+                arenaLoadSound(kind);
+                return;
+            }}
+            const ctx = arenaEnsureCtx();
+            if (ctx.state !== 'running')
+                arenaSoundLog('context not running (' + ctx.state +
+                              ') while playing: ' + kind);
+            const src = ctx.createBufferSource();
+            src.buffer = buf;
+            src.connect(ctx.destination);
+            src.start();
+        }} catch (e) {{
+            arenaSoundLog('sound play failed: ' + kind + ' — ' + e);
+        }}
+    }};
+    </script>
+    """)
+
     # ── Header ────────────────────────────────────────────
     # "row" is explicit: NiceGUI 3.x headers no longer default to it
     with ui.header().classes(
@@ -245,6 +380,17 @@ def main_page():
                 .classes("btn-ic ml-2")
         ui.button("✕", on_click=lambda: _clear_preset(pick_btn)) \
             .props("dense flat color=grey")
+
+        def _toggle_sound():
+            session.sound_muted = not session.sound_muted
+            snd_btn.props(f"icon={'volume_off' if session.sound_muted else 'volume_up'}")
+            ui.run_javascript(
+                f"window.arenaSoundMuted = {str(session.sound_muted).lower()}")
+
+        snd_btn = ui.button(on_click=_toggle_sound) \
+            .props(f"dense flat round color=grey "
+                   f"icon={'volume_off' if session.sound_muted else 'volume_up'}") \
+            .tooltip("Toggle sound effects")
 
     # ── Main 3-column layout ──────────────────────────────
     with ui.row().classes("w-full no-wrap gap-3 p-2 items-stretch"):
@@ -562,6 +708,26 @@ def main_page():
         quality_lbl.style(f"color: {color}")
 
     # ── Wire session events ───────────────────────────────
+    # Session events fire from the background game-loop task, which has no
+    # slot/client context in NiceGUI. Handlers that only mutate existing
+    # elements (set_text, refresh) are fine, but anything that creates
+    # elements or talks to the browser must go through the page's client.
+    client = ui.context.client
+
+    def _on_game_over(result, reason, winner):
+        with client:                    # dialog needs a slot to attach to
+            config_ui.refresh()         # auto color-swap changed the selectors
+            dialogs.show_game_over(
+                session, result, reason, winner,
+                on_new_game=lambda: ui.timer(
+                    0.05, session.new_game, once=True),
+                on_rankings=lambda: views.show_rankings(session),
+                on_export=_export_pgn)
+
+    def _on_error(msg):
+        with client:
+            ui.notify(msg, type="negative", multi_line=True)
+
     session.on("board_changed", on_board_changed)
     session.on("status", status_lbl.set_text)
     session.on("opening", opening_lbl.set_text)
@@ -570,20 +736,14 @@ def main_page():
     session.on("quality", on_quality)
     session.on("banners", refresh_banners)
     session.on("clock", _update_clocks)
+    session.on("sound", lambda kind: client.run_javascript(
+        f"window.arenaPlaySound('{kind}')"))
     # Live countdown while an engine is thinking (clock mode)
     ui.timer(0.25, _update_clocks)
-    session.on("error", lambda msg: ui.notify(msg, type="negative",
-                                              multi_line=True))
+    session.on("error", _on_error)
     session.on("eval", lambda side, ev, dp: eng_log.push(
         f"[{side.upper()}] eval {ev}  depth {dp}"))
-    session.on("game_over", lambda result, reason, winner: (
-        config_ui.refresh(),        # auto color-swap changed the selectors
-        dialogs.show_game_over(
-            session, result, reason, winner,
-            on_new_game=lambda: ui.timer(
-                0.05, session.new_game, once=True),
-            on_rankings=lambda: views.show_rankings(session),
-            on_export=_export_pgn)))
+    session.on("game_over", _on_game_over)
 
     # Startup: banner + assets. On first launch a persistent overlay blocks
     # the UI until the opening book and analyzer are ready — interacting
