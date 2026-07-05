@@ -34,13 +34,25 @@ async def with_loader(builder, message="Loading…"):
 
 
 def banner(color):
-    """Player banner row: name + clock + rank line (see .player-banner CSS)."""
+    """Player banner row: name + head-to-head + clock + rank line."""
     row = ui.row().classes("player-banner w-full items-center justify-between")
     with row:
-        name_lbl = ui.label("").classes("font-bold").style(f"color: {color}")
+        with ui.row().classes("items-center gap-2 no-wrap"):
+            name_lbl = ui.label("").classes("font-bold").style(f"color: {color}")
+            h2h_lbl = ui.html("").classes("text-xs mono font-bold")
         clock_lbl = ui.label("").classes("mono font-bold text-base")
         rank_lbl = ui.label("").classes("text-xs")
-    return row, name_lbl, rank_lbl, clock_lbl
+    return row, name_lbl, rank_lbl, clock_lbl, h2h_lbl
+
+
+def h2h_html(wins, draws, losses):
+    """Colored 'xW xD xL' head-to-head record, '' when never matched."""
+    from webui.theme import COLOR_GREEN, COLOR_RED
+    if wins + draws + losses == 0:
+        return ""
+    return (f'<span style="color:{COLOR_GREEN}">{wins}W</span> '
+            f'<span style="color:#999">{draws}D</span> '
+            f'<span style="color:{COLOR_RED}">{losses}L</span>')
 
 
 def icon(name, size=16, cls=""):

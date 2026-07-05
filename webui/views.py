@@ -364,15 +364,16 @@ def show_game_history(session, filter_engine=None):
                 {"all": "All", "regular": "Regular", "tournament": "Tournament"},
                 value="all").props("inline dense")
             search = widgets.search_input(
-                "Search engine, result, reason, date…").classes("flex-grow")
+                "Search engine, result, opening, reason, date…") \
+                .classes("flex-grow")
 
         columns = [
-            {"name": "id",     "label": "ID",     "field": "id",     "align": "center", "sortable": True},
-            {"name": "date",   "label": "Date",   "field": "date",   "align": "center"},
+            {"name": "date",   "label": "Date",   "field": "date",   "align": "center", "sortable": True},
             {"name": "time",   "label": "Time",   "field": "time",   "align": "center"},
             {"name": "white",  "label": "White",  "field": "white",  "align": "left"},
             {"name": "black",  "label": "Black",  "field": "black",  "align": "left"},
             {"name": "result", "label": "Result", "field": "result", "align": "center"},
+            {"name": "opening", "label": "Opening", "field": "opening", "align": "left", "sortable": True},
             {"name": "tc",     "label": "Time Control", "field": "tc", "align": "center", "sortable": True},
             {"name": "reason", "label": "Reason", "field": "reason", "align": "left"},
             {"name": "moves",  "label": "Moves",  "field": "moves",  "align": "center"},
@@ -415,6 +416,7 @@ def show_game_history(session, filter_engine=None):
                 gid, white, black, result, reason, date, time_str, moves, dur = g[:9]
                 src_tag = g[9] if len(g) > 9 else "regular"
                 tc = g[10] if len(g) > 10 else ""
+                opening = g[11] if len(g) > 11 else ""
                 if result == "1/2-1/2":
                     col = COLOR_BLUE
                 elif result == "1-0":
@@ -431,6 +433,7 @@ def show_game_history(session, filter_engine=None):
                     "id": gid, "date": date, "time": time_str,
                     "white": white, "black": black,
                     "result": result, "result_col": col,
+                    "opening": opening or "—",
                     "tc": tc or "—",
                     "reason": ("[T] " if src_tag == "tournament" else "") + (reason or ""),
                     "moves": moves or 0,

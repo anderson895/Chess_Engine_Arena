@@ -409,13 +409,17 @@ def main_page():
                 @ui.refreshable
                 def config_ui():
                     if session.play_mode == GameSession.MODE_EVE:
-                        _engine_config("BLACK", "e1", COLOR_SILVER, "bK")
+                        # No display-name input in EvE: the name is derived
+                        # from the selected engine file anyway
+                        _engine_config("BLACK", "e1", COLOR_SILVER, "bK",
+                                       name_input=False)
                         with ui.row().classes("w-full justify-center"):
                             ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
                                 .props("dense flat size=sm") \
                                 .classes("text-xs") \
                                 .tooltip("Swap the colors of the two engines")
-                        _engine_config("WHITE", "e2", COLOR_GOLD, "wK")
+                        _engine_config("WHITE", "e2", COLOR_GOLD, "wK",
+                                       name_input=False)
                     else:
                         with ui.row().classes("items-center gap-1 no-wrap"):
                             widgets.icon("ic_user", 14)
@@ -437,7 +441,8 @@ def main_page():
                                 .tooltip("Swap colors with the engine")
                         _engine_config("OPPONENT", "e2", COLOR_GOLD, "wK")
 
-                def _engine_config(title, prefix, color, piece_code=None):
+                def _engine_config(title, prefix, color, piece_code=None,
+                                   name_input=True):
                     with ui.row().classes("items-center gap-1 no-wrap"):
                         if piece_code:
                             widgets.piece(piece_code, 16)
@@ -484,12 +489,14 @@ def main_page():
                                 refresh_banners()
                         ui.button("…", on_click=browse).props("dense") \
                             .tooltip("Browse for an engine .exe")
-                    ui.input(label="Display name",
-                             value=getattr(session, f"{prefix}_name"),
-                             on_change=lambda e, prefix=prefix: (
-                                 setattr(session, f"{prefix}_name", e.value or ""),
-                                 refresh_banners())) \
-                        .props("dense").classes("w-full text-xs")
+                    if name_input:
+                        ui.input(label="Display name",
+                                 value=getattr(session, f"{prefix}_name"),
+                                 on_change=lambda e, prefix=prefix: (
+                                     setattr(session, f"{prefix}_name",
+                                             e.value or ""),
+                                     refresh_banners())) \
+                            .props("dense").classes("w-full text-xs")
 
                 def _swap_colors():
                     if session.game_running:
@@ -604,8 +611,8 @@ def main_page():
                 .style(f"color: {COLOR_BLUE}; background: #0D1B2A; "
                        f"border: 1px solid #003366")
 
-            black_banner, black_name_lbl, black_rank_lbl, black_clock_lbl = \
-                widgets.banner(COLOR_SILVER)
+            black_banner, black_name_lbl, black_rank_lbl, black_clock_lbl, \
+                black_h2h_lbl = widgets.banner(COLOR_SILVER)
 
             # No flex-grow: the row hugs the board so the white banner sits
             # right below it instead of being pushed to the column bottom.
@@ -620,8 +627,8 @@ def main_page():
                 with ui.element("div").classes("flex-grow min-w-0"):
                     board_view = BoardView(_board_state, on_click=_square_clicked)
 
-            white_banner, white_name_lbl, white_rank_lbl, white_clock_lbl = \
-                widgets.banner(COLOR_GOLD)
+            white_banner, white_name_lbl, white_rank_lbl, white_clock_lbl, \
+                white_h2h_lbl = widgets.banner(COLOR_GOLD)
 
             check_lbl = ui.label("").classes("text-center font-bold w-full") \
                 .style("color: #FF4444")
@@ -670,6 +677,10 @@ def main_page():
             text, color = session.rank_line(raw)
             lbl.set_text(text)
             lbl.style(f"color: {color}")
+        # Head-to-head record of this exact pairing (from saved games)
+        w_wins, draws, b_wins = session.head_to_head(white, black)
+        white_h2h_lbl.set_content(widgets.h2h_html(w_wins, draws, b_wins))
+        black_h2h_lbl.set_content(widgets.h2h_html(b_wins, draws, w_wins))
         # Active-turn highlight
         if session.board.turn == "b":
             black_banner.classes(add="active")

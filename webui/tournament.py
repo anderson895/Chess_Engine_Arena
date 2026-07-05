@@ -505,7 +505,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                     .style(f"color: {COLOR_BLUE}")
 
                 black_banner, black_name_lbl, black_rank_lbl, \
-                    black_clock_lbl = widgets.banner(COLOR_SILVER)
+                    black_clock_lbl, black_h2h_lbl = widgets.banner(COLOR_SILVER)
 
                 with ui.row().classes("w-full no-wrap flex-grow gap-2 "
                                       "justify-center items-stretch"):
@@ -522,7 +522,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                         })
 
                 white_banner, white_name_lbl, white_rank_lbl, \
-                    white_clock_lbl = widgets.banner(COLOR_GOLD)
+                    white_clock_lbl, white_h2h_lbl = widgets.banner(COLOR_GOLD)
 
             # ── Right: standings / schedule / bracket ─────
             with ui.column().classes("flex-grow min-w-0"):
@@ -585,7 +585,9 @@ def show_tournament_window(session, tsess: TournamentSession):
             decide_dlg.close()
             _sync_controls()
 
-        def _refresh_banners():
+        h2h_state = {"key": None, "w": "", "b": ""}
+
+        def _refresh_banners(force_h2h=False):
             with tsess.lock:
                 white, black = tsess.white_name, tsess.black_name
                 use_clock = tsess.use_clock
@@ -597,6 +599,15 @@ def show_tournament_window(session, tsess: TournamentSession):
                 text, color = session.rank_line(raw) if raw else ("", "#555")
                 lbl.set_text(text)
                 lbl.style(f"color: {color}")
+            # Head-to-head of the pairing; rescan only on new game/results
+            if force_h2h or h2h_state["key"] != (white, black):
+                w_w, dr, b_w = (session.head_to_head(white, black)
+                                if white else (0, 0, 0))
+                h2h_state.update(key=(white, black),
+                                 w=widgets.h2h_html(w_w, dr, b_w),
+                                 b=widgets.h2h_html(b_w, dr, w_w))
+            white_h2h_lbl.set_content(h2h_state["w"])
+            black_h2h_lbl.set_content(h2h_state["b"])
             if use_clock and white:
                 # live countdown for the side currently thinking
                 if tsess.state == "running":
@@ -679,7 +690,9 @@ def show_tournament_window(session, tsess: TournamentSession):
                 opening = tsess.opening
                 game_label = tsess.game_label
             status_lbl.set_text(status)
-            _refresh_banners()          # names/ranks + live clock countdown
+            if tables_dirty:
+                session.invalidate_stats_caches()   # a game was saved
+            _refresh_banners(force_h2h=tables_dirty)
             if board_dirty:
                 board_view.refresh()
                 game_lbl.set_text(game_label)
@@ -687,7 +700,6 @@ def show_tournament_window(session, tsess: TournamentSession):
                 if cp is not None:
                     eval_bar.set_cp(cp)
             if tables_dirty:
-                session._elo_cache = None   # a game was saved → ranks moved
                 _refresh_tables()
             if tsess.state == "finished":
                 _sync_controls()

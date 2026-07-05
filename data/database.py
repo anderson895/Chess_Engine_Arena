@@ -85,6 +85,20 @@ class Database:
         conn.execute("UPDATE games SET time_control = 'Classic' "
                      "WHERE COALESCE(time_control, '') = ''")
 
+        # Add 'opening' column if missing (migration) and backfill it from
+        # the PGN's [Opening "..."] header (idempotent: only fills blanks)
+        try:
+            conn.execute("ALTER TABLE games ADD COLUMN opening TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        conn.execute('''
+            UPDATE games SET opening =
+                substr(pgn, instr(pgn, '[Opening "') + 10,
+                       instr(substr(pgn, instr(pgn, '[Opening "') + 10), '"') - 1)
+            WHERE COALESCE(opening, '') = ''
+              AND instr(pgn, '[Opening "') > 0
+        ''')
+
         conn.commit()
         conn.close()
 
@@ -92,7 +106,7 @@ class Database:
 
     def save_game(self, white_name, black_name, result, reason,
                   pgn, move_count, duration_sec, source='regular',
-                  time_control=''):
+                  time_control='', opening=''):
         """Save a game to the games table. Returns the new row id, or None on error."""
         try:
             conn   = sqlite3.connect(self.db_path)
@@ -104,8 +118,8 @@ class Database:
                 INSERT INTO games
                     (white_engine, black_engine, result, reason,
                      date, time, pgn, move_count, duration_seconds, source,
-                     time_control)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     time_control, opening)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 normalize_engine_name(white_name),
                 normalize_engine_name(black_name),
@@ -114,6 +128,7 @@ class Database:
                 pgn, move_count, duration_sec,
                 source,
                 time_control or '',
+                opening or '',
             ))
             conn.commit()
             game_id = cursor.lastrowid
@@ -139,6 +154,7 @@ class Database:
                 duration_sec = duration_sec,
                 source       = 'tournament',
                 time_control = time_control,
+                opening      = opening or '',
             )
             if game_id is None:
                 return None, None
@@ -396,8 +412,9 @@ class Database:
             q = f'%{search_query.strip()}%'
             conditions.append(
                 '(white_engine LIKE ? OR black_engine LIKE ? OR result LIKE ? '
-                'OR reason LIKE ? OR date LIKE ?)')
-            params.extend([q] * 5)
+                'OR reason LIKE ? OR date LIKE ? '
+                "OR COALESCE(opening, '') LIKE ?)")
+            params.extend([q] * 6)
         where = (' WHERE ' + ' AND '.join(conditions)) if conditions else ''
         return where, params
 
@@ -416,7 +433,8 @@ class Database:
                 SELECT id, white_engine, black_engine, result, reason,
                        date, time, move_count, duration_seconds,
                        COALESCE(source, 'regular') as source,
-                       COALESCE(time_control, '') as time_control
+                       COALESCE(time_control, '') as time_control,
+                       COALESCE(opening, '') as opening
                 FROM games''' + where + ' ORDER BY id DESC')
             if limit:
                 query += ' LIMIT ?'

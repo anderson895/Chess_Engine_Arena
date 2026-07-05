@@ -123,8 +123,9 @@ class GameSession:
         self.last_quality: str | None = None
         self.eval_bar_cp = 0
 
-        # Elo cache
+        # Elo / head-to-head caches
         self._elo_cache = None
+        self._h2h_cache = None         # raw (white, black, result) rows
 
         # Event subscribers
         self._handlers: dict[str, list] = {}
@@ -238,6 +239,35 @@ class GameSession:
             return "Unranked", "#555"
         tier_lbl, tier_col = get_tier(elo)
         return f"#{rank_map.get(key, '?')}/{total}  {tier_lbl}  •  {elo} Elo", tier_col
+
+    def invalidate_stats_caches(self):
+        """Force Elo and head-to-head recomputation after new games land."""
+        self._elo_cache = None
+        self._h2h_cache = None
+
+    def head_to_head(self, name_a, name_b):
+        """(wins_a, draws, wins_b) across all saved games of this pairing."""
+        a = normalize_engine_name(name_a)
+        b = normalize_engine_name(name_b)
+        if not a or not b or a == b:
+            return 0, 0, 0
+        if self._h2h_cache is None:
+            self._h2h_cache = self.db.get_all_games_for_elo()
+        wins_a = wins_b = draws = 0
+        for white, black, result in self._h2h_cache:
+            white = normalize_engine_name(white)
+            black = normalize_engine_name(black)
+            if {white, black} != {a, b}:
+                continue
+            if result == "1/2-1/2":
+                draws += 1
+            elif result == "1-0":
+                wins_a, wins_b = ((wins_a + 1, wins_b) if white == a
+                                  else (wins_a, wins_b + 1))
+            elif result == "0-1":
+                wins_a, wins_b = ((wins_a + 1, wins_b) if black == a
+                                  else (wins_a, wins_b + 1))
+        return wins_a, draws, wins_b
 
     # ═══════════════════════════════════════════════════════
     #  Opening book / analyzer management
@@ -811,8 +841,9 @@ class GameSession:
         await run.io_bound(
             self.db.save_game, white, black, result, reason, pgn,
             len(self.board.move_history), duration, 'regular',
-            getattr(self, "_game_tc_label", ""))
-        self._elo_cache = None
+            getattr(self, "_game_tc_label", ""),
+            self.current_opening_name or '')
+        self.invalidate_stats_caches()
 
     # ═══════════════════════════════════════════════════════
     #  Move-quality analysis
