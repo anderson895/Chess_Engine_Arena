@@ -1,35 +1,28 @@
-## Chess Engine Resources
-https://e.pcloud.link/publink/show?lang=en&code=kZHEppZbCDCs9wagDhvjGGM2bo36LEIvynX
-###
-
-https://chessengines.blogspot.com/
-
-
-
-# ♟ Chess Engine Arena
+# Chess Engine Arena
 
 A feature-rich desktop app for running chess engine matches, tournaments,
 and human-vs-engine games. Built with **Python + NiceGUI** — runs as a
 native desktop window (pywebview/WebView2) or in the browser.
 
-## Running
+- [Download](#download)
+- [Features](#features)
+- [Getting Started](#getting-started)
+- [Adding Engines and Files](#adding-engines-and-files)
+- [Project Structure](#project-structure)
+- [Building a Standalone .exe](#building-a-standalone-exe)
+- [Resources](#resources)
 
-```bash
-# activate the virtual environment first
-.\venv\Scripts\activate
+## Download
 
-python main.py             # native desktop window (default)
-python main.py --browser   # open in the web browser (DevTools debugging)
-```
+Prebuilt Windows builds are on the
+[Releases page](https://github.com/anderson895/Chess_Engine_Arena/releases).
+Download `ChessEngineArena-<version>-win64.zip`, extract it anywhere, and run
+`ChessEngineArena.exe`.
 
-First launch parses the opening book (a blocking loading screen is shown);
-the parsed book is cached to disk, so every launch after that is fast.
+Keep the .exe inside its folder — it needs the `_internal` directory beside
+it. Requires Windows 10/11 64-bit.
 
-## Requirements
-
-- Python 3.10+
-- `pip install -r requirements.txt` (NiceGUI + pywebview)
-- Windows: WebView2 runtime (built into Windows 11) for native mode
+To run from source instead, see [Getting Started](#getting-started).
 
 ## Features
 
@@ -51,6 +44,59 @@ the parsed book is cached to disk, so every launch after that is fast.
   download
 - **Sprite-based UI** — all pieces, nav cards, medals, badges and icons
   come from `assets/Chess_packs.png` (no emoji dependence)
+
+## Getting Started
+
+### Requirements
+
+- Python 3.10+
+- `pip install -r requirements.txt` (NiceGUI + pywebview)
+- Windows: WebView2 runtime (built into Windows 11) for native mode
+
+### Running
+
+```bash
+# activate the virtual environment first
+.\venv\Scripts\activate
+
+python main.py             # native desktop window (default)
+python main.py --browser   # open in the web browser (DevTools debugging)
+```
+
+First launch parses the opening book (a blocking loading screen is shown);
+the parsed book is cached to disk, so every launch after that is fast.
+
+The database lives at `~/.chess_arena/chess_arena.db` (auto-created) and is
+shared by regular games and tournaments.
+
+## Adding Engines and Files
+
+| File Type              | Folder      | Auto-detected?                          |
+|------------------------|-------------|-----------------------------------------|
+| Chess engines (.exe)   | `engines/`  | ✅ Shown in the engine dropdown          |
+| Analyzer (Stockfish)   | `analyzer/` | ✅ Yes, on startup                       |
+| Opening book (.csv)    | `openings/` | ✅ Yes, on startup                       |
+
+Engines placed in `engines/`, `engine/`, `analyzer/` or `stockfish/` appear
+automatically in the **Engine dropdown**; anything else can be picked with
+the **…** browse button (a real file-explorer dialog in both native and
+browser modes).
+
+> **Stockfish note:** small Stockfish builds need their NNUE network files
+> (`nn-*.nnue`) next to the .exe. The app starts engines from their own
+> folder so these are found automatically, and the analyzer is probed at
+> startup — a build that can't search is reported instead of failing
+> silently.
+
+### Opening Book
+
+Place any of these in `openings/` (both filenames are auto-detected):
+
+- `openings_sheet.csv` (preferred)
+- `openings.csv`
+
+Delete the `.cache.json` next to it to force a re-parse (it also
+invalidates automatically when the CSV changes).
 
 ## Project Structure
 
@@ -99,39 +145,12 @@ Chess_Engine_Arena/
 ├── tournament/
 │   └── manager.py             #   tournament logic: formats, pairing, runner
 │
+├── art_src/                   # Source art sheets (not bundled at runtime)
+├── tools/                     # Dev utilities: sprite slicing, sound probes
+│
 ├── requirements.txt
 └── readme.md
 ```
-
-The database lives at `~/.chess_arena/chess_arena.db` (auto-created) and is
-shared by regular games and tournaments.
-
-## Where to Put Your Files
-
-| File Type              | Folder      | Auto-detected?                          |
-|------------------------|-------------|-----------------------------------------|
-| Chess engines (.exe)   | `engines/`  | ✅ Shown in the engine dropdown          |
-| Analyzer (Stockfish)   | `analyzer/` | ✅ Yes, on startup                       |
-| Opening book (.csv)    | `openings/` | ✅ Yes, on startup                       |
-
-Engines placed in `engines/`, `engine/`, `analyzer/` or `stockfish/` appear
-automatically in the **Engine dropdown**; anything else can be picked with
-the **…** browse button (a real file-explorer dialog in both native and
-browser modes).
-
-> **Stockfish note:** small Stockfish builds need their NNUE network files
-> (`nn-*.nnue`) next to the .exe. The app starts engines from their own
-> folder so these are found automatically, and the analyzer is probed at
-> startup — a build that can't search is reported instead of failing
-> silently.
-
-### Opening Book (auto-detected filenames)
-Place any of these in `openings/`:
-- `openings_sheet.csv` (preferred)
-- `openings.csv`
-
-Delete the `.cache.json` next to it to force a re-parse (it also
-invalidates automatically when the CSV changes).
 
 ## Building a Standalone .exe
 
@@ -149,3 +168,10 @@ nicegui-pack --onefile --windowed --name "ChessEngineArena" ^
 
 (Or run plain `pyinstaller` with `ChessEngineArena.spec` as a starting
 point — but `nicegui-pack` is the supported path for NiceGUI apps.)
+
+## Resources
+
+Where to find more UCI engines to drop into `engines/`:
+
+- [Engine collection (pCloud)](https://e.pcloud.link/publink/show?lang=en&code=kZHEppZbCDCs9wagDhvjGGM2bo36LEIvynX)
+- [chessengines.blogspot.com](https://chessengines.blogspot.com/)
