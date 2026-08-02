@@ -94,7 +94,7 @@ class TournamentSession:
         _, base, _ = TIME_CONTROLS.get(
             getattr(tournament, "time_control", "classic"),
             TIME_CONTROLS["classic"])
-        self.use_clock = base is not None          # every preset is clocked
+        self.use_clock = base is not None          # Classic → no clocks
         self.wtime_ms = self.btime_ms = (base or 0) * 60000
         self.turn = "w"                            # side thinking right now
         self.clock_at = time.time()                # when the snapshot was taken
@@ -345,12 +345,23 @@ def show_tournament_setup(session):
         with ui.row().classes("w-full items-center gap-4"):
             tc_sel = ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
                                value="classic", label="Time control") \
-                .props("dense options-dense").classes("w-44") \
-                .tooltip("Engines manage their own clock and lose on time, "
-                         "same as a regular game")
-            delay_in = ui.number(label="Move delay (s)", value=0.1,
+                .props("dense options-dense").classes("w-36") \
+                .tooltip("Bullet/Blitz/Rapid: engines manage their own "
+                         "clock and lose on time. Classic: fixed think "
+                         "time per move")
+            # Default to the regular game's pace so a Classic tournament
+            # plays at the same speed a Classic single game does
+            movetime_in = ui.number(label="Move time (ms)",
+                                    value=session.movetime_ms,
+                                    min=100, max=60000, step=100) \
+                .props("dense").classes("w-32")
+            delay_in = ui.number(label="Move delay (s)", value=session.delay_s,
                                  min=0.0, max=5.0, step=0.1) \
                 .props("dense").classes("w-32")
+
+        # Move time only applies to the clockless Classic preset
+        tc_sel.on_value_change(
+            lambda e: movetime_in.set_visibility(e.value == "classic"))
 
         ui.separator()
         ui.label("PLAYERS (engines)").classes("arena-heading")
@@ -449,9 +460,10 @@ def show_tournament_setup(session):
                 fmt=fmt.value,
                 players=players,
                 rounds=int(rounds_in.value or 5),
+                movetime_ms=int(movetime_in.value or session.movetime_ms),
                 time_control=tc_sel.value or "classic",
                 double_rr=bool(double_rr.value),
-                delay=float(delay_in.value or 0.1),
+                delay=float(delay_in.value or session.delay_s),
                 analyzer_path=session.analyzer_path,
                 opening_book=session.opening_book
                 if session.opening_book.loaded else None,

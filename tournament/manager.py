@@ -1332,9 +1332,8 @@ class TournamentRunner:
         book_moves_used = 0
         MAX_BOOK_MOVES  = 20
 
-        # Time control: every preset gives each side a real chess clock.
-        # A base of None (no preset uses that now) falls back to a fixed
-        # movetime per move with no flag-fall.
+        # Time control: clocked presets give each side a real chess clock;
+        # "Classic" (base None) falls back to fixed movetime per move.
         from core.constants import TIME_CONTROLS
         _, tc_base, tc_inc = TIME_CONTROLS.get(
             getattr(self.t, "time_control", "classic"),
