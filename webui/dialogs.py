@@ -168,7 +168,7 @@ async def ask_opening_choice(opening_book):
         ]
         table = ui.table(columns=columns, rows=[], row_key="idx",
                          selection="single", pagination=25) \
-            .classes("w-full flex-grow arena-log")
+            .classes("w-full flex-grow arena-log dlg-table")
         count_lbl = ui.label("").classes("text-xs text-gray-500")
 
         def visible_entries():

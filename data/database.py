@@ -107,7 +107,26 @@ class Database:
     def save_game(self, white_name, black_name, result, reason,
                   pgn, move_count, duration_sec, source='regular',
                   time_control='', opening=''):
-        """Save a game to the games table. Returns the new row id, or None on error."""
+        """Save a game to the games table. Returns the new row id, or None on
+        error.
+
+        Two kinds of game are rejected outright, because recording them
+        would pollute the rankings with results that say nothing about
+        playing strength:
+
+        - Self-play (same engine on both sides) — unrated, and storing it
+          desyncs the history count from the ranking count.
+        - Forfeits caused by an engine malfunctioning: returning no move
+          (crash or hang) or playing an illegal move. Neither is a game.
+        """
+        if normalize_engine_name(white_name) == normalize_engine_name(black_name):
+            print(f"[Database] refusing to save self-play game: "
+                  f"{normalize_engine_name(white_name)}")
+            return None
+        r = reason or ''
+        if 'returned no move' in r or 'Illegal move by' in r:
+            print(f"[Database] refusing to save malfunction game: {reason}")
+            return None
         try:
             conn   = sqlite3.connect(self.db_path)
             conn.execute("PRAGMA journal_mode=WAL")
@@ -320,6 +339,8 @@ class Database:
         for white, black, result in rows:
             if result not in ('1-0', '0-1', '1/2-1/2'):
                 continue   # aborted / unfinished games don't count
+            if normalize_engine_name(white) == normalize_engine_name(black):
+                continue   # self-play is unrated (see core.elo)
             w, b = rec(white), rec(black)
             w['matches'] += 1
             b['matches'] += 1
@@ -367,6 +388,8 @@ class Database:
         for white, black, result, tc in rows:
             if result not in ('1-0', '0-1', '1/2-1/2'):
                 continue
+            if normalize_engine_name(white) == normalize_engine_name(black):
+                continue   # self-play is unrated (see core.elo)
             tc = tc or 'Classic'
             for name, win_res in ((white, '1-0'), (black, '0-1')):
                 rec = stats.setdefault(

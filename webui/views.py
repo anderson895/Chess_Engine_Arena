@@ -77,7 +77,8 @@ def show_rankings(session):
              "align": "center"},
         ]
         table = ui.table(columns=columns, rows=[], row_key="engine",
-                         pagination=20).classes("w-full flex-grow arena-log")
+                         pagination=20) \
+            .classes("w-full flex-grow arena-log dlg-table")
         table.add_slot("body-cell-tier", _TIER_CELL_SLOT)
         table.add_slot("body-cell-rank", _RANK_CELL_SLOT)
         table.add_slot("body-cell-actions", """
@@ -381,7 +382,8 @@ def show_game_history(session, filter_engine=None):
             {"name": "actions", "label": "", "field": "id", "align": "center"},
         ]
         table = ui.table(columns=columns, rows=[], row_key="id",
-                         pagination=15).classes("w-full flex-grow arena-log")
+                         pagination=15) \
+            .classes("w-full flex-grow arena-log dlg-table")
         table.add_slot("body-cell-result", _RESULT_CELL_SLOT)
         table.add_slot("body-cell-actions", """
 <q-td :props="props" class="text-center">
@@ -588,8 +590,12 @@ def show_pgn_viewer(session, game_id, all_games=None):
             if idx is None or idx >= len(ids) - 1:
                 next_btn.disable()
 
-        with ui.row().classes("w-full flex-grow no-wrap gap-4"):
-            with ui.column().classes("w-1/2 items-center"):
+        # items-stretch/min-h-0: nicegui-row aligns children to flex-start, so
+        # the columns would grow to their content height instead of being
+        # bounded by the card.
+        with ui.row().classes(
+                "w-full flex-grow no-wrap gap-4 min-h-0 items-stretch"):
+            with ui.column().classes("w-1/2 items-center min-h-0"):
                 with ui.row().classes("w-full no-wrap gap-2 justify-center "
                                       "items-stretch"):
                     with ui.column().classes("gap-0 py-1 self-stretch"):
@@ -613,10 +619,14 @@ def show_pgn_viewer(session, game_id, all_games=None):
                         ui.button(icon=icon, on_click=action) \
                             .props("dense").tooltip(tip)
                 widgets.hint("Keys: ← → move · Home/End start/end")
-            with ui.column().classes("w-1/2 h-full"):
+            with ui.column().classes("w-1/2 h-full min-h-0"):
                 ui.label("PGN").classes("arena-heading")
-                ui.textarea(value=pgn).props("readonly autogrow") \
-                    .classes("w-full flex-grow arena-log mono text-xs")
+                # No autogrow: it sizes the field to the whole PGN, which
+                # overflows the card and leaves a scrollbar that flickers on
+                # and off as the analyzer fills in the labels below the board.
+                ui.textarea(value=pgn).props("readonly") \
+                    .classes("w-full flex-grow min-h-0 arena-log mono text-xs "
+                             "pgn-box")
                 with ui.row().classes("gap-2"):
                     widgets.icon_button("Copy PGN", "ic_export", secondary=True,
                                         dense=True, on_click=lambda: (

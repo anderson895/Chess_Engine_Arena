@@ -253,14 +253,90 @@ img.btn-ic {{
     overflow: auto;
 }}
 
-/* Footer button rows stay pinned and visible while the dialog scrolls */
+/* A maximized dialog already fills the screen, so the 92vh/95vw clamp above
+   would shrink the card below the space Quasar gave it and force the whole
+   panel to scroll. */
+.q-dialog__inner--maximized .arena-panel {{
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0;
+}}
+
+/* A card whose last row is a pinned footer hands its bottom padding over to
+   that footer. Keeping it here would leave a bare strip underneath the
+   buttons for the scrolling content to show through, and a negative bottom
+   margin can't close it — that only pulls later siblings up, it does not
+   grow the element itself. */
+.q-dialog .arena-panel:has(.dlg-foot) {{
+    padding-bottom: 0;
+}}
+
+/* Footer button rows stay pinned and visible while the dialog scrolls. The
+   side margins widen the row over the card's left/right padding, so the bar
+   spans edge to edge. --nicegui-default-padding is what .nicegui-card
+   actually uses, so this tracks it rather than hardcoding 16px. */
 .q-dialog .arena-panel .dlg-foot {{
+    --pad: var(--nicegui-default-padding, 1rem);
     position: sticky;
     bottom: -1px;
     z-index: 5;
     background: var(--panel);
-    margin-top: auto;
-    padding-top: 6px;
+    margin: auto calc(-1 * var(--pad)) 0;
+    padding: 6px var(--pad) var(--pad);
+    /* w-full would hold the row at the content width and leave the right
+       padding bare; the extra 2x pad matches the negative margins. */
+    width: calc(100% + 2 * var(--pad)) !important;
+    border-radius: 0 0 8px 8px;
+}}
+
+/* The PGN box fills the space it is given and scrolls inside, instead of
+   stretching the dialog to fit the whole game. */
+.pgn-box {{
+    display: flex;
+    flex-direction: column;
+}}
+/* q-field__inner is display:block, so the control below it will not pick up
+   the height unless this link in the chain becomes a flex column too. */
+.pgn-box .q-field__inner {{
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}}
+.pgn-box .q-field__control {{
+    flex: 1 1 auto;
+    min-height: 0;
+}}
+.pgn-box .q-field__control-container {{
+    height: 100%;
+}}
+.pgn-box textarea.q-field__native {{
+    height: 100% !important;
+    min-height: 0;
+    resize: none;
+    overflow: auto;
+}}
+
+/* Tables marked .dlg-table fill the dialog and scroll their own body, so the
+   column labels stay put. The body has to be the scroll container: letting
+   the panel scroll instead would need the rows unclipped to keep the sticky
+   offset, and unclipped rows paint outside the table. min-height:0 is what
+   lets a flex child shrink below its content height and actually scroll. */
+.q-dialog .arena-panel .dlg-table {{
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}}
+.q-dialog .arena-panel .dlg-table .q-table__middle {{
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}}
+.q-dialog .arena-panel .dlg-table thead tr th {{
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--log);
+    border-bottom: 1px solid #333;
 }}
 """
 

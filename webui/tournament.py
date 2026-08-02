@@ -254,7 +254,8 @@ def show_tournament_list(session):
             {"name": "date",   "label": "Date",   "field": "date",  "align": "center"},
         ]
         table = ui.table(columns=columns, rows=[], row_key="tid",
-                         pagination=12).classes("w-full flex-grow arena-log")
+                         pagination=12) \
+            .classes("w-full flex-grow arena-log dlg-table")
         table.add_slot("body-cell-badge", _STATUS_BADGE_SLOT)
 
         def refresh():
@@ -368,22 +369,35 @@ def show_tournament_setup(session):
                                 label="Engine", with_input=True) \
                 .props("dense options-dense").classes("flex-grow")
 
+            resetting = False   # guards the clear-selection value change
+
             def add_player(path=None):
                 p = path or eng_sel.value
                 if not p or not os.path.isfile(p):
                     ui.notify("Select a valid engine first.", type="warning")
                     return
-                base = normalize_engine_name(
+                name = normalize_engine_name(
                     os.path.splitext(os.path.basename(p))[0])
-                name = base
-                n = 2
-                while any(r["name"] == name for r in roster):
-                    name = f"{base}-{n}"
-                    n += 1
+                if any(os.path.normcase(r["path"]) == os.path.normcase(p)
+                       or r["name"] == name for r in roster):
+                    ui.notify(f"{name} is already in the tournament.",
+                              type="warning")
+                    return
                 roster.append({"name": name, "path": p})
                 roster_ui.refresh()
 
-            ui.button("Add", on_click=lambda: add_player()).props("dense no-caps")
+            def on_pick(e):
+                # Picking an engine adds it straight away; the box is then
+                # cleared so the same engine can be picked again.
+                nonlocal resetting
+                if resetting or not e.value:
+                    resetting = False
+                    return
+                add_player(e.value)
+                resetting = True
+                eng_sel.set_value(None)
+
+            eng_sel.on_value_change(on_pick)
 
             async def browse_add():
                 p = await pick_file("Select engine",
@@ -412,6 +426,9 @@ def show_tournament_setup(session):
                         .props("dense borderless").classes("w-40 text-sm")
                     ui.label(os.path.basename(r["path"])) \
                         .classes("text-xs text-gray-500 flex-grow")
+                    rank_txt, rank_col = session.rank_line(r["name"])
+                    ui.label(rank_txt).classes("text-xs no-wrap") \
+                        .style(f"color: {rank_col}")
                     ui.button("✕", on_click=lambda i=i: (
                         roster.pop(i), roster_ui.refresh())) \
                         .props("dense flat color=grey")
@@ -426,9 +443,13 @@ def show_tournament_setup(session):
 
         def create():
             names = {r["name"] for r in roster}
-            if len(roster) < 2 or len(names) < 2:
-                ui.notify("Add at least 2 players with unique names.",
-                          type="warning")
+            if len(roster) < 2:
+                ui.notify("Add at least 2 players.", type="warning")
+                return
+            if len(names) != len(roster):
+                # Renaming a row by hand can still collide
+                ui.notify("Duplicate player names — each engine must be "
+                          "unique.", type="warning")
                 return
             players = [TournamentPlayer(r["name"], r["path"]) for r in roster]
             t = Tournament(
@@ -711,18 +732,23 @@ def show_tournament_window(session, tsess: TournamentSession):
             timer.cancel()
             dialog.close()
 
-        sched_table.on("rowDblclick", lambda e: _open_game_pgn(session, e.args[1]))
+        sched_table.on("rowDblclick",
+                       lambda e: _open_game_pgn(session, e.args[1],
+                                                sched_table.rows))
         _sync_controls()
         _refresh_tables()
     dialog.open()
 
 
-async def _open_game_pgn(session, row):
+async def _open_game_pgn(session, row, siblings=None):
     from webui.views import show_pgn_viewer
     gid = row.get("db_id")
     if gid:
-        await widgets.with_loader(lambda: show_pgn_viewer(session, gid),
-                                  "Loading game replay…")
+        # Siblings in display order, so Prev/Next game work
+        played = [(r["db_id"],) for r in (siblings or []) if r.get("db_id")]
+        await widgets.with_loader(
+            lambda: show_pgn_viewer(session, gid, played),
+            "Loading game replay…")
     else:
         ui.notify("Game not finished yet.", type="info")
 
@@ -845,7 +871,11 @@ def show_tournament_history(session, tournament_id, name):
             ui.label(f"{fmt}  ·  {len(rows)} games  ·  {rows[0]['date']}") \
                 .classes("text-xs text-gray-500")
 
-        with ui.row().classes("w-full flex-grow no-wrap gap-4 min-h-0"):
+        # items-stretch: nicegui-row aligns children to flex-start, so these
+        # columns would size to their content height and overflow the row
+        # instead of handing a bounded height to the tables inside them.
+        with ui.row().classes(
+                "w-full flex-grow no-wrap gap-4 min-h-0 items-stretch"):
             with ui.column().classes("w-[38%] min-h-0 overflow-auto"):
                 ui.label("FINAL STANDINGS").classes("arena-heading")
                 stand_cols = [
@@ -863,7 +893,7 @@ def show_tournament_history(session, tournament_id, name):
                      "wdl": f"{d['w']}/{d['d']}/{d['l']}"}
                     for i, (p, d) in enumerate(standings, 1)
                 ], row_key="player", pagination=0) \
-                    .classes("w-full flex-grow arena-log")
+                    .classes("w-full flex-grow arena-log dlg-table")
                 st.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
 
             with ui.column().classes("flex-grow min-w-0 min-h-0 overflow-auto"):
@@ -887,14 +917,17 @@ def show_tournament_history(session, tournament_id, name):
                      "result": r["result"], "opening": r["opening"] or ""}
                     for r in rows
                 ], row_key="gid", pagination=12) \
-                    .classes("w-full flex-grow arena-log")
+                    .classes("w-full flex-grow arena-log dlg-table")
 
                 async def open_pgn(e):
                     from webui.views import show_pgn_viewer
                     gid = e.args[1].get("gid")
                     if gid:
+                        # Siblings in display order, so Prev/Next game work
+                        siblings = [(r["game_id"],) for r in rows
+                                    if r["game_id"]]
                         await widgets.with_loader(
-                            lambda: show_pgn_viewer(session, gid),
+                            lambda: show_pgn_viewer(session, gid, siblings),
                             "Loading game replay…")
                 gt.on("rowDblclick", open_pgn)
 

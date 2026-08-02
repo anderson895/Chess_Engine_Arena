@@ -33,6 +33,11 @@ def compute_elo_ratings(games, k=32, start_elo=1500):
     for white, black, result in games:
         w = normalize_engine_name(white)
         b = normalize_engine_name(black)
+        if w == b:
+            # Self-play carries no rating information, and applying both
+            # updates to one name would just overwrite the first with the
+            # second (a free ±K swing).
+            continue
         rw = get_r(w)
         rb = get_r(b)
         ew = 1 / (1 + 10 ** ((rb - rw) / 400))
@@ -85,6 +90,8 @@ def compute_elo_history(games, engine_name, k=32, start_elo=1500):
     for i, (white, black, result) in enumerate(games):
         w = normalize_engine_name(white)
         b = normalize_engine_name(black)
+        if w == b:
+            continue   # self-play is unrated — see compute_elo_ratings
         rw = get_r(w)
         rb = get_r(b)
         ew = 1 / (1 + 10 ** ((rb - rw) / 400))
