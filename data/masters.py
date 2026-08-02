@@ -556,6 +556,56 @@ class MastersDB:
             print(f"[MastersDB] delete_game error: {e}")
             return False
 
+    def merge_from(self, other_path):
+        """
+        Copy master_games rows out of another database file.
+
+        Deliberately a merge of one table, not a file swap: a shared
+        snapshot also contains whoever produced it engine games and
+        tournaments, and overwriting the local database with those would
+        destroy the user's own results and Elo history. The UNIQUE
+        game_key does the deduplication, so merging twice is a no-op.
+
+        Returns (added, skipped).
+        """
+        if not os.path.isfile(other_path):
+            raise FileNotFoundError(other_path)
+
+        conn = self._connect()
+        # Quote for SQL: ATTACH takes a literal, not a bound parameter.
+        literal = other_path.replace("'", "''")
+        conn.execute(f"ATTACH DATABASE '{literal}' AS shared")
+        try:
+            have = conn.execute(
+                "SELECT name FROM shared.sqlite_master "
+                "WHERE type='table' AND name='master_games'").fetchone()
+            if not have:
+                raise ValueError("that database has no master_games table")
+
+            # Match on column name so a snapshot from an older or newer
+            # schema still merges instead of failing on column order.
+            mine = {r[1] for r in conn.execute("PRAGMA table_info(master_games)")}
+            theirs = [r[1] for r in
+                      conn.execute("PRAGMA shared.table_info(master_games)")]
+            common = [c for c in theirs if c in mine and c != "id"]
+            cols = ", ".join(f"[{c}]" for c in common)
+
+            before = conn.execute(
+                "SELECT COUNT(*) FROM master_games").fetchone()[0]
+            available = conn.execute(
+                "SELECT COUNT(*) FROM shared.master_games").fetchone()[0]
+            conn.execute(f"INSERT OR IGNORE INTO master_games ({cols}) "
+                         f"SELECT {cols} FROM shared.master_games")
+            conn.commit()
+            after = conn.execute(
+                "SELECT COUNT(*) FROM master_games").fetchone()[0]
+        finally:
+            conn.execute("DETACH DATABASE shared")
+            conn.close()
+
+        added = after - before
+        return added, available - added
+
     def size_bytes(self):
         """Bytes the master_games rows occupy, plus the whole DB file."""
         try:

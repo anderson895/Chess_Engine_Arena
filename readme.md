@@ -114,10 +114,17 @@ Everything is stored locally in the same SQLite file as the engine games
 (`~/.chess_arena/chess_arena.db`), so search and replay work offline. The
 network is only used while importing.
 
-### Importing
+### Getting the games
 
-**Import games** offers five sources, all free and none requiring an API
-key. The same fetchers are available from the command line:
+The quickest way to fill it is **Storage & maintenance → Download shared
+database**, which pulls the published snapshot from this repo's Releases:
+about 120,000 games in under a minute, no Python needed. Only master games
+are copied in — your own engine games, tournaments and Elo history are left
+alone, and running it again adds nothing it already has.
+
+To build the collection yourself instead, **Import games** offers five
+sources, all free and none requiring an API key. The same fetchers are
+available from the command line:
 
 ```bash
 # Over-the-board tournaments relayed live by Lichess.
@@ -162,7 +169,7 @@ python -m tools.fetch_masters reparse    # re-derive columns from stored PGN
 python -m tools.fetch_masters prune --max 200000
 ```
 
-### Backups
+### Backups and publishing
 
 The database grows past GitHub's 100 MB per-file limit, so it cannot be
 committed. `tools/backup_db.py` snapshots it to a GitHub Release instead,
@@ -173,6 +180,11 @@ python -m tools.backup_db            # snapshot and upload
 python -m tools.backup_db --list
 python -m tools.backup_db --restore  # newest backup; --force to overwrite
 ```
+
+Uploading a snapshot is also what publishes it: **Download shared
+database** in the app picks up the newest `db-*` release automatically.
+Note that a snapshot contains the whole file, engine games included, so
+only publish from a machine whose results you are happy to share.
 
 ## Project Structure
 
