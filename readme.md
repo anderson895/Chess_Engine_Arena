@@ -107,12 +107,20 @@ invalidates automatically when the CSV changes).
 
 Open **MASTERS** in the header. This is a separate collection of games
 played by real people — grandmasters, IMs and rated club players — kept in
-its own `master_games` table so that human results can never reach the
-engine Elo ratings.
+its own database so that human results can never reach the engine Elo
+ratings.
 
-Everything is stored locally in the same SQLite file as the engine games
-(`~/.chess_arena/chess_arena.db`), so search and replay work offline. The
-network is only used while importing.
+Everything is stored locally in `~/.chess_arena/masters.db`, a separate
+SQLite file from the engine database (`chess_arena.db`) beside it. The
+collection runs to a few hundred megabytes and is republished wholesale,
+while engine games, tournaments and Elo history are personal and small —
+splitting them means a collection update never touches your own results,
+and a published snapshot carries no private games. Search and replay work
+offline; the network is only used while importing.
+
+Installs from before the split kept both in one file. The masters tables
+are moved across automatically the first time the app opens, and the
+engine database is compacted afterwards.
 
 ### Getting the games
 
@@ -171,9 +179,9 @@ python -m tools.fetch_masters prune --max 200000
 
 ### Backups and publishing
 
-The database grows past GitHub's 100 MB per-file limit, so it cannot be
-committed. `tools/backup_db.py` snapshots it to a GitHub Release instead,
-which lives outside git history:
+The masters database grows past GitHub's 100 MB per-file limit, so it
+cannot be committed. `tools/backup_db.py` snapshots it to a GitHub Release
+instead, which lives outside git history:
 
 ```bash
 python -m tools.backup_db            # snapshot and upload
@@ -183,8 +191,9 @@ python -m tools.backup_db --restore  # newest backup; --force to overwrite
 
 Uploading a snapshot is also what publishes it: **Download shared
 database** in the app picks up the newest `db-*` release automatically.
-Note that a snapshot contains the whole file, engine games included, so
-only publish from a machine whose results you are happy to share.
+A snapshot holds `masters.db` only, so your own engine games and
+tournaments never leave the machine. The asset is still named
+`chess_arena.db.bz2` because shipped builds match on that name.
 
 ## Project Structure
 

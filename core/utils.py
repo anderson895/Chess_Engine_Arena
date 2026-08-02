@@ -58,12 +58,29 @@ def normalize_engine_name(name):
     return name.strip()
 
 
-def get_db_path():
-    """Return the path to the SQLite database, creating the directory if needed."""
-    home = os.path.expanduser("~")
-    db_dir = os.path.join(home, ".chess_arena")
+def _db_dir():
+    """The per-user data directory, created on first use."""
+    db_dir = os.path.join(os.path.expanduser("~"), ".chess_arena")
     os.makedirs(db_dir, exist_ok=True)
-    return os.path.join(db_dir, "chess_arena.db")
+    return db_dir
+
+
+def get_db_path():
+    """Return the path to the engine SQLite database, creating the directory."""
+    return os.path.join(_db_dir(), "chess_arena.db")
+
+
+def get_masters_db_path():
+    """
+    Return the path to the human-games database.
+
+    Deliberately a separate file from the engine database. The masters
+    collection is republished wholesale and runs to hundreds of megabytes,
+    while engine games, tournaments and Elo history are personal and small.
+    Splitting them means updating the collection never rewrites the user's
+    own results, and a published snapshot carries no private games.
+    """
+    return os.path.join(_db_dir(), "masters.db")
 
 
 def get_tier(rating):

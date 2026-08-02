@@ -1,10 +1,13 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#  backup_db.py — snapshot the local database to a GitHub Release
+#  backup_db.py — snapshot the masters database to a GitHub Release
 #
-#  The database lives in ~/.chess_arena and is ~170 MB once a few TWIC
-#  issues are imported, so it cannot go in the repo: GitHub rejects any
-#  file over 100 MB outright, and SQLite is binary, so git would store a
-#  whole new copy on every commit.
+#  The masters database lives in ~/.chess_arena/masters.db and is ~170 MB
+#  once a few TWIC issues are imported, so it cannot go in the repo:
+#  GitHub rejects any file over 100 MB outright, and SQLite is binary, so
+#  git would store a whole new copy on every commit.
+#
+#  Only human games travel: the engine database beside it holds the user's
+#  own games, tournaments and Elo history and is never published.
 #
 #  Releases are the right home for it — 2 GB per asset, and assets live
 #  outside git history, so uploading repeatedly never grows the clone.
@@ -28,11 +31,15 @@ import sys
 import tempfile
 import time
 
-from core.utils import get_db_path
+from core.utils import get_masters_db_path
 
 # bz2 beats gzip substantially on SQLite pages (16% vs 24% of original) and
 # is five times faster than lzma for the same ratio.
 COMPRESS_LEVEL = 9
+# Snapshots hold the masters collection only — engine games, tournaments and
+# Elo history are personal and stay out of it. The file name predates that
+# split and must not change: shipped builds match on it exactly when they
+# look for a snapshot (see tools/fetch_masters.DB_ASSET).
 ASSET = "chess_arena.db.bz2"
 TAG_PREFIX = "db-"
 KEEP = 5              # dated releases retained by --prune
@@ -64,16 +71,15 @@ def snapshot(dest_dir):
     miss committed data sitting in the -wal file. VACUUM INTO takes a read
     lock and emits a complete, already-compacted database.
     """
-    src = get_db_path()
+    src = get_masters_db_path()
     if not os.path.isfile(src):
-        raise SystemExit(f"no database at {src}")
+        raise SystemExit(f"no masters database at {src}")
     raw_size = os.path.getsize(src)
     print(f"source     : {src}  ({_mb(raw_size)})")
 
     with sqlite3.connect(src) as conn:
         games = conn.execute(
             "SELECT COUNT(*) FROM master_games").fetchone()[0]
-        engine = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
         vacuumed = os.path.join(dest_dir, "snapshot.db")
         print("snapshot   : VACUUM INTO …", end="", flush=True)
         t = time.perf_counter()
@@ -95,8 +101,7 @@ def snapshot(dest_dir):
 
     if size > 2 * 1024 ** 3:
         raise SystemExit("asset exceeds the 2 GB GitHub Release limit")
-    return out, {"games": games, "engine_games": engine, "raw": raw_size,
-                 "packed": size}
+    return out, {"games": games, "raw": raw_size, "packed": size}
 
 
 def list_backups():
@@ -133,7 +138,7 @@ def restore(tag=None, force=False):
     if not rels:
         raise SystemExit("no database backups found in this repo's releases")
     tag = tag or rels[0]["tagName"]
-    dest = get_db_path()
+    dest = get_masters_db_path()
 
     tmp = tempfile.mkdtemp()
     print(f"download   : {tag}")
@@ -201,19 +206,24 @@ def main(argv=None):
         return 0
 
     tag = args.tag or TAG_PREFIX + time.strftime("%Y-%m-%d")
-    workdir = "." if args.local_only else tempfile.mkdtemp()
-    path, meta = snapshot(workdir)
-
     if args.local_only:
+        path, _ = snapshot(".")
         print(f"written    : {path}")
         return 0
 
-    notes = (f"Masters + engine database snapshot.\n\n"
-             f"- {meta['games']:,} master games\n"
-             f"- {meta['engine_games']:,} engine games\n"
-             f"- {_mb(meta['raw'])} uncompressed, {_mb(meta['packed'])} packed\n\n"
-             f"Restore with `python -m tools.backup_db --restore {tag}`.")
-    upload(path, meta, tag, notes)
+    # The packed snapshot is only needed until it is uploaded; without the
+    # cleanup every run left another copy of it behind in the temp folder.
+    workdir = tempfile.mkdtemp()
+    try:
+        path, meta = snapshot(workdir)
+        notes = (f"Masters database snapshot — human games only.\n\n"
+                 f"- {meta['games']:,} master games\n"
+                 f"- {_mb(meta['raw'])} uncompressed, "
+                 f"{_mb(meta['packed'])} packed\n\n"
+                 f"Restore with `python -m tools.backup_db --restore {tag}`.")
+        upload(path, meta, tag, notes)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
     if args.prune:
         prune()
     return 0

@@ -11,7 +11,7 @@ import os
 import re
 import sqlite3
 
-from core.utils import get_base_path, get_db_path
+from core.utils import get_base_path, get_db_path, get_masters_db_path
 
 
 # ── PGN parsing ────────────────────────────────────────────────
@@ -328,13 +328,17 @@ class MastersDB:
     """
     SQLite store for real-world human games.
 
-    Shares the file with the engine database (`get_db_path()`) but lives in
-    its own table, so nothing here can reach the engine Elo pipeline.
+    Lives in its own file (`get_masters_db_path()`), separate from the engine
+    database, so nothing here can reach the engine Elo pipeline and a
+    collection update never rewrites the user's own results. Older installs
+    kept these tables inside the engine database; `_migrate_legacy` moves
+    them across on first use.
     """
 
     def __init__(self, db_path=None):
-        self.db_path = db_path or get_db_path()
+        self.db_path = db_path or get_masters_db_path()
         self._init_schema()
+        self._migrate_legacy()
 
     def _connect(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -390,6 +394,95 @@ class MastersDB:
                 f'CREATE INDEX IF NOT EXISTS {name} ON master_games ({cols})')
         conn.commit()
         conn.close()
+
+    def _migrate_legacy(self, legacy_path=None):
+        """
+        Move master_games/master_meta out of the engine database, once.
+
+        Installs from before the split kept both tables inside
+        chess_arena.db. Copy the rows across, drop the originals and
+        reclaim the freed pages, so the engine database goes back to
+        holding only engine data.
+
+        No completion marker is needed: the drop is what makes this a
+        no-op next time, and the copy itself is idempotent because
+        game_key is UNIQUE. A failed drop simply re-copies nothing.
+
+        Returns the number of games moved.
+        """
+        legacy = legacy_path or get_db_path()
+        if os.path.abspath(legacy) == os.path.abspath(self.db_path):
+            return 0                     # caller asked for a single file
+        if not os.path.isfile(legacy):
+            return 0
+
+        try:
+            probe = sqlite3.connect(legacy, timeout=30)
+            has_table = probe.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='master_games'").fetchone()
+            pending = probe.execute(
+                "SELECT COUNT(*) FROM master_games").fetchone()[0] \
+                if has_table else 0
+            probe.close()
+        except sqlite3.Error as e:
+            print(f"[MastersDB] legacy probe failed: {e}")
+            return 0
+
+        if not has_table:
+            return 0
+
+        moved = 0
+        if pending:
+            print(f"[MastersDB] migrating {pending:,} games out of "
+                  f"{os.path.basename(legacy)} …")
+            conn = self._connect()
+            literal = legacy.replace("'", "''")
+            conn.execute(f"ATTACH DATABASE '{literal}' AS legacy")
+            try:
+                mine = {r[1] for r in
+                        conn.execute("PRAGMA table_info(master_games)")}
+                theirs = [r[1] for r in
+                          conn.execute("PRAGMA legacy.table_info(master_games)")]
+                cols = ", ".join(f"[{c}]" for c in theirs
+                                 if c in mine and c != "id")
+                before = conn.execute(
+                    "SELECT COUNT(*) FROM master_games").fetchone()[0]
+                conn.execute(f"INSERT OR IGNORE INTO master_games ({cols}) "
+                             f"SELECT {cols} FROM legacy.master_games")
+                if conn.execute(
+                        "SELECT name FROM legacy.sqlite_master WHERE "
+                        "type='table' AND name='master_meta'").fetchone():
+                    conn.execute("INSERT OR IGNORE INTO master_meta (key, value) "
+                                 "SELECT key, value FROM legacy.master_meta")
+                conn.commit()
+                moved = conn.execute(
+                    "SELECT COUNT(*) FROM master_games").fetchone()[0] - before
+            except sqlite3.Error as e:
+                print(f"[MastersDB] migration failed, engine database left "
+                      f"untouched: {e}")
+                conn.execute("DETACH DATABASE legacy")
+                conn.close()
+                return 0
+            conn.execute("DETACH DATABASE legacy")
+            conn.close()
+
+        # Only now is it safe to reclaim the space on the engine side.
+        try:
+            old = sqlite3.connect(legacy, timeout=30)
+            old.isolation_level = None          # VACUUM cannot run in a txn
+            old.execute("DROP TABLE IF EXISTS master_games")
+            old.execute("DROP TABLE IF EXISTS master_meta")
+            old.execute("VACUUM")
+            old.close()
+        except sqlite3.Error as e:
+            print(f"[MastersDB] could not shrink {os.path.basename(legacy)}: {e}")
+            return moved
+
+        if pending:
+            print(f"[MastersDB] moved {moved:,} games to "
+                  f"{os.path.basename(self.db_path)}")
+        return moved
 
     # ── Settings ───────────────────────────────────────────
 
