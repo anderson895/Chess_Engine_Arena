@@ -9,7 +9,7 @@ from nicegui import app, ui, run
 from core.constants import QUALITY_COLORS
 from core.opening_book import OpeningBook
 from core.utils import get_base_path, get_resource_path
-from webui import dialogs, tournament, views, widgets
+from webui import dialogs, masters, tournament, views, widgets
 from webui.board import BoardView, EvalBar
 from webui.session import GameSession, parse_opening_book, TIME_CONTROLS
 from webui.theme import (
@@ -367,10 +367,24 @@ def main_page():
                  lambda: views.show_game_history(session),
                  "Loading game history…"),
              "Game history"),
+            ("masters",
+             lambda: widgets.with_loader(
+                 lambda: masters.show_masters_db(session),
+                 "Loading masters database…"),
+             "Real games by GMs, IMs and other rated human players"),
         ]:
-            ui.element("img").props(f'src="/assets/ui/nav_{card}.png"') \
+            nav_img = ui.element("img") \
+                .props(f'src="/assets/ui/nav_{card}.png"') \
                 .classes("nav-card").on("click", handler) \
                 .tooltip(tip)
+            if card == "masters":
+                with nav_img:
+                    masters_badge = ui.badge("") \
+                        .props("floating color=positive")
+                    masters_badge.set_visibility(False)
+        # Pulls newly relayed tournament games on a worker thread a few
+        # seconds from now; no-ops unless the user turned auto-sync on.
+        masters.schedule_auto_sync(session, masters_badge)
         ui.space()
         pick_btn = ui.button("Pick Opening",
                              on_click=lambda: _pick_opening(pick_btn)) \

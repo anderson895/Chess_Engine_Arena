@@ -8,6 +8,7 @@ native desktop window (pywebview/WebView2) or in the browser.
 - [Features](#features)
 - [Getting Started](#getting-started)
 - [Adding Engines and Files](#adding-engines-and-files)
+- [Masters Database](#masters-database)
 - [Project Structure](#project-structure)
 - [Building a Standalone .exe](#building-a-standalone-exe)
 - [Resources](#resources)
@@ -40,6 +41,10 @@ To run from source instead, see [Getting Started](#getting-started).
 - **Elo Ratings** — automatic rating tracking with interactive history charts
 - **Rankings / Statistics / Game History** — searchable tables with
   medals for the top 3 and per-engine opening statistics
+- **Masters Database** — over-the-board games by real titled players,
+  imported from Lichess broadcasts, Chess.com, TWIC and PGN Mentor, with
+  filters for player, colour, opponent, event, ECO, rating and year
+  ([details](#masters-database))
 - **PGN Viewer** — interactive replay with keyboard navigation, copy and
   download
 - **Sprite-based UI** — all pieces, nav cards, medals, badges and icons
@@ -97,6 +102,77 @@ Place any of these in `openings/` (both filenames are auto-detected):
 
 Delete the `.cache.json` next to it to force a re-parse (it also
 invalidates automatically when the CSV changes).
+
+## Masters Database
+
+Open **MASTERS** in the header. This is a separate collection of games
+played by real people — grandmasters, IMs and rated club players — kept in
+its own `master_games` table so that human results can never reach the
+engine Elo ratings.
+
+Everything is stored locally in the same SQLite file as the engine games
+(`~/.chess_arena/chess_arena.db`), so search and replay work offline. The
+network is only used while importing.
+
+### Importing
+
+**Import games** offers five sources, all free and none requiring an API
+key. The same fetchers are available from the command line:
+
+```bash
+# Over-the-board tournaments relayed live by Lichess.
+# Real names, FIDE IDs, Elo and ECO — but only the top boards.
+python -m tools.fetch_masters broadcasts --pages 1 --max-tours 10
+
+# The Week in Chess: one zipped PGN per week, complete tournament
+# coverage (every board, every round). Issue 1655 is late July 2026;
+# subtract about 52 per year going back. Available from issue 920.
+python -m tools.fetch_masters twic --from 1646 --to 1655
+
+# PGN Mentor: whole careers, or every master game in an opening.
+python -m tools.fetch_masters pgnmentor --kind players --names Carlsen Fischer
+python -m tools.fetch_masters pgnmentor --kind openings --all
+
+# Chess.com and Lichess accounts.
+python -m tools.fetch_masters titled --title GM --players 20 --months 3
+python -m tools.fetch_masters lichess --player DrNykterstein --max 500
+
+# Anything you already have.
+python -m tools.fetch_masters file --path games.pgn
+```
+
+Re-importing is safe: a dedupe key over players, date, result and opening
+moves means duplicates are skipped. Games still in progress are refused —
+the next sync picks them up once they finish.
+
+> **Coverage note:** Lichess relays only the top boards of an event, so a
+> player outside the top boards will be missing rounds. TWIC carries the
+> whole tournament and is the source to use when a player looks incomplete.
+
+### Housekeeping
+
+**Storage & maintenance** holds the size report, an optional background
+sync, and a hard cap on the number of games (older imports are pruned once
+it is reached). Clock and evaluation annotations are stripped on import,
+which cuts stored PGN by about 60%.
+
+```bash
+python -m tools.fetch_masters stats      # counts, span, size on disk
+python -m tools.fetch_masters reparse    # re-derive columns from stored PGN
+python -m tools.fetch_masters prune --max 200000
+```
+
+### Backups
+
+The database grows past GitHub's 100 MB per-file limit, so it cannot be
+committed. `tools/backup_db.py` snapshots it to a GitHub Release instead,
+which lives outside git history:
+
+```bash
+python -m tools.backup_db            # snapshot and upload
+python -m tools.backup_db --list
+python -m tools.backup_db --restore  # newest backup; --force to overwrite
+```
 
 ## Project Structure
 

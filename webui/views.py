@@ -529,8 +529,14 @@ def parse_pgn_moves(pgn):
     return uci_moves
 
 
-def show_pgn_viewer(session, game_id, all_games=None):
-    pgn = session.db.get_game_pgn(game_id)
+def show_pgn_viewer(session, game_id, all_games=None, pgn_loader=None):
+    """
+    Replay a stored game.
+
+    *pgn_loader* overrides where the PGN comes from, so the same viewer
+    serves engine games and the human masters database.
+    """
+    pgn = (pgn_loader or session.db.get_game_pgn)(game_id)
     if not pgn:
         ui.notify("Could not load PGN.", type="negative")
         return
@@ -573,7 +579,8 @@ def show_pgn_viewer(session, game_id, all_games=None):
         async def _nav_game(delta):
             dialog.close()
             await widgets.with_loader(
-                lambda: show_pgn_viewer(session, ids[idx + delta], all_games),
+                lambda: show_pgn_viewer(session, ids[idx + delta], all_games,
+                                        pgn_loader),
                 "Loading game replay…")
 
         with ui.row().classes("w-full items-center justify-between"):
