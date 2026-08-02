@@ -25,7 +25,6 @@
 import argparse
 import io
 import json
-import os
 import re
 import sys
 import time
@@ -334,67 +333,6 @@ def fetch_twic(issue_from, issue_to=None, log=print):
         chunks.extend(_unzip_pgn(raw, f"issue {issue}", log))
         time.sleep(0.5)
     return "\n\n".join(chunks)
-
-
-# ── Shared database snapshot ───────────────────────────────────
-
-GITHUB_API = "https://api.github.com/repos"
-DEFAULT_REPO = "anderson895/Chess_Engine_Arena"
-DB_TAG_PREFIX = "db-"
-DB_ASSET = "chess_arena.db.bz2"
-
-
-def find_shared_db(repo=DEFAULT_REPO, log=print):
-    """
-    Locate the newest published database snapshot.
-
-    Uses the public Releases API directly rather than the gh CLI, because
-    this has to work from the packaged .exe, where neither gh nor the
-    project source is present.
-
-    Returns (tag, download_url, size_bytes) or None.
-    """
-    data = _get_json(f"{GITHUB_API}/{repo}/releases?per_page=100")
-    if not data:
-        log("could not reach the releases API")
-        return None
-    snapshots = sorted(
-        (r for r in data if (r.get("tag_name") or "").startswith(DB_TAG_PREFIX)),
-        key=lambda r: r.get("created_at", ""), reverse=True)
-    for rel in snapshots:
-        for asset in rel.get("assets") or []:
-            if asset.get("name") == DB_ASSET:
-                return (rel["tag_name"], asset["browser_download_url"],
-                        asset.get("size", 0))
-    log("no database snapshot published yet")
-    return None
-
-
-def download_shared_db(dest_path, url, total=0, log=print, on_progress=None):
-    """
-    Stream a .bz2 snapshot to *dest_path*, decompressing as it goes.
-
-    Decompressing during the download avoids ever holding the ~170 MB
-    expanded database in memory, and means only one temporary file exists.
-    """
-    import bz2
-
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    decomp = bz2.BZ2Decompressor()
-    read = 0
-    with urllib.request.urlopen(req, timeout=120) as resp, \
-            open(dest_path, "wb") as out:
-        while True:
-            chunk = resp.read(1 << 20)
-            if not chunk:
-                break
-            read += len(chunk)
-            out.write(decomp.decompress(chunk))
-            if on_progress:
-                on_progress(read, total)
-    log(f"downloaded {read / 1048576:.1f} MB, "
-        f"expanded to {os.path.getsize(dest_path) / 1048576:.1f} MB")
-    return dest_path
 
 
 # ── Import driver ──────────────────────────────────────────────

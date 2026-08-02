@@ -111,12 +111,14 @@ its own database so that human results can never reach the engine Elo
 ratings.
 
 Everything is stored locally in `~/.chess_arena/masters.db`, a separate
-SQLite file from the engine database (`chess_arena.db`) beside it. The
-collection runs to a few hundred megabytes and is republished wholesale,
-while engine games, tournaments and Elo history are personal and small —
-splitting them means a collection update never touches your own results,
-and a published snapshot carries no private games. Search and replay work
-offline; the network is only used while importing.
+SQLite file from the engine database (`chess_arena.db`) beside it. The two
+have opposite lifecycles: the collection runs to a few hundred megabytes
+and can be re-fetched from its sources at any time, while engine games,
+tournaments and Elo history are small and cannot be recreated. Search and
+replay work offline; the network is only used while importing.
+
+A fresh install starts with an empty collection — that is expected. Fill
+it from the import sources whenever you like; nothing else depends on it.
 
 Installs from before the split kept both in one file. The masters tables
 are moved across automatically the first time the app opens, and the
@@ -124,15 +126,8 @@ engine database is compacted afterwards.
 
 ### Getting the games
 
-The quickest way to fill it is **Storage & maintenance → Download shared
-database**, which pulls the published snapshot from this repo's Releases:
-about 120,000 games in under a minute, no Python needed. Only master games
-are copied in — your own engine games, tournaments and Elo history are left
-alone, and running it again adds nothing it already has.
-
-To build the collection yourself instead, **Import games** offers five
-sources, all free and none requiring an API key. The same fetchers are
-available from the command line:
+**Import games** offers five sources, all free and none requiring an API
+key. The same fetchers are available from the command line:
 
 ```bash
 # Over-the-board tournaments relayed live by Lichess.
@@ -177,11 +172,12 @@ python -m tools.fetch_masters reparse    # re-derive columns from stored PGN
 python -m tools.fetch_masters prune --max 200000
 ```
 
-### Backups and publishing
+### Moving the engine database between machines
 
-The masters database grows past GitHub's 100 MB per-file limit, so it
-cannot be committed. `tools/backup_db.py` snapshots it to a GitHub Release
-instead, which lives outside git history:
+`chess_arena.db` holds the games, tournaments and Elo history that cannot
+be recreated. SQLite is binary, so committing it would make git store a
+whole new copy on every change; `tools/backup_db.py` publishes it as a
+GitHub Release asset instead, which lives outside git history:
 
 ```bash
 python -m tools.backup_db            # snapshot and upload
@@ -189,11 +185,13 @@ python -m tools.backup_db --list
 python -m tools.backup_db --restore  # newest backup; --force to overwrite
 ```
 
-Uploading a snapshot is also what publishes it: **Download shared
-database** in the app picks up the newest `db-*` release automatically.
-A snapshot holds `masters.db` only, so your own engine games and
-tournaments never leave the machine. The asset is still named
-`chess_arena.db.bz2` because shipped builds match on that name.
+On the other machine, either run `--restore`, or download
+`chess_arena.db.bz2` from the newest `db-*` release, decompress it and put
+the result at `~/.chess_arena/chess_arena.db`.
+
+`masters.db` is deliberately left out — it is large and every game in it
+can be re-fetched from the import sources, so a new machine simply starts
+with an empty collection.
 
 ## Project Structure
 

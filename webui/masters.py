@@ -6,8 +6,6 @@
 #  Read-only reference material: kept out of the engine Elo pipeline.
 # ═══════════════════════════════════════════════════════════
 
-import os
-import shutil
 import time
 
 from nicegui import run, ui
@@ -675,71 +673,6 @@ def show_maintenance_dialog(session, on_done=None):
             refresh_stats()
         auto_sw.on_value_change(lambda e: save_settings())
         cap_inp.on_value_change(lambda e: save_settings())
-
-        ui.separator()
-        ui.label("SHARED COLLECTION").classes("arena-heading")
-        ui.label("Fetch the published snapshot instead of importing every "
-                 "source yourself. Only master games are copied in — your "
-                 "own engine games, tournaments and ratings are untouched.") \
-            .classes("text-xs text-gray-500")
-        shared_lbl = ui.label("").classes("text-xs mono")
-        shared_bar = ui.linear_progress(value=0, show_value=False) \
-            .classes("w-full")
-        shared_bar.set_visibility(False)
-
-        async def do_fetch_shared():
-            from tools import fetch_masters as fm
-            import tempfile
-
-            shared_btn.disable()
-            shared_lbl.set_text("Looking for a published snapshot…")
-            try:
-                found = await run.io_bound(fm.find_shared_db,
-                                           log=lambda *_: None)
-                if not found:
-                    shared_lbl.set_text("No snapshot published yet.")
-                    ui.notify("No shared database found.", type="warning")
-                    return
-                tag, url, size = found
-                shared_lbl.set_text(f"Downloading {tag} ({_mb(size)})…")
-                shared_bar.set_visibility(True)
-
-                # io_bound runs on a worker thread, so the progress callback
-                # cannot touch UI elements directly; stash and poll instead.
-                seen = {"n": 0}
-                tmp = os.path.join(tempfile.mkdtemp(), "shared.db")
-                timer = ui.timer(0.3, lambda: shared_bar.set_value(
-                    min(1.0, seen["n"] / size) if size else 0))
-                try:
-                    await run.io_bound(
-                        fm.download_shared_db, tmp, url, size,
-                        lambda *_: None,
-                        lambda read, _t: seen.__setitem__("n", read))
-                finally:
-                    timer.deactivate()
-                shared_bar.set_value(1.0)
-
-                shared_lbl.set_text("Merging…")
-                added, dupes = await run.io_bound(db.merge_from, tmp)
-                shutil.rmtree(os.path.dirname(tmp), ignore_errors=True)
-
-                shared_lbl.set_text(
-                    f"{tag}: {added:,} new game(s) added, "
-                    f"{dupes:,} already present")
-                ui.notify(f"Added {added:,} game(s) from {tag}",
-                          type="positive" if added else "info")
-                refresh_stats()
-            except Exception as e:
-                shared_lbl.set_text(f"Failed: {e}")
-                ui.notify(f"Could not fetch the shared database: {e}",
-                          type="negative")
-            finally:
-                shared_bar.set_visibility(False)
-                shared_btn.enable()
-
-        shared_btn = widgets.icon_button(
-            "Download shared database", "ic_download", secondary=True,
-            dense=True, on_click=do_fetch_shared)
 
         ui.separator()
         ui.label("MAINTENANCE").classes("arena-heading")
