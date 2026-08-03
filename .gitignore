@@ -20,10 +20,3 @@ openings/*.cache.json
 # The live database lives in ~/.chess_arena (see core.utils.get_db_path)
 # and grows without limit as games are imported — it must never be
 # committed. Any stray copy in the repo is ignored too.
-*.db
-*.db-*
-*.db.*
-*.sqlite
-*.sqlite3
-*.pgn
-*.pgn.gz
