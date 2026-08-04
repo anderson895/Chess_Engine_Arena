@@ -197,7 +197,18 @@ class GameSession:
                 f"Plies: {len(self.board.move_history)}")
 
     def uses_clock(self):
-        """True unless the selected preset is clockless (Classic)."""
+        """
+        True unless the preset in force is clockless (Classic).
+
+        While a game runs this answers from the base time captured by
+        start_game, not from the live selection. The Time control dropdown
+        stays editable during a game, and switching it to a clocked preset
+        mid-game used to turn this on against clocks start_game had left at
+        zero — max(1, 0) then handed the engine a 1 ms clock and the next
+        move flagged, in a game the history still recorded as Classic.
+        """
+        if self.game_running:
+            return self.base_min is not None
         return TIME_CONTROLS.get(
             self.time_control, TIME_CONTROLS["blitz"])[1] is not None
 
