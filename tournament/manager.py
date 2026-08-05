@@ -783,6 +783,71 @@ class Tournament:
 
         return True, f"{name} joins from round {self.current_round + 1}."
 
+    def remove_player(self, name):
+        """
+        Drop a player before the tournament starts.
+
+        Only before the first round: once games exist, removing someone
+        would leave results and Buchholz scores referring to a player who
+        is no longer in the field. Any schedule derived from the roster is
+        rebuilt, so a round-robin re-pairs around the smaller field.
+
+        Returns (ok, message).
+        """
+        if self.started:
+            return False, "The tournament has already started."
+
+        with self._lock:
+            player = self.players.get(normalize_engine_name(name))
+            if player is None:
+                return False, f"{name} is not in this tournament."
+            if len(self.player_list) <= 2:
+                return False, "A tournament needs at least 2 players."
+
+            del self.players[player.name]
+            self.player_list.remove(player)
+            for i, p in enumerate(self.player_list):
+                p.seed = i
+
+            # Anything precomputed from the roster is now stale
+            if self.format == self.FORMAT_ROUNDROBIN:
+                self._rr_schedule = RoundRobinPairing.generate_all_rounds(
+                    self.player_list, double=self.double_rr)
+                self.rounds = len(self._rr_schedule)
+            elif self.format == self.FORMAT_KNOCKOUT:
+                self._ko_active_players = list(self.player_list)
+
+        return True, f"{player.name} removed."
+
+    def set_rounds(self, count):
+        """
+        Change how many rounds a Swiss runs.
+
+        Swiss is the only format whose length is a free choice: round-robin
+        gets its round count from the generated schedule and knockout from
+        the size of the bracket. Rounds already played cannot be taken
+        back, so the floor is the current round.
+
+        Returns (ok, message).
+        """
+        if self.format != self.FORMAT_SWISS:
+            return False, "Only Swiss tournaments have an adjustable length."
+        if self.finished:
+            return False, "This tournament has already finished."
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            return False, "Rounds must be a whole number."
+
+        floor = max(1, self.current_round)
+        if count < floor:
+            return False, (f"Round {self.current_round} is already under way "
+                           f"— {floor} is the fewest you can set.")
+
+        with self._lock:
+            self.rounds = count
+        return True, f"Now {count} round(s)."
+
     def round_complete(self):
         return all(g.status == "done" for g in self.round_games)
 

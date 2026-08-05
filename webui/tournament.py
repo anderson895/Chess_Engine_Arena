@@ -45,6 +45,25 @@ _RANK_MEDAL_SLOT = """
 </q-td>
 """
 
+# The engine's standing in the games database, not in this tournament
+_ELO_SLOT = """
+<q-td :props="props" class="text-left">
+  <span class="text-xs" :style="{ color: props.row.elo_color }">
+    {{ props.row.elo }}
+  </span>
+</q-td>
+"""
+
+_DROP_SLOT = """
+<q-td :props="props" class="text-center">
+  <q-btn v-if="props.row.can_drop" dense flat round size="sm"
+         icon="close" color="negative"
+         @click="$parent.$emit('drop', props.row)">
+    <q-tooltip>Remove from the tournament</q-tooltip>
+  </q-btn>
+</q-td>
+"""
+
 
 def _fmt_clock(ms):
     """mm:ss for a clock value in milliseconds (never negative)."""
@@ -220,6 +239,22 @@ class TournamentSession:
         name = normalize_engine_name(
             os.path.splitext(os.path.basename(path))[0])
         ok, msg = self.t.add_player(TournamentPlayer(name, path))
+        if ok:
+            with self.lock:
+                self.tables_dirty = True
+        return ok, msg
+
+    def remove_player(self, name):
+        """Drop a player from a tournament that has not started yet."""
+        ok, msg = self.t.remove_player(name)
+        if ok:
+            with self.lock:
+                self.tables_dirty = True
+        return ok, msg
+
+    def set_rounds(self, count):
+        """Change the length of a Swiss event."""
+        ok, msg = self.t.set_rounds(count)
         if ok:
             with self.lock:
                 self.tables_dirty = True
@@ -532,6 +567,12 @@ def show_tournament_window(session, tsess: TournamentSession):
                 .props("no-caps color=secondary") \
                 .tooltip("Enter another engine — it starts on zero and is "
                          "paired from the next round")
+            rounds_in = ui.number(label="Rounds", value=t.rounds,
+                                  min=1, max=99, step=1,
+                                  on_change=lambda e: _set_rounds(e.value)) \
+                .props("dense").classes("w-24") \
+                .tooltip("Swiss length — cannot go below the round already "
+                         "under way")
             stop_btn = widgets.icon_button(
                 "Stop", "ic_stop", secondary=True,
                 on_click=lambda: (tsess.stop(), _sync_controls()))
@@ -579,6 +620,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                         .classes("w-full flex-grow"):
                     with ui.tab_panel(tab_stand):
                         stand_table = _standings_table(t)
+                        stand_table.on("drop", lambda e: _drop_player(e.args))
                     with ui.tab_panel(tab_sched):
                         sched_table = _schedule_table()
                     if tab_brack:
@@ -597,9 +639,12 @@ def show_tournament_window(session, tsess: TournamentSession):
             pause_btn.set_visibility(tsess.state == "running")
             decide_btn.set_visibility(tsess.state in ("running", "paused"))
             stop_btn.set_visibility(tsess.state in ("running", "paused"))
-            # Only Swiss can absorb a late entrant, and only until it ends
-            add_btn.set_visibility(t.format == Tournament.FORMAT_SWISS
-                                   and tsess.state != "finished")
+            # Only Swiss can absorb a late entrant or change its length,
+            # and only until it ends
+            swiss_live = (t.format == Tournament.FORMAT_SWISS
+                          and tsess.state != "finished")
+            add_btn.set_visibility(swiss_live)
+            rounds_in.set_visibility(swiss_live)
 
         # Adjudication dialog: stop the current game, user picks the result
         with ui.dialog() as decide_dlg, ui.card().classes(
@@ -660,6 +705,31 @@ def show_tournament_window(session, tsess: TournamentSession):
             if ok:
                 add_dlg.close()
                 _refresh_tables()
+
+        def _drop_player(payload):
+            # A one-argument $emit arrives as the row itself; more than one
+            # arrives as a list. Accept either rather than guess.
+            if isinstance(payload, list):
+                payload = next((a for a in payload if isinstance(a, dict)), {})
+            name = (payload or {}).get("player") if isinstance(payload, dict) \
+                else payload
+            if not name:
+                return
+            ok, msg = tsess.remove_player(name)
+            ui.notify(msg, type="positive" if ok else "warning")
+            if ok:
+                _refresh_tables()
+
+        def _set_rounds(value):
+            if value is None or int(value) == t.rounds:
+                return
+            ok, msg = tsess.set_rounds(value)
+            if not ok:
+                ui.notify(msg, type="warning")
+                rounds_in.set_value(t.rounds)      # bounce back to the truth
+                return
+            ui.notify(msg, type="positive")
+            _refresh_tables()
 
         def _open_decide():
             with tsess.lock:
@@ -723,8 +793,10 @@ def show_tournament_window(session, tsess: TournamentSession):
                 f"{t.format}  ·  Round {t.current_round}"
                 + (f"/{t.rounds}" if t.format != Tournament.FORMAT_KNOCKOUT
                    else ""))
-            _fill_standings(stand_table, t)
+            _fill_standings(stand_table, t, session)
             _fill_schedule(sched_table, t)
+            if rounds_in.value != t.rounds:
+                rounds_in.set_value(t.rounds)
             if tab_brack:
                 bracket_html.set_content(_bracket_text(t))
             if t.finished and not winner_row.visible:
@@ -827,6 +899,7 @@ def _standings_table(t):
     columns = [
         {"name": "rank",   "label": "#",      "field": "rank",  "align": "center"},
         {"name": "player", "label": "Player", "field": "player", "align": "left"},
+        {"name": "elo",    "label": "Rating", "field": "elo",   "align": "left"},
         {"name": "score",  "label": "Score",  "field": "score", "align": "center",
          "sortable": True},
         {"name": "wdl",    "label": "W/D/L",  "field": "wdl",   "align": "center"},
@@ -834,19 +907,36 @@ def _standings_table(t):
     if swiss:
         columns.append({"name": "buch", "label": "Buchholz", "field": "buch",
                         "align": "center"})
+    # Drop column, only ever populated before the first round
+    columns.append({"name": "drop", "label": "", "field": "drop",
+                    "align": "center", "style": "width: 44px"})
     table = ui.table(columns=columns, rows=[], row_key="player",
                      pagination=0).classes("w-full arena-log")
     table.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
+    table.add_slot("body-cell-elo", _ELO_SLOT)
+    table.add_slot("body-cell-drop", _DROP_SLOT)
     return table
 
 
-def _fill_standings(table, t):
+def _fill_standings(table, t, session=None):
+    """
+    Fill the standings.
+
+    Before the first round the table doubles as the roster: it carries each
+    engine's live rating from the games database and a drop button, so the
+    field can be trimmed without leaving the tournament window.
+    """
+    editable = not t.started
     rows = []
     for i, p in enumerate(t.get_standings(), 1):
+        elo_txt, elo_col = (session.rank_line(p.name) if session
+                            else ("", COLOR_MUTED))
         rows.append({
             "rank": i, "player": p.name, "score": p.score,
+            "elo": elo_txt, "elo_color": elo_col,
             "wdl": f"{p.wins}/{p.draws}/{p.losses}",
             "buch": f"{p.buchholz:.1f}",
+            "can_drop": editable,
         })
     table.rows = rows
     table.update()
