@@ -476,13 +476,21 @@ class SwissPairing:
         bye_player = None
 
         if len(available) % 2 == 1:
-            for p in reversed(available):
-                if 'BYE' not in p.opponents:
-                    bye_player = p
-                    available.remove(p)
+            # available is sorted best-first, so the last of any pool is its
+            # lowest-ranked member — the one a bye normally goes to.
+            #
+            # A bye is worth a full point, and a late entrant is always on
+            # zero and therefore always last, so without the first pool the
+            # newcomer would collect a free win before playing anyone. Fall
+            # through when everyone left is in that position.
+            for pool in ([p for p in available
+                          if p.games_played and 'BYE' not in p.opponents],
+                         [p for p in available if 'BYE' not in p.opponents],
+                         available):
+                if pool:
+                    bye_player = pool[-1]
+                    available.remove(bye_player)
                     break
-            if bye_player is None:
-                bye_player = available.pop()
 
         paired = SwissPairing._backtrack_pair(available, played_pairs, 0)
 
@@ -623,6 +631,10 @@ class Tournament:
 
         self.tournament_id = str(id(self))
 
+        # Late entrants arrive on the UI thread while the runner thread is
+        # generating rounds off player_list — see add_player.
+        self._lock = threading.RLock()
+
         self._ko_pending_winners = []
         self._ko_eliminated      = []
         self._ko_round_games     = {}
@@ -645,8 +657,11 @@ class Tournament:
         self.round_games = []
 
         if self.format == self.FORMAT_SWISS:
-            pairs, bye = SwissPairing.pair(
-                self.player_list, self.current_round, self.played_pairs)
+            # Hold the lock across pairing so a late entrant either makes
+            # this round in full or waits for the next one
+            with self._lock:
+                pairs, bye = SwissPairing.pair(
+                    self.player_list, self.current_round, self.played_pairs)
             for w, b in pairs:
                 g = TournamentGame(self.current_round, w, b)
                 self.round_games.append(g)
@@ -725,6 +740,48 @@ class Tournament:
                 elim = game.black if adv is game.white else game.white
                 self._ko_pending_winners.append(adv)
                 self._ko_eliminated.append(elim)
+
+    def add_player(self, player):
+        """
+        Add a late entrant to a Swiss tournament already under way.
+
+        The newcomer starts on zero and is picked up by the next round the
+        pairing generates; rounds already scheduled keep their games. Swiss
+        only — round-robin builds its whole schedule up front and knockout
+        seeds a fixed bracket, so neither can absorb an extra player
+        without invalidating what it already produced.
+
+        Returns (ok, message).
+        """
+        if self.format != self.FORMAT_SWISS:
+            return False, "Only Swiss tournaments can take late entrants."
+        if self.finished:
+            return False, "This tournament has already finished."
+        if not player.engine_path or not os.path.isfile(player.engine_path):
+            return False, "That engine file no longer exists."
+
+        name = normalize_engine_name(player.name)
+        if not name:
+            return False, "That engine has no usable name."
+
+        with self._lock:
+            # Same two rules the create dialog enforces: one entry per name
+            # and one per engine file, so a rename cannot smuggle in a clone
+            if name in self.players:
+                return False, f"{name} is already in this tournament."
+            twin = next(
+                (p for p in self.player_list
+                 if os.path.normcase(p.engine_path)
+                 == os.path.normcase(player.engine_path)), None)
+            if twin is not None:
+                return False, f"That engine is already playing as {twin.name}."
+
+            player.name = name
+            player.seed = len(self.player_list)
+            self.players[name] = player
+            self.player_list.append(player)
+
+        return True, f"{name} joins from round {self.current_round + 1}."
 
     def round_complete(self):
         return all(g.status == "done" for g in self.round_games)

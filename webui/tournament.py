@@ -215,6 +215,16 @@ class TournamentSession:
             self.runner.adjudicate(result)
             self.state = "running"     # adjudicating releases a pause
 
+    def add_player(self, path):
+        """Enter an engine into a Swiss event in progress. (ok, message)."""
+        name = normalize_engine_name(
+            os.path.splitext(os.path.basename(path))[0])
+        ok, msg = self.t.add_player(TournamentPlayer(name, path))
+        if ok:
+            with self.lock:
+                self.tables_dirty = True
+        return ok, msg
+
 
 def stop_all_tournaments():
     for tsess in ACTIVE.values():
@@ -485,6 +495,10 @@ def show_tournament_setup(session):
 # ═══════════════════════════════════════════════════════════
 
 def show_tournament_window(session, tsess: TournamentSession):
+    # Imported here rather than at module scope: main_page imports this
+    # module, so a top-level import would be circular
+    from webui.main_page import _discover_engines, pick_file
+
     t = tsess.t
 
     with ui.dialog().props("maximized") as dialog, \
@@ -513,6 +527,11 @@ def show_tournament_window(session, tsess: TournamentSession):
                 "Decide Result", on_click=lambda: _open_decide()) \
                 .props("no-caps color=secondary") \
                 .tooltip("Stop the current game and set its result yourself")
+            add_btn = ui.button(
+                "Add Player", on_click=lambda: _open_add()) \
+                .props("no-caps color=secondary") \
+                .tooltip("Enter another engine — it starts on zero and is "
+                         "paired from the next round")
             stop_btn = widgets.icon_button(
                 "Stop", "ic_stop", secondary=True,
                 on_click=lambda: (tsess.stop(), _sync_controls()))
@@ -578,6 +597,9 @@ def show_tournament_window(session, tsess: TournamentSession):
             pause_btn.set_visibility(tsess.state == "running")
             decide_btn.set_visibility(tsess.state in ("running", "paused"))
             stop_btn.set_visibility(tsess.state in ("running", "paused"))
+            # Only Swiss can absorb a late entrant, and only until it ends
+            add_btn.set_visibility(t.format == Tournament.FORMAT_SWISS
+                                   and tsess.state != "finished")
 
         # Adjudication dialog: stop the current game, user picks the result
         with ui.dialog() as decide_dlg, ui.card().classes(
@@ -594,6 +616,50 @@ def show_tournament_window(session, tsess: TournamentSession):
                           on_click=lambda: _decide("0-1")).props("no-caps")
             ui.button("Cancel", on_click=decide_dlg.close) \
                 .props("flat color=grey no-caps")
+
+        # Late entry: pick an engine, it joins the next round on zero points
+        with ui.dialog() as add_dlg, ui.card().classes(
+                "arena-panel gap-3 p-6 w-[460px]"):
+            ui.label("ADD PLAYER").classes("arena-heading")
+            ui.label("The engine starts on zero and is paired from the next "
+                     "round. Games already scheduled are left alone.") \
+                .classes("text-xs text-gray-500")
+            with ui.row().classes("w-full items-center gap-1 no-wrap"):
+                add_sel = ui.select({}, label="Engine", with_input=True) \
+                    .props("dense options-dense").classes("flex-grow")
+
+                async def _browse_add():
+                    p = await pick_file("Select engine",
+                                        ("Executables (*.exe;*.bin)",
+                                         "All files (*.*)"))
+                    if p:
+                        _do_add(p)
+                ui.button("…", on_click=_browse_add).props("dense") \
+                    .tooltip("Browse for an engine")
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("Cancel", on_click=add_dlg.close) \
+                    .props("flat color=grey no-caps")
+                ui.button("Add", on_click=lambda: _do_add(add_sel.value)) \
+                    .props("no-caps")
+
+        def _open_add():
+            entered = {p.engine_path for p in t.player_list}
+            options = {k: v for k, v in _discover_engines().items()
+                       if os.path.normcase(k) not in
+                       {os.path.normcase(e) for e in entered}}
+            add_sel.set_options(options or {"": "— all engines entered —"})
+            add_sel.set_value(None)
+            add_dlg.open()
+
+        def _do_add(path):
+            if not path or not os.path.isfile(path):
+                ui.notify("Select a valid engine first.", type="warning")
+                return
+            ok, msg = tsess.add_player(path)
+            ui.notify(msg, type="positive" if ok else "warning")
+            if ok:
+                add_dlg.close()
+                _refresh_tables()
 
         def _open_decide():
             with tsess.lock:
