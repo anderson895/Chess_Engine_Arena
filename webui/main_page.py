@@ -420,18 +420,30 @@ def main_page():
 
                 config_area = ui.column().classes("w-full gap-1")
 
+                # Inputs that must not move under a running game. Which
+                # engine plays is fixed when it is loaded, but its *name* is
+                # read again when the result is saved, so swapping the
+                # selector mid-game files the game under an engine that
+                # never played it — and Elo is computed from exactly those
+                # saved names. config_ui rebuilds these, so the list is
+                # repopulated on every refresh.
+                locked = []
+
                 @ui.refreshable
                 def config_ui():
+                    locked.clear()
                     if session.play_mode == GameSession.MODE_EVE:
                         # No display-name input in EvE: the name is derived
                         # from the selected engine file anyway
                         _engine_config("BLACK", "e1", COLOR_SILVER, "bK",
                                        name_input=False)
                         with ui.row().classes("w-full justify-center"):
-                            ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
-                                .props("dense flat size=sm") \
-                                .classes("text-xs") \
-                                .tooltip("Swap the colors of the two engines")
+                            locked.append(
+                                ui.button("⇄ SWITCH COLORS",
+                                          on_click=_swap_colors)
+                                .props("dense flat size=sm")
+                                .classes("text-xs")
+                                .tooltip("Swap the colors of the two engines"))
                         _engine_config("WHITE", "e2", COLOR_GOLD, "wK",
                                        name_input=False)
                     else:
@@ -439,21 +451,28 @@ def main_page():
                             widgets.icon("ic_user", 14)
                             ui.label("PLAYER INFO").classes(
                                 "text-xs font-bold").style("color:#00FF00")
-                        ui.input(label="Your name", value=session.player_name,
-                                 on_change=lambda e: setattr(
-                                     session, "player_name", e.value or "")) \
-                            .props("dense").classes("w-full")
-                        ui.radio({"white": "White", "black": "Black"},
-                                 value=session.player_color,
-                                 on_change=lambda e: setattr(
-                                     session, "player_color", e.value)) \
-                            .props("inline dense")
+                        locked.append(
+                            ui.input(label="Your name",
+                                     value=session.player_name,
+                                     on_change=lambda e: setattr(
+                                         session, "player_name", e.value or ""))
+                            .props("dense").classes("w-full"))
+                        locked.append(
+                            ui.radio({"white": "White", "black": "Black"},
+                                     value=session.player_color,
+                                     on_change=lambda e: setattr(
+                                         session, "player_color", e.value))
+                            .props("inline dense"))
                         with ui.row().classes("w-full justify-center"):
-                            ui.button("⇄ SWITCH COLORS", on_click=_swap_colors) \
-                                .props("dense flat size=sm") \
-                                .classes("text-xs") \
-                                .tooltip("Swap colors with the engine")
+                            locked.append(
+                                ui.button("⇄ SWITCH COLORS",
+                                          on_click=_swap_colors)
+                                .props("dense flat size=sm")
+                                .classes("text-xs")
+                                .tooltip("Swap colors with the engine"))
                         _engine_config("OPPONENT", "e2", COLOR_GOLD, "wK")
+                    for w in locked:
+                        w.set_enabled(not session.game_running)
 
                 def _engine_config(title, prefix, color, piece_code=None,
                                    name_input=True):
@@ -485,6 +504,7 @@ def main_page():
                                         label="Engine", with_input=True) \
                             .props("dense options-dense") \
                             .classes("flex-grow text-xs")
+                        locked.append(sel)
 
                         def on_sel(e, prefix=prefix):
                             if e.value:
@@ -501,16 +521,18 @@ def main_page():
                                 apply_engine(p, prefix)
                                 config_ui.refresh()
                                 refresh_banners()
-                        ui.button("…", on_click=browse).props("dense") \
-                            .tooltip("Browse for an engine .exe")
+                        locked.append(
+                            ui.button("…", on_click=browse).props("dense")
+                            .tooltip("Browse for an engine .exe"))
                     if name_input:
-                        ui.input(label="Display name",
-                                 value=getattr(session, f"{prefix}_name"),
-                                 on_change=lambda e, prefix=prefix: (
-                                     setattr(session, f"{prefix}_name",
-                                             e.value or ""),
-                                     refresh_banners())) \
-                            .props("dense").classes("w-full text-xs")
+                        locked.append(
+                            ui.input(label="Display name",
+                                     value=getattr(session, f"{prefix}_name"),
+                                     on_change=lambda e, prefix=prefix: (
+                                         setattr(session, f"{prefix}_name",
+                                                 e.value or ""),
+                                         refresh_banners()))
+                            .props("dense").classes("w-full text-xs"))
 
                 def _swap_colors():
                     if session.game_running:
@@ -539,10 +561,11 @@ def main_page():
 
                 ui.separator()
                 widgets.heading("ic_settings", "SETTINGS", size=15, text_cls="arena-heading")
-                ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
-                          value=session.time_control, label="Time control",
-                          on_change=lambda e: setattr(
-                              session, "time_control", e.value)) \
+                tc_sel = ui.select(
+                    {k: v[0] for k, v in TIME_CONTROLS.items()},
+                    value=session.time_control, label="Time control",
+                    on_change=lambda e: setattr(
+                        session, "time_control", e.value)) \
                     .props("dense options-dense").classes("w-full") \
                     .tooltip("Bullet/Blitz/Rapid: engines manage their own "
                              "clock and lose on time. Classic: no clock — "
@@ -683,6 +706,20 @@ def main_page():
         moves_html.set_content("&nbsp; ".join(parts))
         moves_area.scroll_to(percent=1.0)
 
+    # "banners" fires on start, finish and stop — the three moments the
+    # running state flips. Only act on an actual change: config_ui.refresh()
+    # rebuilds the selectors, which would fight the user mid-edit otherwise.
+    _lock_state = {"running": None}
+
+    def _sync_config_lock():
+        running = session.game_running
+        if running == _lock_state["running"]:
+            return
+        _lock_state["running"] = running
+        mode.set_enabled(not running)
+        tc_sel.set_enabled(not running)
+        config_ui.refresh()
+
     def refresh_banners():
         white, black = session.player_names()
         white_name_lbl.set_text(white)
@@ -760,6 +797,7 @@ def main_page():
     session.on("eval_bar", eval_bar.set_cp)
     session.on("quality", on_quality)
     session.on("banners", refresh_banners)
+    session.on("banners", _sync_config_lock)
     session.on("clock", _update_clocks)
     session.on("sound", lambda kind: client.run_javascript(
         f"window.arenaPlaySound('{kind}')"))
