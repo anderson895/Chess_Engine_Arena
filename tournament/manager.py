@@ -10,6 +10,7 @@ import random
 import sqlite3
 import os
 import math
+import uuid
 from datetime import datetime
 from itertools import combinations
 import copy
@@ -629,7 +630,10 @@ class Tournament:
         self.status_msg    = "Ready"
         self.created_at    = datetime.now()
 
-        self.tournament_id = str(id(self))
+        # A real identifier, not id(self): a memory address is reused within
+        # a run and meaningless across one, so it could never tie a resumed
+        # tournament back to the games it had already played.
+        self.tournament_id = uuid.uuid4().hex
 
         # Late entrants arrive on the UI thread while the runner thread is
         # generating rounds off player_list — see add_player.
@@ -927,6 +931,170 @@ class Tournament:
 
     def get_all_completed_games(self):
         return [g for g in self.all_games if g.status == "done"]
+
+    # ── Resume snapshot ───────────────────────────────────
+
+    SNAPSHOT_VERSION = 1
+
+    @staticmethod
+    def _player_dict(p):
+        return {"name": p.name, "engine_path": p.engine_path,
+                "score": p.score, "wins": p.wins, "draws": p.draws,
+                "losses": p.losses, "buchholz": p.buchholz,
+                "sonneborn": p.sonneborn, "seed": p.seed,
+                "color_history": list(p.color_history),
+                "opponents": list(p.opponents)}
+
+    @staticmethod
+    def _game_dict(g):
+        return {"round_num": g.round_num, "white": g.white.name,
+                "black": g.black.name, "result": g.result,
+                "reason": g.reason, "status": g.status,
+                "move_count": g.move_count, "duration": g.duration,
+                "opening": g.opening,
+                "db_game_id": getattr(g, "db_game_id", None)}
+
+    def to_dict(self):
+        """
+        Everything the runner needs to pick this tournament back up.
+
+        Move lists, PGN and eval traces are deliberately left out: finished
+        games are already in the games table with their PGN, and carrying
+        them here would grow the snapshot without bound. What stays is what
+        the standings, the schedule and the pairing actually read.
+
+        The opening book is not stored either — it belongs to the session,
+        and is re-attached by whoever restores the tournament.
+        """
+        with self._lock:
+            index = {id(g): i for i, g in enumerate(self.all_games)}
+            return {
+                "version": self.SNAPSHOT_VERSION,
+                "tournament_id": self.tournament_id,
+                "name": self.name,
+                "format": self.format,
+                "rounds": self.rounds,
+                "movetime_ms": self.movetime_ms,
+                "time_control": self.time_control,
+                "double_rr": self.double_rr,
+                "delay": self.delay,
+                "analyzer_path": self.analyzer_path,
+                "current_round": self.current_round,
+                "started": self.started,
+                "finished": self.finished,
+                "status_msg": self.status_msg,
+                "created_at": self.created_at.isoformat(),
+                "winner": self.winner.name if self.winner else None,
+                "players": [self._player_dict(p) for p in self.player_list],
+                "games": [self._game_dict(g) for g in self.all_games],
+                "round_games": [index[id(g)] for g in self.round_games
+                                if id(g) in index],
+                "played_pairs": [sorted(pair) for pair in self.played_pairs],
+                "bye_history": sorted(self.bye_history),
+                "rr_schedule": ([[[w.name, b.name] for w, b in rnd]
+                                 for rnd in self._rr_schedule]
+                                if self._rr_schedule else None),
+                "ko_pending": [p.name for p in self._ko_pending_winners],
+                "ko_eliminated": [p.name for p in self._ko_eliminated],
+                "ko_active": [p.name for p in self._ko_active_players],
+                "ko_round_games": {
+                    str(r): [index[id(g)] for g in games if id(g) in index]
+                    for r, games in self._ko_round_games.items()},
+            }
+
+    @classmethod
+    def from_dict(cls, data, opening_book=None):
+        """
+        Rebuild a tournament from a snapshot written by to_dict.
+
+        Players are matched by name throughout — a game or pairing naming
+        someone no longer on the roster is dropped rather than guessed at,
+        so a hand-edited or partly written snapshot still loads.
+        """
+        players = []
+        for d in data.get("players", []):
+            p = TournamentPlayer(d.get("name", ""), d.get("engine_path", ""))
+            p.score = d.get("score", 0.0)
+            p.wins = d.get("wins", 0)
+            p.draws = d.get("draws", 0)
+            p.losses = d.get("losses", 0)
+            p.buchholz = d.get("buchholz", 0.0)
+            p.sonneborn = d.get("sonneborn", 0.0)
+            p.seed = d.get("seed", 0)
+            p.color_history = list(d.get("color_history", []))
+            p.opponents = list(d.get("opponents", []))
+            players.append(p)
+
+        t = cls(data.get("name", "Tournament"),
+                data.get("format", cls.FORMAT_SWISS),
+                players,
+                data.get("rounds", 1),
+                movetime_ms=data.get("movetime_ms", 1000),
+                double_rr=data.get("double_rr", False),
+                delay=data.get("delay", 0.3),
+                analyzer_path=data.get("analyzer_path"),
+                opening_book=opening_book,
+                time_control=data.get("time_control", "classic"))
+
+        by_name = {p.name: p for p in players}
+        t.tournament_id = data.get("tournament_id") or t.tournament_id
+        t.rounds = data.get("rounds", t.rounds)
+        t.current_round = data.get("current_round", 0)
+        t.started = data.get("started", False)
+        t.finished = data.get("finished", False)
+        t.status_msg = data.get("status_msg", "Ready")
+        t.winner = by_name.get(data.get("winner"))
+        try:
+            t.created_at = datetime.fromisoformat(data["created_at"])
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        games = []
+        for gd in data.get("games", []):
+            white = by_name.get(gd.get("white"))
+            black = by_name.get(gd.get("black"))
+            if white is None or black is None:
+                continue
+            g = TournamentGame(gd.get("round_num", 1), white, black)
+            # Only a finished game survives an interruption. One that was
+            # in flight was never recorded, and get_pending_games only ever
+            # hands out "pending", so leaving it "running" would strand the
+            # round: never played, never complete.
+            if gd.get("status") == "done":
+                g.status = "done"
+                g.result = gd.get("result")
+                g.reason = gd.get("reason", "")
+                g.move_count = gd.get("move_count", 0)
+                g.duration = gd.get("duration", 0)
+                g.opening = gd.get("opening", "")
+                if gd.get("db_game_id") is not None:
+                    g.db_game_id = gd["db_game_id"]
+            games.append(g)
+        t.all_games = games
+
+        def pick(indices):
+            return [games[i] for i in indices if 0 <= i < len(games)]
+
+        t.round_games = pick(data.get("round_games", []))
+        t.played_pairs = {frozenset(pair)
+                          for pair in data.get("played_pairs", [])}
+        t.bye_history = set(data.get("bye_history", []))
+
+        schedule = data.get("rr_schedule")
+        if schedule:
+            t._rr_schedule = [
+                [(by_name[w], by_name[b]) for w, b in rnd
+                 if w in by_name and b in by_name]
+                for rnd in schedule]
+        t._ko_pending_winners = [by_name[n] for n in data.get("ko_pending", [])
+                                 if n in by_name]
+        t._ko_eliminated = [by_name[n] for n in data.get("ko_eliminated", [])
+                            if n in by_name]
+        t._ko_active_players = [by_name[n] for n in data.get("ko_active", [])
+                                if n in by_name] or list(players)
+        t._ko_round_games = {int(r): pick(idx) for r, idx
+                             in (data.get("ko_round_games") or {}).items()}
+        return t
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

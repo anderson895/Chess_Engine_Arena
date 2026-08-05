@@ -68,6 +68,22 @@ class Database:
             )
         ''')
 
+        # Live tournament state, so an event survives closing the app.
+        # tournament_games holds what has been played; this holds everything
+        # else the runner needs to pick up where it left off — the roster and
+        # its scores, the pairings, byes, and which round is under way.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS tournaments (
+                tournament_id TEXT PRIMARY KEY,
+                name          TEXT NOT NULL,
+                format        TEXT NOT NULL,
+                status        TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                state         TEXT NOT NULL
+            )
+        ''')
+
         # Add 'source' column to existing games table if missing (migration)
         try:
             conn.execute("ALTER TABLE games ADD COLUMN source TEXT DEFAULT 'regular'")
@@ -216,6 +232,67 @@ class Database:
         except Exception as e:
             print(f"[Database] save_tournament_game error: {e}")
             return None, None
+
+    # ── Live tournament state ─────────────────────────────
+
+    def save_tournament_state(self, tournament_id, name, fmt, status, state):
+        """
+        Write a tournament's resume snapshot, replacing any earlier one.
+
+        *state* is a JSON string produced by Tournament.to_dict. Called
+        after every game, so it has to be cheap and must never take the
+        runner thread down: a failed snapshot costs the resume point, not
+        the tournament in progress.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            conn.execute("PRAGMA journal_mode=WAL")
+            now = datetime.now().isoformat(" ", "seconds")
+            conn.execute('''
+                INSERT INTO tournaments
+                    (tournament_id, name, format, status, created_at,
+                     updated_at, state)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tournament_id) DO UPDATE SET
+                    name = excluded.name,
+                    format = excluded.format,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at,
+                    state = excluded.state
+            ''', (tournament_id, name, fmt, status, now, now, state))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"[Database] save_tournament_state error: {e}")
+            return False
+
+    def get_resumable_tournaments(self):
+        """Snapshots of tournaments that have not finished, newest first."""
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM tournaments WHERE status != 'finished' "
+                "ORDER BY updated_at DESC").fetchall()
+            conn.close()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            print(f"[Database] get_resumable_tournaments error: {e}")
+            return []
+
+    def delete_tournament_state(self, tournament_id):
+        """Drop a resume snapshot. Played games are left alone."""
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            conn.execute("DELETE FROM tournaments WHERE tournament_id = ?",
+                         (tournament_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"[Database] delete_tournament_state error: {e}")
+            return False
 
     def rename_engine(self, old_name, new_name):
         """

@@ -7,6 +7,7 @@
 #  NiceGUI event loop via a lock-protected snapshot + polling timer.
 # ═══════════════════════════════════════════════════════════
 
+import json
 import os
 import threading
 import time
@@ -176,16 +177,40 @@ class TournamentSession:
             game.db_game_id = game_id
         with self.lock:
             self.tables_dirty = True
+        self.snapshot()
 
     def _cb_round_end(self, rnd):
         with self.lock:
             self.tables_dirty = True
+        self.snapshot()
 
     def _cb_tournament_end(self, t):
         with self.lock:
             self.state = "finished"
             self.tables_dirty = True
             self.board_dirty = True
+        self.snapshot()
+
+    # ── Resume ────────────────────────────────────────────
+
+    def snapshot(self):
+        """
+        Persist the resume point. Runs on the runner thread after every
+        game, so it must never raise: losing a snapshot costs the resume
+        point, not the tournament that is playing.
+        """
+        try:
+            if self.t.finished:
+                # Nothing left to resume; the games themselves stay in
+                # tournament_games, which is what the list reads for
+                # finished events
+                self.db.delete_tournament_state(self.t.tournament_id)
+                return
+            self.db.save_tournament_state(
+                self.t.tournament_id, self.t.name, self.t.format, self.state,
+                json.dumps(self.t.to_dict(), separators=(",", ":")))
+        except Exception as e:
+            print(f"[TournamentSession] snapshot failed: {e}")
 
     _EMOJI_RE = None
 
@@ -215,18 +240,21 @@ class TournamentSession:
         elif self.state == "paused":
             self.runner.resume()
         self.state = "running"
+        self.snapshot()
 
     def pause(self):
         if self.runner and self.state == "running":
             self.runner.pause()
             self.state = "paused"
             self.status_msg = "Paused"
+            self.snapshot()
 
     def stop(self):
         if self.runner:
             self.runner.stop()
         if self.state != "finished":
             self.state = "stopped"
+        self.snapshot()
 
     def adjudicate(self, result):
         """End the current game with a user-decided result; play continues."""
@@ -242,6 +270,7 @@ class TournamentSession:
         if ok:
             with self.lock:
                 self.tables_dirty = True
+            self.snapshot()
         return ok, msg
 
     def remove_player(self, name):
@@ -250,6 +279,7 @@ class TournamentSession:
         if ok:
             with self.lock:
                 self.tables_dirty = True
+            self.snapshot()
         return ok, msg
 
     def set_rounds(self, count):
@@ -258,7 +288,43 @@ class TournamentSession:
         if ok:
             with self.lock:
                 self.tables_dirty = True
+            self.snapshot()
         return ok, msg
+
+
+def restore_tournaments(session):
+    """
+    Bring unfinished tournaments back into ACTIVE from their snapshots.
+
+    Restored events are left paused whatever they were doing when the app
+    went away: engines are not relaunched behind the user's back, and a
+    machine that lost power mid-game should not silently resume playing.
+    Press Start to carry on — the interrupted game is replayed from the
+    beginning of that pairing, since only completed games are recorded.
+
+    Safe to call more than once; anything already live is left alone.
+    """
+    restored = 0
+    for row in session.db.get_resumable_tournaments():
+        tid = row["tournament_id"]
+        if tid in ACTIVE:
+            continue
+        try:
+            data = json.loads(row["state"])
+            book = (session.opening_book
+                    if getattr(session.opening_book, "loaded", False)
+                    else None)
+            t = Tournament.from_dict(data, opening_book=book)
+        except Exception as e:
+            print(f"[tournament] could not restore {tid}: {e}")
+            continue
+        tsess = TournamentSession(t, session.db)
+        tsess.state = "paused" if t.started else "ready"
+        tsess.status_msg = ("Resumed — press Start to continue"
+                            if t.started else "Ready — press Start")
+        ACTIVE[tid] = tsess
+        restored += 1
+    return restored
 
 
 def stop_all_tournaments():
@@ -304,6 +370,8 @@ def show_tournament_list(session):
         table.add_slot("body-cell-badge", _STATUS_BADGE_SLOT)
 
         def refresh():
+            # Anything unfinished from a previous run reappears here
+            restore_tournaments(session)
             rows = []
             live_ids = set()
             for tid, tsess in ACTIVE.items():
@@ -515,6 +583,7 @@ def show_tournament_setup(session):
             )
             tsess = TournamentSession(t, session.db)
             ACTIVE[t.tournament_id] = tsess
+            tsess.snapshot()      # survives a close before it is ever started
             dialog.close()
             show_tournament_window(session, tsess)
 
