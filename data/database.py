@@ -267,6 +267,27 @@ class Database:
             print(f"[Database] save_tournament_state error: {e}")
             return False
 
+    def results_for_games(self, game_ids):
+        """
+        {game_id: (result, reason)} for the ids that still exist.
+
+        Ids that have been deleted are simply absent, which lets a caller
+        tell "changed" from "gone".
+        """
+        if not game_ids:
+            return {}
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            marks = ",".join("?" * len(game_ids))
+            rows = conn.execute(
+                f"SELECT id, result, reason FROM games WHERE id IN ({marks})",
+                list(game_ids)).fetchall()
+            conn.close()
+            return {r[0]: (r[1], r[2]) for r in rows}
+        except Exception as e:
+            print(f"[Database] results_for_games error: {e}")
+            return {}
+
     def get_resumable_tournaments(self):
         """Snapshots of tournaments that have not finished, newest first."""
         try:

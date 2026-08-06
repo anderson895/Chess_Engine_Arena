@@ -292,6 +292,54 @@ class TournamentSession:
         return ok, msg
 
 
+_POINTS = {"1-0": (1.0, 0.0), "0-1": (0.0, 1.0), "1/2-1/2": (0.5, 0.5)}
+
+
+def _reconcile_with_db(t, db):
+    """
+    Make the games table the last word on results the snapshot carries.
+
+    A snapshot is the in-memory state of a running tournament, so editing
+    a game in the database — correcting a result, deleting a game — never
+    reached it, and the schedule went on showing the old outcome after a
+    restore. Completed games belong to the database; pairings, byes and
+    whose turn it is belong to the snapshot.
+
+    Returns the number of games brought back into line.
+    """
+    played = {g.db_game_id: g for g in t.all_games
+              if getattr(g, "db_game_id", None) is not None}
+    if not played:
+        return 0
+    try:
+        rows = db.results_for_games(list(played))
+    except Exception as e:
+        print(f"[tournament] could not reconcile with the database: {e}")
+        return 0
+
+    fixed = 0
+    for gid, game in played.items():
+        truth = rows.get(gid)
+        if truth is None or truth[0] == game.result:
+            continue
+        old, new = game.result, truth[0]
+        if old not in _POINTS or new not in _POINTS:
+            continue
+        for player, o, n in ((game.white, _POINTS[old][0], _POINTS[new][0]),
+                             (game.black, _POINTS[old][1], _POINTS[new][1])):
+            player.score = round(player.score - o + n, 1)
+            for pts, step in ((o, -1), (n, 1)):
+                if pts == 1.0:
+                    player.wins = max(0, player.wins + step)
+                elif pts == 0.5:
+                    player.draws = max(0, player.draws + step)
+                else:
+                    player.losses = max(0, player.losses + step)
+        game.result, game.reason = new, truth[1]
+        fixed += 1
+    return fixed
+
+
 def restore_tournaments(session):
     """
     Bring unfinished tournaments back into ACTIVE from their snapshots.
@@ -318,7 +366,12 @@ def restore_tournaments(session):
         except Exception as e:
             print(f"[tournament] could not restore {tid}: {e}")
             continue
+        fixed = _reconcile_with_db(t, session.db)
         tsess = TournamentSession(t, session.db)
+        if fixed:
+            print(f"[tournament] {t.name}: {fixed} result(s) refreshed "
+                  f"from the database")
+            tsess.snapshot()
         tsess.state = "paused" if t.started else "ready"
         tsess.status_msg = ("Resumed — press Start to continue"
                             if t.started else "Ready — press Start")
