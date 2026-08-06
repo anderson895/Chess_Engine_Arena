@@ -1691,8 +1691,17 @@ class TournamentRunner:
                     elapsed = (time.time() - t0) * 1000
                     remaining = (wtime if is_white_turn else btime) - elapsed
                     if remaining <= 0:
-                        result = '0-1' if is_white_turn else '1-0'
-                        reason = f"{player.name} lost on time"
+                        # FIDE 6.9: a flag fall is only a loss if the
+                        # opponent could still mate. Against a bare king —
+                        # or a lone bishop or knight — it is a draw.
+                        rival = 'b' if is_white_turn else 'w'
+                        if board.can_mate(rival):
+                            result = '0-1' if is_white_turn else '1-0'
+                            reason = f"{player.name} lost on time"
+                        else:
+                            result = '1/2-1/2'
+                            reason = (f"{player.name} lost on time — drawn, "
+                                      f"opponent cannot mate")
                         break
                     remaining += inc_ms
                     if is_white_turn:

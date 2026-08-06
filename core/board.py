@@ -468,6 +468,38 @@ class Board:
             return True, '1/2-1/2', 'Draw by insufficient material', None
         return False, '', '', None
 
+    def can_mate(self, color):
+        """
+        Return True if *color* could still deliver mate in this position.
+
+        FIDE 6.9: when a player runs out of time the game is drawn, not
+        lost, if the opponent "cannot checkmate the player's king by any
+        possible series of legal moves". Note *possible*, not *forced* —
+        the losing side is allowed to help.
+
+        A bare king can never mate. A king with a single bishop or knight
+        cannot mate a bare king either, but it can once the defender has
+        anything of its own: a black king on h8 with its own pawn on h7 is
+        mated by Kf7 and Ng6. So the single-minor case turns on whether
+        the defender has material left to be walled in by.
+
+        Distinct from _insufficient(), which asks whether *neither* side
+        can mate and ends the game on the spot. This asks about one side,
+        which is the question a flag fall poses.
+        """
+        mine, theirs = [], []
+        for row in self.board:
+            for p in row:
+                if p == '.' or p.lower() == 'k':
+                    continue
+                (mine if p.isupper() == (color == 'w') else theirs).append(
+                    p.lower())
+        if not mine:
+            return False
+        if len(mine) == 1 and mine[0] in ('b', 'n'):
+            return bool(theirs)
+        return True
+
     def _insufficient(self):
         """Return True if the position has insufficient mating material."""
         ws, bs = [], []

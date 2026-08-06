@@ -639,8 +639,19 @@ class GameSession:
                 - elapsed_ms
             if remaining <= 0:
                 self._emit("clock")
-                await self._finish(forfeit_result, f"{name} lost on time",
-                                   "black" if not is_black else "white")
+                # FIDE 6.9: a flag fall is only a loss if the opponent
+                # could still mate. Against a bare king — or a lone
+                # bishop or knight — the game is drawn instead.
+                rival = "b" if not is_black else "w"
+                if self.board.can_mate(rival):
+                    await self._finish(forfeit_result,
+                                       f"{name} lost on time",
+                                       "black" if not is_black else "white")
+                else:
+                    await self._finish(
+                        "1/2-1/2",
+                        f"{name} lost on time — drawn, opponent cannot mate",
+                        None)
                 return False
             remaining += self.inc_s * 1000
             if is_black:
