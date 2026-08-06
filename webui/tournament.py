@@ -763,6 +763,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                     with ui.tab_panel(tab_stand):
                         stand_table = _standings_table(t)
                         stand_table.on("drop", lambda e: _drop_player(e.args))
+                        widgets.hint("Double-click an engine to see its games")
                     with ui.tab_panel(tab_sched):
                         sched_table = _schedule_table()
                     if tab_brack:
@@ -1019,9 +1020,98 @@ def show_tournament_window(session, tsess: TournamentSession):
         sched_table.on("rowDblclick",
                        lambda e: _open_game_pgn(session, e.args[1],
                                                 sched_table.rows))
+        stand_table.on("rowDblclick",
+                       lambda e: _show_player_card(session, t,
+                                                   e.args[1].get("player")))
         _sync_controls()
         _refresh_tables()
     dialog.open()
+
+
+_OUTCOME = {
+    ("w", "1-0"): ("Win", COLOR_GOLD), ("w", "0-1"): ("Loss", COLOR_MUTED),
+    ("b", "0-1"): ("Win", COLOR_GOLD), ("b", "1-0"): ("Loss", COLOR_MUTED),
+    ("w", "1/2-1/2"): ("Draw", COLOR_BLUE),
+    ("b", "1/2-1/2"): ("Draw", COLOR_BLUE),
+}
+
+_OUTCOME_SLOT = """
+<q-td :props="props" class="text-center">
+  <span :style="{ color: props.row.outcome_color }">{{ props.row.outcome }}</span>
+</q-td>
+"""
+
+
+def _show_player_card(session, t, name):
+    """Every game this engine has played in this tournament."""
+    player = t.players.get(name)
+    if player is None:
+        return
+
+    rows = []
+    for g in t.all_games:
+        if g.white.name == name:
+            side, opponent = "w", g.black.name
+        elif g.black.name == name:
+            side, opponent = "b", g.white.name
+        else:
+            continue
+        outcome, colour = _OUTCOME.get(
+            (side, g.result or ""), ("—", COLOR_MUTED))
+        rows.append({
+            "round": g.round_num, "colour": "White" if side == "w" else "Black",
+            "opponent": opponent, "outcome": outcome, "outcome_color": colour,
+            "result": g.result or "—", "reason": g.reason or "",
+            "db_id": getattr(g, "db_game_id", None),
+        })
+    rows.sort(key=lambda r: r["round"])
+
+    rank_txt, rank_col = session.rank_line(name)
+    with ui.dialog() as dlg, ui.card().classes(
+            "arena-panel w-[860px] max-w-full gap-2 p-5"):
+        with ui.row().classes("w-full items-center gap-3 no-wrap"):
+            ui.element("img").props('src="/assets/ui/st_engine.png"') \
+                .style("height: 18px; width: auto;")
+            ui.label(name).classes("text-lg font-bold text-primary")
+            ui.label(rank_txt).classes("text-xs") \
+                .style(f"color: {rank_col}")
+            ui.space()
+            ui.label(f"{player.score:g} pts  ·  "
+                     f"{player.wins}W / {player.draws}D / {player.losses}L") \
+                .classes("text-sm")
+        if name in t.bye_history:
+            ui.label("Received a bye this tournament") \
+                .classes("text-xs").style(f"color: {COLOR_ORANGE}")
+
+        if not rows:
+            ui.label("No games yet — this engine has not been paired.") \
+                .classes("text-xs text-gray-500")
+        else:
+            columns = [
+                {"name": "round", "label": "Rd", "field": "round",
+                 "align": "center"},
+                {"name": "colour", "label": "As", "field": "colour",
+                 "align": "center"},
+                {"name": "opponent", "label": "Opponent", "field": "opponent",
+                 "align": "left"},
+                {"name": "outcome", "label": "", "field": "outcome",
+                 "align": "center"},
+                {"name": "result", "label": "Result", "field": "result",
+                 "align": "center"},
+                {"name": "reason", "label": "Reason", "field": "reason",
+                 "align": "left"},
+            ]
+            tbl = ui.table(columns=columns, rows=rows, row_key="round",
+                           pagination=0).classes("w-full arena-log")
+            tbl.add_slot("body-cell-outcome", _OUTCOME_SLOT)
+            tbl.on("rowDblclick",
+                   lambda e: _open_game_pgn(session, e.args[1], rows))
+            widgets.hint("Double-click a game to replay it")
+
+        with ui.row().classes("w-full justify-end dlg-foot"):
+            ui.button("Close", on_click=dlg.close) \
+                .props("flat color=grey no-caps")
+    dlg.open()
 
 
 async def _open_game_pgn(session, row, siblings=None):
