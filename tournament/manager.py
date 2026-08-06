@@ -1699,9 +1699,11 @@ class TournamentRunner:
                             result = '0-1' if is_white_turn else '1-0'
                             reason = f"{player.name} lost on time"
                         else:
+                            # Phrased like the other draw reasons, which
+                            # never name an engine
                             result = '1/2-1/2'
-                            reason = (f"{player.name} lost on time — drawn, "
-                                      f"opponent cannot mate")
+                            reason = ("Draw by timeout vs "
+                                      "insufficient material")
                         break
                     remaining += inc_ms
                     if is_white_turn:

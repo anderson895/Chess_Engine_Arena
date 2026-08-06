@@ -648,10 +648,11 @@ class GameSession:
                                        f"{name} lost on time",
                                        "black" if not is_black else "white")
                 else:
+                    # Phrased like the other draw reasons, which never name
+                    # an engine — the result column already says 1/2-1/2
                     await self._finish(
                         "1/2-1/2",
-                        f"{name} lost on time — drawn, opponent cannot mate",
-                        None)
+                        "Draw by timeout vs insufficient material", None)
                 return False
             remaining += self.inc_s * 1000
             if is_black:
