@@ -355,6 +355,9 @@ def show_tournament_list(session):
                 on_click=lambda: (dialog.close(),
                                   show_tournament_setup(session)))
 
+        list_search = widgets.search_input(
+            "Search name, format, status, date…").classes("w-full")
+
         columns = [
             {"name": "badge",  "label": "",       "field": "badge", "align": "center",
              "style": "width: 90px"},
@@ -397,8 +400,18 @@ def show_tournament_list(session):
                     "games": row["game_count"], "info": "Saved in database",
                     "date": row["date"],
                 })
-            table.rows = rows
+            all_rows[:] = rows
+            _apply_filter()
+
+        all_rows = []
+
+        def _apply_filter():
+            table.rows = [r for r in all_rows
+                          if _match(r, list_search.value or "",
+                                    ("name", "format", "info", "date"))]
             table.update()
+
+        list_search.on_value_change(lambda e: _apply_filter())
 
         async def open_row(row):
             if row["live"]:
@@ -679,6 +692,13 @@ def show_tournament_window(session, tsess: TournamentSession):
 
             # ── Right: standings / schedule / bracket ─────
             with ui.column().classes("flex-grow min-w-0"):
+                # One box for both tables: the terms that make sense in a
+                # tournament — an engine name, a round, a result — read the
+                # same either way
+                table_search = widgets.search_input(
+                    "Search engine, round, result, reason…") \
+                    .classes("w-full") \
+                    .on_value_change(lambda e: _refresh_tables())
                 with ui.tabs().classes("w-full") as tabs:
                     tab_stand = ui.tab("Standings")
                     tab_sched = ui.tab("Schedule")
@@ -862,8 +882,9 @@ def show_tournament_window(session, tsess: TournamentSession):
                 f"{t.format}  ·  Round {t.current_round}"
                 + (f"/{t.rounds}" if t.format != Tournament.FORMAT_KNOCKOUT
                    else ""))
-            _fill_standings(stand_table, t, session)
-            _fill_schedule(sched_table, t)
+            query = table_search.value or ""
+            _fill_standings(stand_table, t, session, query)
+            _fill_schedule(sched_table, t, query)
             if rounds_in.value != t.rounds:
                 rounds_in.set_value(t.rounds)
             if tab_brack:
@@ -987,7 +1008,7 @@ def _standings_table(t):
     return table
 
 
-def _fill_standings(table, t, session=None):
+def _fill_standings(table, t, session=None, query=""):
     """
     Fill the standings.
 
@@ -1007,7 +1028,9 @@ def _fill_standings(table, t, session=None):
             "buch": f"{p.buchholz:.1f}",
             "can_drop": editable,
         })
-    table.rows = rows
+    # Filtering after ranking keeps the # column showing real positions
+    table.rows = [r for r in rows
+                  if _match(r, query, ("rank", "player", "elo", "wdl"))]
     table.update()
 
 
@@ -1027,9 +1050,17 @@ def _schedule_table():
     return table
 
 
-def _fill_schedule(table, t):
+def _match(row, query, fields):
+    """True if every whitespace-separated term appears in *fields*."""
+    if not query:
+        return True
+    hay = " ".join(str(row.get(f, "")) for f in fields).lower()
+    return all(term in hay for term in query.lower().split())
+
+
+def _fill_schedule(table, t, query=""):
     badge_map = {"pending": "upcoming", "running": "running", "done": "finished"}
-    table.rows = [
+    rows = [
         {
             "gid": g.id, "badge": badge_map.get(g.status, "upcoming"),
             "round": g.round_num, "white": g.white.name, "black": g.black.name,
@@ -1038,6 +1069,9 @@ def _fill_schedule(table, t):
         }
         for g in t.all_games
     ]
+    table.rows = [r for r in rows
+                  if _match(r, query, ("round", "white", "black",
+                                       "result", "reason"))]
     table.update()
 
 
