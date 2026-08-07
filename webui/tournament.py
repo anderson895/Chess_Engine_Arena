@@ -11,6 +11,7 @@ import json
 import os
 import threading
 import time
+from collections import deque
 from datetime import datetime
 
 from nicegui import app, ui
@@ -22,6 +23,7 @@ from tournament.manager import (
 )
 from webui import widgets
 from webui.board import BoardView, EvalBar
+from webui.session import sound_for_san
 from webui.theme import (
     COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN, COLOR_ORANGE,
     COLOR_MUTED,
@@ -122,10 +124,18 @@ class TournamentSession:
         self.board_dirty = True
         self.tables_dirty = True
 
+        # Sounds are queued rather than played: these callbacks run on the
+        # runner thread, which has no client to run JavaScript on. The
+        # window's poll timer drains them. Capped because a stalled or
+        # hidden window must not bank a minute of moves and fire them all
+        # at once when it comes back.
+        self.sounds = deque(maxlen=3)
+
     # ── Runner callbacks (worker thread!) ─────────────────
 
     def _cb_game_start(self, game):
         with self.lock:
+            self.sounds.append("game_start")
             self.game_label = f"Round {game.round_num}"
             self.white_name = game.white.name
             self.black_name = game.black.name
@@ -154,6 +164,12 @@ class TournamentSession:
             self.turn = board.turn        # side to move = thinking next
             self.clock_at = time.time()
             self.board_dirty = True
+            san = getattr(game, "last_san", None)
+            if san:
+                # No human here, so White is the near side — the same split
+                # a regular engine-vs-engine game uses
+                self.sounds.append(
+                    sound_for_san(san, getattr(game, "last_was_white", True)))
 
     def _cb_game_end(self, game):
         if game.pgn:
@@ -177,6 +193,7 @@ class TournamentSession:
             game.db_game_id = game_id
         with self.lock:
             self.tables_dirty = True
+            self.sounds.append("game_end")
         self.snapshot()
 
     def _cb_round_end(self, rnd):
@@ -992,6 +1009,12 @@ def show_tournament_window(session, tsess: TournamentSession):
                 tsess.board_dirty = False
                 tsess.tables_dirty = False
                 status = tsess.status_msg
+                sounds = list(tsess.sounds)
+                tsess.sounds.clear()
+            for kind in sounds:
+                # arenaPlaySound is defined once on the page and already
+                # honours the mute button
+                ui.run_javascript(f"window.arenaPlaySound('{kind}')")
                 cp = tsess.cp
                 opening = tsess.opening
                 game_label = tsess.game_label

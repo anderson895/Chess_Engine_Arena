@@ -1736,6 +1736,10 @@ class TournamentRunner:
                 break
 
             last_move = uci
+            # Alongside the clock below: per-move detail the UI callbacks
+            # need but the board snapshot cannot carry
+            game.last_san = san
+            game.last_was_white = is_white_turn
 
             if book is not None:
                 found_name = self._lookup_opening(book, board)

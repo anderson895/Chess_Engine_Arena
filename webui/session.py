@@ -42,6 +42,26 @@ async def parse_opening_book(path):
     return await run.io_bound(OpeningBook, path)
 
 
+def sound_for_san(san, near_side=True):
+    """
+    Sound effect kind for a SAN move. Check wins over everything else.
+
+    Plain moves use chess.com's two distinct sounds: 'move' (move-self) for
+    the side the board is oriented to, 'move_opp' for the other — so the two
+    sides stay audibly apart. Shared with the tournament window, which has
+    no human and treats White as the near side.
+    """
+    if "+" in san or "#" in san:
+        return "check"
+    if "=" in san:
+        return "promote"
+    if san.startswith("O-O"):
+        return "castle"
+    if "x" in san:
+        return "capture"
+    return "move" if near_side else "move_opp"
+
+
 class GameSession:
     """
     Game controller shared by every part of the web UI.
@@ -784,24 +804,12 @@ class GameSession:
     # ═══════════════════════════════════════════════════════
 
     def _sound_for_san(self, san, was_white):
-        """Sound effect kind for a SAN move (priority: check first).
-
-        Plain moves use chess.com's two distinct sounds: 'move' (move-self)
-        for White / the human player, 'move_opp' (move-opponent) otherwise —
-        so both sides are clearly audible as different sounds.
-        """
-        if "+" in san or "#" in san:
-            return "check"
-        if "=" in san:
-            return "promote"
-        if san.startswith("O-O"):
-            return "castle"
-        if "x" in san:
-            return "capture"
+        """Sound effect kind for a SAN move played in this session."""
         if self.play_mode == self.MODE_HVE:
-            human_moved = (self.player_color == "white") == was_white
-            return "move" if human_moved else "move_opp"
-        return "move" if was_white else "move_opp"
+            near_side = (self.player_color == "white") == was_white
+        else:
+            near_side = was_white
+        return sound_for_san(san, near_side)
 
     def _after_move(self, moves_before, was_white, san):
         self._emit("sound", self._sound_for_san(san, was_white))
