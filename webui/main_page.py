@@ -706,9 +706,14 @@ def main_page():
         moves_html.set_content("&nbsp; ".join(parts))
         moves_area.scroll_to(percent=1.0)
 
-    # "banners" fires on start, finish and stop — the three moments the
-    # running state flips. Only act on an actual change: config_ui.refresh()
-    # rebuilds the selectors, which would fight the user mid-edit otherwise.
+    # Driven off both "banners" and "status". "banners" catches the start
+    # immediately, but new_game clears game_running without emitting it, so
+    # on its own the panel stayed locked after New Game interrupted a game.
+    # "status" fires on every transition, including that one.
+    #
+    # Acting only on an actual change matters as much as the events do:
+    # "status" also fires on every move, and refreshing config_ui that often
+    # would rebuild the selectors under the user's cursor.
     _lock_state = {"running": None}
 
     def _sync_config_lock():
@@ -798,6 +803,7 @@ def main_page():
     session.on("quality", on_quality)
     session.on("banners", refresh_banners)
     session.on("banners", _sync_config_lock)
+    session.on("status", lambda _msg: _sync_config_lock())
     session.on("clock", _update_clocks)
     session.on("sound", lambda kind: client.run_javascript(
         f"window.arenaPlaySound('{kind}')"))
