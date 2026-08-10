@@ -267,10 +267,21 @@ class TournamentSession:
             self.snapshot()
 
     def stop(self):
+        """
+        End the tournament. The runner finalises once the game in flight
+        lets go; without one there is nobody to do it, so finish here.
+        """
         if self.runner:
             self.runner.stop()
-        if self.state != "finished":
-            self.state = "stopped"
+            if self.state != "finished":
+                self.state = "stopping"
+                # The move in flight has to come back first, which on a
+                # long think is a few seconds of nothing happening
+                self.status_msg = "Finishing the game in progress…"
+        else:
+            self.t.finish_now()
+            self.state = "finished"
+            self._cb_tournament_end(self.t)
         self.snapshot()
 
     def adjudicate(self, result):
@@ -727,7 +738,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                          "under way")
             stop_btn = widgets.icon_button(
                 "Stop", "ic_stop", secondary=True,
-                on_click=lambda: (tsess.stop(), _sync_controls()))
+                on_click=lambda: _open_stop())
             ui.button("Close", on_click=lambda: _close()) \
                 .props("flat color=grey no-caps")
 
@@ -794,15 +805,19 @@ def show_tournament_window(session, tsess: TournamentSession):
         # ── Refresh plumbing ──────────────────────────────
 
         def _sync_controls():
-            start_lbl.set_text("Resume" if tsess.state == "paused" else "Start")
-            start_btn.set_visibility(tsess.state in ("ready", "paused"))
-            pause_btn.set_visibility(tsess.state == "running")
-            decide_btn.set_visibility(tsess.state in ("running", "paused"))
-            stop_btn.set_visibility(tsess.state in ("running", "paused"))
+            state = tsess.state
+            start_lbl.set_text("Resume" if state == "paused" else "Start")
+            start_btn.set_visibility(state in ("ready", "paused"))
+            pause_btn.set_visibility(state == "running")
+            decide_btn.set_visibility(state in ("running", "paused"))
+            stop_btn.set_visibility(state in ("running", "paused"))
+            # "stopping" is the gap between asking to stop and the game in
+            # flight letting go. Every button is hidden then, which is why
+            # the state has to end somewhere — it becomes "finished".
+            over = state in ("finished", "stopping")
             # Only Swiss can absorb a late entrant or change its length,
             # and only until it ends
-            swiss_live = (t.format == Tournament.FORMAT_SWISS
-                          and tsess.state != "finished")
+            swiss_live = t.format == Tournament.FORMAT_SWISS and not over
             add_btn.set_visibility(swiss_live)
             rounds_in.set_visibility(swiss_live)
 
@@ -821,6 +836,35 @@ def show_tournament_window(session, tsess: TournamentSession):
                           on_click=lambda: _decide("0-1")).props("no-caps")
             ui.button("Cancel", on_click=decide_dlg.close) \
                 .props("flat color=grey no-caps")
+
+        # Stopping is final — Pause is the way back — so confirm it
+        with ui.dialog() as stop_dlg, ui.card().classes(
+                "arena-panel items-center gap-3 p-6 w-[420px]"):
+            ui.label("END THIS TOURNAMENT?").classes("arena-heading")
+            stop_lbl = ui.label("").classes("text-sm text-center")
+            ui.label("The standings become final and a winner is declared. "
+                     "Games already played are kept either way.") \
+                .classes("text-xs text-gray-500 text-center")
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("Cancel", on_click=stop_dlg.close) \
+                    .props("flat color=grey no-caps")
+                ui.button("End tournament", on_click=lambda: _do_stop()) \
+                    .props("no-caps")
+
+        def _open_stop():
+            played = len(t.get_all_completed_games())
+            leader = t.get_standings()[:1]
+            stop_lbl.set_text(
+                f"Round {t.current_round} of {t.rounds} · {played} games "
+                f"played"
+                + (f" · {leader[0].name} leads on {leader[0].score:g}"
+                   if leader else ""))
+            stop_dlg.open()
+
+        def _do_stop():
+            stop_dlg.close()
+            tsess.stop()
+            _sync_controls()
 
         # Late entry: pick an engine, it joins the next round on zero points
         with ui.dialog() as add_dlg, ui.card().classes(

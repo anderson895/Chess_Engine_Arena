@@ -852,6 +852,18 @@ class Tournament:
             self.rounds = count
         return True, f"Now {count} round(s)."
 
+    def finish_now(self):
+        """
+        End the tournament where it stands, winner from current standings.
+
+        What Stop means. Pause is the control that halts an event to pick
+        up later; stopping one and leaving it neither running nor finished
+        left it with no winner and no way back in.
+        """
+        if not self.finished:
+            self._finish()
+        return self.winner
+
     def round_complete(self):
         return all(g.status == "done" for g in self.round_games)
 
@@ -1547,10 +1559,16 @@ class TournamentRunner:
             try: self._analyzer.stop()
             except: pass
 
+        # Stopping ends the tournament rather than leaving it in limbo:
+        # the standings as they stand decide it. Pause is the control for
+        # halting an event you mean to come back to.
+        if self._stop_flag:
+            self.t.finish_now()
+
         if self.t.finished:
             self.on_tournament_end(self.t)
         else:
-            self.on_status("Tournament paused / stopped.")
+            self.on_status("Tournament paused.")
 
     def _lookup_opening(self, book, board):
         if book is None:
