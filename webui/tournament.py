@@ -75,6 +75,15 @@ _ELO_SLOT = """
 </q-td>
 """
 
+_TRASH_SLOT = """
+<q-td :props="props" class="text-center">
+  <q-btn dense flat round size="sm" icon="delete" color="negative"
+         @click="$parent.$emit('trash', props.row)">
+    <q-tooltip>Delete this tournament and its games</q-tooltip>
+  </q-btn>
+</q-td>
+"""
+
 _DROP_SLOT = """
 <q-td :props="props" class="text-center">
   <q-btn v-if="props.row.can_drop" dense flat round size="sm"
@@ -560,11 +569,14 @@ def show_tournament_list(session):
             {"name": "games",  "label": "Games",  "field": "games", "align": "center"},
             {"name": "info",   "label": "Status", "field": "info",  "align": "left"},
             {"name": "date",   "label": "Date",   "field": "date",  "align": "center"},
+            {"name": "del",    "label": "",       "field": "del",
+             "align": "center", "style": "width: 44px"},
         ]
         table = ui.table(columns=columns, rows=[], row_key="tid",
                          pagination=12) \
             .classes("w-full flex-grow arena-log dlg-table")
         table.add_slot("body-cell-badge", _STATUS_BADGE_SLOT)
+        table.add_slot("body-cell-del", _TRASH_SLOT)
 
         def refresh():
             # Anything unfinished from a previous run reappears here
@@ -606,6 +618,56 @@ def show_tournament_list(session):
             table.update()
 
         list_search.on_value_change(lambda e: _apply_filter())
+
+        # Deleting takes the games with it, which moves every rating those
+        # games touched — worth spelling out before it happens
+        pending = {}
+        with ui.dialog() as del_dlg, ui.card().classes(
+                "arena-panel items-center gap-3 p-6 w-[440px]"):
+            ui.label("DELETE THIS TOURNAMENT?").classes("arena-heading")
+            del_lbl = ui.label("").classes("text-sm text-center")
+            ui.label("The games go with it: they leave Game History, and "
+                     "every engine that played them is re-rated. This "
+                     "cannot be undone.") \
+                .classes("text-xs text-gray-500 text-center")
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("Cancel", on_click=del_dlg.close) \
+                    .props("flat color=grey no-caps")
+                ui.button("Delete", on_click=lambda: _do_delete()) \
+                    .props("no-caps color=negative")
+
+        def _ask_delete(row):
+            if not isinstance(row, dict):
+                return
+            pending.clear()
+            pending.update(row)
+            del_lbl.set_text(f"{row.get('name')}  ·  {row.get('games')} games")
+            del_dlg.open()
+
+        def _do_delete():
+            tid = pending.get("tid")
+            del_dlg.close()
+            if not tid:
+                return
+            # A live event has a runner and engines to let go of first
+            live = ACTIVE.pop(tid, None)
+            if live is not None:
+                try:
+                    live.stop()
+                except Exception:
+                    pass
+            count, ok = session.db.delete_tournament(tid)
+            if ok:
+                session.invalidate_stats_caches()   # ratings just moved
+                ui.notify(f"Deleted {pending.get('name')} and {count} game(s)",
+                          type="positive")
+            else:
+                ui.notify("Could not delete that tournament.", type="negative")
+            refresh()
+
+        table.on("trash", lambda e: _ask_delete(
+            e.args if isinstance(e.args, dict)
+            else next((a for a in (e.args or []) if isinstance(a, dict)), None)))
 
         async def open_row(row):
             if row["live"]:

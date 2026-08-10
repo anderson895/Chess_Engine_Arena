@@ -267,6 +267,41 @@ class Database:
             print(f"[Database] save_tournament_state error: {e}")
             return False
 
+    def delete_tournament(self, tournament_id):
+        """
+        Remove a tournament and every game it produced.
+
+        The tournament list is built by grouping tournament_games, so an
+        event exists only while its games do — deleting the grouping on
+        its own would leave it on screen. Ratings come from the games
+        table, so they move when this runs.
+
+        Returns (games_deleted, ok).
+        """
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            conn.execute("PRAGMA journal_mode=WAL")
+            cur = conn.cursor()
+            ids = [r[0] for r in cur.execute(
+                "SELECT game_id FROM tournament_games "
+                "WHERE tournament_id = ? AND game_id IS NOT NULL",
+                (tournament_id,))]
+            cur.execute("DELETE FROM tournament_games WHERE tournament_id = ?",
+                        (tournament_id,))
+            for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500)):
+                marks = ",".join("?" * len(chunk))
+                cur.execute(f"DELETE FROM games WHERE id IN ({marks})", chunk)
+            # The resume snapshot goes too, or the event would reappear
+            # the next time the list is opened
+            cur.execute("DELETE FROM tournaments WHERE tournament_id = ?",
+                        (tournament_id,))
+            conn.commit()
+            conn.close()
+            return len(ids), True
+        except Exception as e:
+            print(f"[Database] delete_tournament error: {e}")
+            return 0, False
+
     def results_for_games(self, game_ids):
         """
         {game_id: (result, reason)} for the ids that still exist.
