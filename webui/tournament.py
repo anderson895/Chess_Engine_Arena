@@ -33,6 +33,23 @@ from webui.theme import (
 # Live tournaments registry: {tournament_id: TournamentSession}
 ACTIVE: dict = {}
 
+# Unsubmitted New Tournament form. Setting one up is a lot of typing —
+# engine picks, team names, a manual seat — and the dialog has to be closed
+# to look a rating up in Rankings. Keeping the draft here means that, and a
+# stray Escape, cost nothing. Cleared once a tournament is created.
+_DRAFT: dict = {
+    "name": None,               # None → fall back to a fresh timestamp
+    "format": None,             # None → Swiss
+    "rounds": 5,
+    "double_rr": False,
+    "team_ko": False,
+    "time_control": "classic",
+    "movetime": None,           # None → the session's own pace
+    "delay": None,
+    "roster": [],               # shared list objects, so edits stick
+    "teams": [],
+}
+
 _STATUS_BADGE_SLOT = """
 <q-td :props="props" class="text-center">
   <img :src="'/assets/ui/st_' + props.row.badge + '.png'"
@@ -618,7 +635,8 @@ def show_tournament_list(session):
 def show_tournament_setup(session):
     from webui.main_page import _discover_engines, pick_file
 
-    roster: list[dict] = []   # {"name": str, "path": str}
+    draft = _DRAFT
+    roster: list[dict] = draft["roster"]   # {"name": str, "path": str}
 
     with ui.dialog() as dialog, ui.card().classes(
             "arena-panel w-[640px] max-w-full flex flex-col"):
@@ -626,70 +644,84 @@ def show_tournament_setup(session):
 
         name_in = ui.input(
             label="Tournament name",
-            value=f"Tournament {datetime.now().strftime('%Y-%m-%d %H:%M')}") \
+            value=draft["name"] or
+            f"Tournament {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            on_change=lambda e: draft.__setitem__("name", e.value)) \
             .props("dense").classes("w-full")
 
         with ui.row().classes("w-full items-center gap-4"):
             fmt = ui.select(
                 [Tournament.FORMAT_SWISS, Tournament.FORMAT_ROUNDROBIN,
                  Tournament.FORMAT_KNOCKOUT, Tournament.FORMAT_TEAM],
-                value=Tournament.FORMAT_SWISS, label="Format") \
-                .props("dense").classes("w-40")
-            rounds_in = ui.number(label="Rounds", value=5, min=1, max=30) \
+                value=draft["format"] or Tournament.FORMAT_SWISS,
+                label="Format").props("dense").classes("w-40")
+            rounds_in = ui.number(
+                label="Rounds", value=draft["rounds"], min=1, max=30,
+                on_change=lambda e: draft.__setitem__("rounds", e.value)) \
                 .props("dense").classes("w-24")
-            double_rr = ui.checkbox("Double round-robin")
-            double_rr.set_visibility(False)
-            team_ko = ui.checkbox("Knockout bracket") \
+            double_rr = ui.checkbox("Double round-robin",
+                                    value=draft["double_rr"])
+            team_ko = ui.checkbox("Knockout bracket", value=draft["team_ko"]) \
                 .tooltip("Teams are paired off and the loser is out. "
                          "Points still decide each tie — the squad that "
                          "scores more across it goes through.")
-            team_ko.set_visibility(False)
 
-        def on_fmt(e):
-            team_mode = e.value == Tournament.FORMAT_TEAM
-            rounds_in.set_visibility(e.value == Tournament.FORMAT_SWISS)
+        def _apply_format():
+            """Show the controls the chosen format actually uses."""
+            value = fmt.value
+            team_mode = value == Tournament.FORMAT_TEAM
+            rounds_in.set_visibility(value == Tournament.FORMAT_SWISS)
             team_ko.set_visibility(team_mode)
             double_rr.set_visibility(
-                e.value == Tournament.FORMAT_ROUNDROBIN
+                value == Tournament.FORMAT_ROUNDROBIN
                 or (team_mode and not team_ko.value))
             double_rr.set_text("Double round-robin (home and away)"
                                if team_mode else "Double round-robin")
             solo_area.set_visibility(not team_mode)
             team_area.set_visibility(team_mode)
             _sync_counts()
-        fmt.on_value_change(on_fmt)
+
+        fmt.on_value_change(lambda e: (draft.__setitem__("format", e.value),
+                                       _apply_format()))
         # A bracket has no return leg, so the double option goes with it
         team_ko.on_value_change(lambda e: (
-            double_rr.set_visibility(
-                fmt.value == Tournament.FORMAT_TEAM and not e.value),
-            _sync_counts()))
+            draft.__setitem__("team_ko", e.value), _apply_format()))
+        double_rr.on_value_change(
+            lambda e: draft.__setitem__("double_rr", e.value))
 
         with ui.row().classes("w-full items-center gap-4"):
             tc_sel = ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
-                               value="classic", label="Time control") \
+                               value=draft["time_control"],
+                               label="Time control") \
                 .props("dense options-dense").classes("w-36") \
                 .tooltip("Bullet/Blitz/Rapid: engines manage their own "
                          "clock and lose on time. Classic: fixed think "
                          "time per move")
             # Default to the regular game's pace so a Classic tournament
             # plays at the same speed a Classic single game does
-            movetime_in = ui.number(label="Move time (ms)",
-                                    value=session.movetime_ms,
-                                    min=100, max=60000, step=100) \
+            movetime_in = ui.number(
+                label="Move time (ms)",
+                value=draft["movetime"] or session.movetime_ms,
+                min=100, max=60000, step=100,
+                on_change=lambda e: draft.__setitem__("movetime", e.value)) \
                 .props("dense").classes("w-32")
-            delay_in = ui.number(label="Move delay (s)", value=session.delay_s,
-                                 min=0.0, max=5.0, step=0.1) \
+            delay_in = ui.number(
+                label="Move delay (s)",
+                value=draft["delay"] if draft["delay"] is not None
+                else session.delay_s,
+                min=0.0, max=5.0, step=0.1,
+                on_change=lambda e: draft.__setitem__("delay", e.value)) \
                 .props("dense").classes("w-32")
 
         # Move time only applies to the clockless Classic preset
-        tc_sel.on_value_change(
-            lambda e: movetime_in.set_visibility(e.value == "classic"))
+        tc_sel.on_value_change(lambda e: (
+            draft.__setitem__("time_control", e.value),
+            movetime_in.set_visibility(e.value == "classic")))
 
         ui.separator()
         solo_area = ui.column().classes("w-full gap-1")
         team_area = ui.column().classes("w-full gap-1")
-        team_area.set_visibility(False)
-        teams = []          # [{"name": str, "members": [{name, path}]}]
+        teams = draft["teams"]   # [{"name": str, "members": [{name, path}]}]
 
         def _engine_from(path):
             """(name, path) for an engine file, or None with a notice."""
@@ -948,7 +980,11 @@ def show_tournament_setup(session):
                     f"{n} teams of {size} · {shape} · {matches} team "
                     f"match(es) · {matches * size * size} games")
 
-        double_rr.on_value_change(lambda e: _sync_counts())
+        # Everything is built: show the controls the restored format uses.
+        # on_value_change only fires on a change, so a reopened draft would
+        # otherwise come back looking like a fresh Swiss form.
+        _apply_format()
+        movetime_in.set_visibility(tc_sel.value == "classic")
 
         analyzer_note = ("Analyzer attached — move quality will be recorded"
                          if session.analyzer and session.analyzer.alive
@@ -1034,6 +1070,13 @@ def show_tournament_setup(session):
             tsess = TournamentSession(t, session.db)
             ACTIVE[t.tournament_id] = tsess
             tsess.snapshot()      # survives a close before it is ever started
+            # The draft has become a tournament, so the next New Tournament
+            # starts from a clean form rather than repeating this one
+            _DRAFT.update(name=None, format=None, rounds=5, double_rr=False,
+                          team_ko=False, time_control="classic",
+                          movetime=None, delay=None)
+            _DRAFT["roster"] = []
+            _DRAFT["teams"] = []
             dialog.close()
             show_tournament_window(session, tsess)
 
