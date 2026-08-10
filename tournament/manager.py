@@ -434,6 +434,44 @@ class TournamentPlayer:
         return f"<TPlayer {self.name} {self.score}>"
 
 
+class TournamentTeam:
+    """
+    A named side in a team event.
+
+    Everything a team is worth is derived from its members rather than
+    tallied alongside them: a squad's score is its players' game points,
+    so there is no second copy to fall out of step when a result is
+    corrected or a game is deleted.
+    """
+
+    def __init__(self, name, players=None):
+        self.name = (name or "").strip()
+        self.players = list(players or [])
+
+    @property
+    def score(self):
+        return sum(p.score for p in self.players)
+
+    @property
+    def wins(self):
+        return sum(p.wins for p in self.players)
+
+    @property
+    def draws(self):
+        return sum(p.draws for p in self.players)
+
+    @property
+    def losses(self):
+        return sum(p.losses for p in self.players)
+
+    @property
+    def games_played(self):
+        return sum(p.games_played for p in self.players)
+
+    def __repr__(self):
+        return f"<Team {self.name} {self.score}>"
+
+
 class TournamentGame:
     def __init__(self, round_num, white: TournamentPlayer, black: TournamentPlayer):
         self.round_num    = round_num
@@ -540,6 +578,10 @@ class RoundRobinPairing:
         n = len(players)
         lst = list(players)
         rounds_single = []
+        if n < 2:
+            # Nobody to pair. from_dict builds the tournament before it
+            # restores the roster, so this is reached on every reload.
+            return rounds_single
         if n % 2 == 1:
             lst.append(None)
             n += 1
@@ -603,12 +645,21 @@ class Tournament:
     FORMAT_SWISS       = "Swiss"
     FORMAT_ROUNDROBIN  = "Round Robin"
     FORMAT_KNOCKOUT    = "Knockout"
+    FORMAT_TEAM        = "Team"
 
     def __init__(self, name, fmt, players, rounds, movetime_ms=1000,
                 double_rr=False, delay=0.3, analyzer_path=None,
-                opening_book=None, time_control="classic"):
+                opening_book=None, time_control="classic", teams=None,
+                team_knockout=False):
         self.name          = name
         self.format        = fmt
+        self.teams         = list(teams or [])
+        self.team_knockout = bool(team_knockout)
+        if self.teams and not players:
+            # The roster of a team event is its squads flattened, so every
+            # per-player path — standings, pairing history, Elo — keeps
+            # working without knowing teams exist
+            players = [p for team in self.teams for p in team.players]
         self.players       = {p.name: p for p in players}
         self.player_list   = list(players)
         self.rounds        = rounds
@@ -651,6 +702,30 @@ class Tournament:
         else:
             self._rr_schedule = None
 
+        # Team events: every squad meets every other, and one round is one
+        # team match. Flattening the round-robin means the schedule reads
+        # "Round 3 of 6: Reds vs Blues" instead of burying several matches
+        # in a round, which matters when the games are played one after
+        # another anyway.
+        self._team_alive = list(self.teams)     # knockout: still standing
+        self._team_bracket = {}                 # round → [(home, away)]
+        self._team_bye = None
+        if fmt == self.FORMAT_TEAM and not self.team_knockout:
+            self._team_schedule = [
+                pair
+                for rnd in RoundRobinPairing.generate_all_rounds(
+                    self.teams, double=double_rr)
+                for pair in rnd]
+            self.rounds = len(self._team_schedule)
+        elif fmt == self.FORMAT_TEAM:
+            # A knockout bracket is only known one round at a time, so the
+            # schedule is built as it goes. The length is how many rounds
+            # it takes to get from this many teams to one.
+            self._team_schedule = []
+            self.rounds = max(1, math.ceil(math.log2(max(2, len(self.teams)))))
+        else:
+            self._team_schedule = []
+
     def start(self):
         self.started = True
         self._generate_round()
@@ -681,6 +756,32 @@ class Tournament:
                     g = TournamentGame(self.current_round, w, b)
                     self.round_games.append(g)
                     self.all_games.append(g)
+
+        elif self.format == self.FORMAT_TEAM:
+            if self.team_knockout:
+                # A round is a bracket round: every surviving team is
+                # paired off, and an odd one out walks through
+                alive = list(self._team_alive)
+                pairings = [(alive[i], alive[i + 1])
+                            for i in range(0, len(alive) - 1, 2)]
+                self._team_bye = alive[-1] if len(alive) % 2 else None
+                self._team_bracket[self.current_round] = [
+                    (h.name, a.name) for h, a in pairings]
+            else:
+                idx = self.current_round - 1
+                pairings = ([self._team_schedule[idx]]
+                            if idx < len(self._team_schedule) else [])
+
+            for home, away in pairings:
+                for i, hp in enumerate(home.players):
+                    for j, ap in enumerate(away.players):
+                        # Alternate the colours across the grid so nobody
+                        # plays every one of their games with White
+                        w, b = ((hp, ap) if (i + j) % 2 == 0 else (ap, hp))
+                        g = TournamentGame(self.current_round, w, b)
+                        g.home_team, g.away_team = home.name, away.name
+                        self.round_games.append(g)
+                        self.all_games.append(g)
 
         elif self.format == self.FORMAT_KNOCKOUT:
             if self.current_round == 1:
@@ -877,7 +978,38 @@ class Tournament:
             self._generate_round()
             return False
 
-        elif self.format == self.FORMAT_ROUNDROBIN:
+        elif self.format == self.FORMAT_TEAM and self.team_knockout:
+            # Points still decide it — the squad that scored more across
+            # the tie goes through. A tie that finishes level is settled
+            # on game wins, then by the higher seed, so a bracket always
+            # produces someone rather than stalling.
+            survivors = []
+            for home_name, away_name in self._team_bracket.get(
+                    self.current_round, []):
+                home, away = self.match_scores(self.current_round,
+                                               home_name, away_name)
+                by_name = {x.name: x for x in self.teams}
+                h, a = by_name.get(home_name), by_name.get(away_name)
+                if h is None or a is None:
+                    continue
+                if home != away:
+                    survivors.append(h if home > away else a)
+                elif h.wins != a.wins:
+                    survivors.append(h if h.wins > a.wins else a)
+                else:
+                    survivors.append(h)
+            if self._team_bye is not None:
+                survivors.append(self._team_bye)
+                self._team_bye = None
+            self._team_alive = survivors
+            if len(survivors) <= 1:
+                self.winner = survivors[0] if survivors else None
+                self._finish()
+                return True
+            self._generate_round()
+            return False
+
+        elif self.format in (self.FORMAT_ROUNDROBIN, self.FORMAT_TEAM):
             if self.current_round >= self.rounds:
                 self._finish()
                 return True
@@ -897,7 +1029,10 @@ class Tournament:
 
     def _finish(self):
         self.finished = True
-        standings = self.get_standings()
+        # A team event is won by a squad, not by whoever scored most in it
+        standings = (self.get_team_standings()
+                     if self.format == self.FORMAT_TEAM
+                     else self.get_standings())
         if standings and self.winner is None:
             self.winner = standings[0]
         self.status_msg = (
@@ -918,11 +1053,78 @@ class Tournament:
                 elif g.black is p and g.black_score is not None:
                     p.sonneborn += g.black_score * score_map.get(g.white.name, 0)
 
+    def team_of(self, player_name):
+        """The team a player belongs to, or None outside a team event."""
+        for team in self.teams:
+            if any(p.name == player_name for p in team.players):
+                return team
+        return None
+
+    def ties_in(self, round_num):
+        """[(home_name, away_name)] played in *round_num*, in order."""
+        seen = []
+        for g in self.all_games:
+            if g.round_num != round_num or not getattr(g, "home_team", None):
+                continue
+            key = (g.home_team, g.away_team)
+            if key not in seen:
+                seen.append(key)
+        return seen
+
+    def match_scores(self, round_num, home_name=None, away_name=None):
+        """
+        (home_points, away_points) for one team match.
+
+        Read off the games rather than tallied as they finish, so a
+        corrected or deleted result changes the match with it. A knockout
+        round holds several ties at once, so the pair can be named.
+        """
+        home = away = 0.0
+        for g in self.all_games:
+            if g.round_num != round_num or not getattr(g, "home_team", None):
+                continue
+            if home_name is not None and g.home_team != home_name:
+                continue
+            if away_name is not None and g.away_team != away_name:
+                continue
+            ws, bs = g.white_score, g.black_score
+            if ws is None:
+                continue
+            for player, points in ((g.white, ws), (g.black, bs)):
+                team = self.team_of(player.name)
+                if team is None:
+                    continue
+                if team.name == g.home_team:
+                    home += points
+                else:
+                    away += points
+        return home, away
+
+    def get_team_standings(self):
+        """
+        Teams by points, then by matches won.
+
+        Points decide it, as asked; matches won only separates teams that
+        finish level, where the squad that beat more opponents outright
+        has the better claim.
+        """
+        won = {t.name: 0 for t in self.teams}
+        for rnd in range(1, self.current_round + 1):
+            for home_name, away_name in self.ties_in(rnd):
+                home, away = self.match_scores(rnd, home_name, away_name)
+                if home == away:
+                    continue
+                winner = home_name if home > away else away_name
+                if winner in won:
+                    won[winner] += 1
+        return sorted(self.teams,
+                      key=lambda t: (-t.score, -won.get(t.name, 0), t.name))
+
     def get_standings(self):
         players = list(self.player_list)
         if self.format == self.FORMAT_SWISS:
             players.sort(key=lambda p: (-p.score, -p.buchholz, -p.sonneborn, p.name))
-        elif self.format == self.FORMAT_ROUNDROBIN:
+        elif self.format in (self.FORMAT_ROUNDROBIN, self.FORMAT_TEAM):
             players.sort(key=lambda p: (-p.score, -p.wins, p.name))
         elif self.format == self.FORMAT_KNOCKOUT:
             eliminated_names = [p.name for p in self._ko_eliminated]
@@ -964,7 +1166,9 @@ class Tournament:
                 "reason": g.reason, "status": g.status,
                 "move_count": g.move_count, "duration": g.duration,
                 "opening": g.opening,
-                "db_game_id": getattr(g, "db_game_id", None)}
+                "db_game_id": getattr(g, "db_game_id", None),
+                "home_team": getattr(g, "home_team", None),
+                "away_team": getattr(g, "away_team", None)}
 
     def to_dict(self):
         """
@@ -998,6 +1202,16 @@ class Tournament:
                 "created_at": self.created_at.isoformat(),
                 "winner": self.winner.name if self.winner else None,
                 "players": [self._player_dict(p) for p in self.player_list],
+                "teams": [{"name": t.name,
+                           "players": [p.name for p in t.players]}
+                          for t in self.teams],
+                "team_schedule": [[h.name, a.name]
+                                  for h, a in self._team_schedule],
+                "team_knockout": self.team_knockout,
+                "team_alive": [t.name for t in self._team_alive],
+                "team_bracket": {str(r): [list(p) for p in pairs]
+                                 for r, pairs in self._team_bracket.items()},
+                "team_bye": self._team_bye.name if self._team_bye else None,
                 "games": [self._game_dict(g) for g in self.all_games],
                 "round_games": [index[id(g)] for g in self.round_games
                                 if id(g) in index],
@@ -1046,7 +1260,8 @@ class Tournament:
                 delay=data.get("delay", 0.3),
                 analyzer_path=data.get("analyzer_path"),
                 opening_book=opening_book,
-                time_control=data.get("time_control", "classic"))
+                time_control=data.get("time_control", "classic"),
+                team_knockout=data.get("team_knockout", False))
 
         by_name = {p.name: p for p in players}
         t.tournament_id = data.get("tournament_id") or t.tournament_id
@@ -1081,6 +1296,9 @@ class Tournament:
                 g.opening = gd.get("opening", "")
                 if gd.get("db_game_id") is not None:
                     g.db_game_id = gd["db_game_id"]
+            if gd.get("home_team"):
+                g.home_team = gd["home_team"]
+                g.away_team = gd.get("away_team")
             games.append(g)
         t.all_games = games
 
@@ -1106,6 +1324,22 @@ class Tournament:
                                 if n in by_name] or list(players)
         t._ko_round_games = {int(r): pick(idx) for r, idx
                              in (data.get("ko_round_games") or {}).items()}
+
+        # Teams reference the same player objects as player_list, so a
+        # score read through a squad is the score the standings show
+        t.teams = [TournamentTeam(td.get("name", ""),
+                                  [by_name[n] for n in td.get("players", [])
+                                   if n in by_name])
+                   for td in data.get("teams", [])]
+        by_team = {team.name: team for team in t.teams}
+        t._team_schedule = [(by_team[h], by_team[a])
+                            for h, a in data.get("team_schedule", [])
+                            if h in by_team and a in by_team]
+        t._team_alive = [by_team[n] for n in data.get("team_alive", [])
+                         if n in by_team] or list(t.teams)
+        t._team_bracket = {int(r): [tuple(p) for p in pairs] for r, pairs
+                           in (data.get("team_bracket") or {}).items()}
+        t._team_bye = by_team.get(data.get("team_bye") or "")
         return t
 
 

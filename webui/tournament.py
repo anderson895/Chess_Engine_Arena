@@ -8,6 +8,7 @@
 # ═══════════════════════════════════════════════════════════
 
 import json
+import math
 import os
 import threading
 import time
@@ -19,7 +20,7 @@ from nicegui import app, ui
 from core.constants import TIME_CONTROLS
 from core.utils import normalize_engine_name
 from tournament.manager import (
-    Tournament, TournamentPlayer, TournamentRunner,
+    Tournament, TournamentPlayer, TournamentRunner, TournamentTeam,
 )
 from webui import widgets
 from webui.board import BoardView, EvalBar
@@ -566,18 +567,37 @@ def show_tournament_setup(session):
         with ui.row().classes("w-full items-center gap-4"):
             fmt = ui.select(
                 [Tournament.FORMAT_SWISS, Tournament.FORMAT_ROUNDROBIN,
-                 Tournament.FORMAT_KNOCKOUT],
+                 Tournament.FORMAT_KNOCKOUT, Tournament.FORMAT_TEAM],
                 value=Tournament.FORMAT_SWISS, label="Format") \
                 .props("dense").classes("w-40")
             rounds_in = ui.number(label="Rounds", value=5, min=1, max=30) \
                 .props("dense").classes("w-24")
             double_rr = ui.checkbox("Double round-robin")
             double_rr.set_visibility(False)
+            team_ko = ui.checkbox("Knockout bracket") \
+                .tooltip("Teams are paired off and the loser is out. "
+                         "Points still decide each tie — the squad that "
+                         "scores more across it goes through.")
+            team_ko.set_visibility(False)
 
         def on_fmt(e):
+            team_mode = e.value == Tournament.FORMAT_TEAM
             rounds_in.set_visibility(e.value == Tournament.FORMAT_SWISS)
-            double_rr.set_visibility(e.value == Tournament.FORMAT_ROUNDROBIN)
+            team_ko.set_visibility(team_mode)
+            double_rr.set_visibility(
+                e.value == Tournament.FORMAT_ROUNDROBIN
+                or (team_mode and not team_ko.value))
+            double_rr.set_text("Double round-robin (home and away)"
+                               if team_mode else "Double round-robin")
+            solo_area.set_visibility(not team_mode)
+            team_area.set_visibility(team_mode)
+            _sync_counts()
         fmt.on_value_change(on_fmt)
+        # A bracket has no return leg, so the double option goes with it
+        team_ko.on_value_change(lambda e: (
+            double_rr.set_visibility(
+                fmt.value == Tournament.FORMAT_TEAM and not e.value),
+            _sync_counts()))
 
         with ui.row().classes("w-full items-center gap-4"):
             tc_sel = ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
@@ -601,79 +621,217 @@ def show_tournament_setup(session):
             lambda e: movetime_in.set_visibility(e.value == "classic"))
 
         ui.separator()
-        ui.label("PLAYERS (engines)").classes("arena-heading")
+        solo_area = ui.column().classes("w-full gap-1")
+        team_area = ui.column().classes("w-full gap-1")
+        team_area.set_visibility(False)
+        teams = []          # [{"name": str, "members": [{name, path}]}]
 
-        with ui.row().classes("w-full items-center gap-1"):
-            options = _discover_engines()
-            eng_sel = ui.select(options or {"": "— none found —"},
-                                label="Engine", with_input=True) \
-                .props("dense options-dense").classes("flex-grow")
+        def _engine_from(path):
+            """(name, path) for an engine file, or None with a notice."""
+            if not path or not os.path.isfile(path):
+                ui.notify("Select a valid engine first.", type="warning")
+                return None
+            return normalize_engine_name(
+                os.path.splitext(os.path.basename(path))[0]), path
 
-            resetting = False   # guards the clear-selection value change
+        with solo_area:
+            ui.label("PLAYERS (engines)").classes("arena-heading")
 
-            def add_player(path=None):
-                p = path or eng_sel.value
-                if not p or not os.path.isfile(p):
-                    ui.notify("Select a valid engine first.", type="warning")
+            with ui.row().classes("w-full items-center gap-1"):
+                options = _discover_engines()
+                eng_sel = ui.select(options or {"": "— none found —"},
+                                    label="Engine", with_input=True) \
+                    .props("dense options-dense").classes("flex-grow")
+
+                resetting = False   # guards the clear-selection value change
+
+                def add_player(path=None):
+                    picked = _engine_from(path or eng_sel.value)
+                    if not picked:
+                        return
+                    name, p = picked
+                    if any(os.path.normcase(r["path"]) == os.path.normcase(p)
+                           or r["name"] == name for r in roster):
+                        ui.notify(f"{name} is already in the tournament.",
+                                  type="warning")
+                        return
+                    roster.append({"name": name, "path": p})
+                    roster_ui.refresh()
+                    _sync_counts()
+
+                def on_pick(e):
+                    # Picking an engine adds it straight away; the box is
+                    # then cleared so the same engine can be picked again.
+                    nonlocal resetting
+                    if resetting or not e.value:
+                        resetting = False
+                        return
+                    add_player(e.value)
+                    resetting = True
+                    eng_sel.set_value(None)
+
+                eng_sel.on_value_change(on_pick)
+
+                async def browse_add():
+                    p = await pick_file("Select engine",
+                                        ("Executables (*.exe;*.bin)",
+                                         "All files (*.*)"))
+                    if p:
+                        add_player(p)
+                ui.button("…", on_click=browse_add).props("dense") \
+                    .tooltip("Browse for an engine")
+
+            @ui.refreshable
+            def roster_ui():
+                if not roster:
+                    ui.label("No players yet — add at least 2 engines.") \
+                        .classes("text-xs text-gray-500")
                     return
-                name = normalize_engine_name(
-                    os.path.splitext(os.path.basename(p))[0])
-                if any(os.path.normcase(r["path"]) == os.path.normcase(p)
-                       or r["name"] == name for r in roster):
-                    ui.notify(f"{name} is already in the tournament.",
-                              type="warning")
+                for i, r in enumerate(roster):
+                    with ui.row().classes(
+                            "w-full items-center gap-2 no-wrap arena-log "
+                            "rounded px-2 py-1"):
+                        ui.element("img") \
+                            .props('src="/assets/ui/st_engine.png"') \
+                            .style("height: 14px; width: auto;")
+                        ui.input(value=r["name"],
+                                 on_change=lambda e, r=r: r.__setitem__(
+                                     "name", e.value or r["name"])) \
+                            .props("dense borderless").classes("w-40 text-sm")
+                        ui.label(os.path.basename(r["path"])) \
+                            .classes("text-xs text-gray-500 flex-grow")
+                        rank_txt, rank_col = session.rank_line(r["name"])
+                        ui.label(rank_txt).classes("text-xs no-wrap") \
+                            .style(f"color: {rank_col}")
+                        ui.button("✕", on_click=lambda i=i: (
+                            roster.pop(i), roster_ui.refresh(),
+                            _sync_counts())) \
+                            .props("dense flat color=grey")
+
+            roster_ui()
+
+        with team_area:
+            with ui.row().classes("w-full items-center gap-2"):
+                ui.label("TEAMS").classes("arena-heading")
+                ui.space()
+                ui.button("+ Add team", on_click=lambda: (
+                    teams.append({"name": f"Team {len(teams) + 1}",
+                                  "members": []}),
+                    teams_ui.refresh(), _sync_counts())) \
+                    .props("dense flat no-caps")
+            count_lbl = ui.label("").classes("text-xs") \
+                .style(f"color: {COLOR_BLUE}")
+
+            def team_add(team, path):
+                picked = _engine_from(path)
+                if not picked:
                     return
-                roster.append({"name": name, "path": p})
-                roster_ui.refresh()
+                name, p = picked
+                # One engine cannot play for two sides, and cannot be its
+                # own opponent inside a squad
+                for other in teams:
+                    if any(m["name"] == name
+                           or os.path.normcase(m["path"]) == os.path.normcase(p)
+                           for m in other["members"]):
+                        ui.notify(f"{name} is already in {other['name']}.",
+                                  type="warning")
+                        return
+                team["members"].append({"name": name, "path": p})
+                teams_ui.refresh()
+                _sync_counts()
 
-            def on_pick(e):
-                # Picking an engine adds it straight away; the box is then
-                # cleared so the same engine can be picked again.
-                nonlocal resetting
-                if resetting or not e.value:
-                    resetting = False
+            @ui.refreshable
+            def teams_ui():
+                if not teams:
+                    ui.label("No teams yet — add at least 2, then put "
+                             "engines in each.").classes("text-xs text-gray-500")
                     return
-                add_player(e.value)
-                resetting = True
-                eng_sel.set_value(None)
+                for ti, team in enumerate(teams):
+                    with ui.card().classes("arena-log w-full gap-1 p-2"):
+                        with ui.row().classes("w-full items-center gap-2 "
+                                              "no-wrap"):
+                            ui.input(value=team["name"],
+                                     on_change=lambda e, t=team: (
+                                         t.__setitem__(
+                                             "name", e.value or t["name"]),
+                                         _sync_counts())) \
+                                .props("dense borderless") \
+                                .classes("w-44 text-sm font-bold")
+                            ui.label(f"{len(team['members'])} engine(s)") \
+                                .classes("text-xs text-gray-500")
+                            ui.space()
+                            sel = ui.select(_discover_engines()
+                                            or {"": "— none found —"},
+                                            label="Add engine",
+                                            with_input=True) \
+                                .props("dense options-dense").classes("w-56")
 
-            eng_sel.on_value_change(on_pick)
+                            def picked(e, t=team, box=None):
+                                if e.value:
+                                    team_add(t, e.value)
+                            sel.on_value_change(picked)
 
-            async def browse_add():
-                p = await pick_file("Select engine",
+                            async def browse_team(t=team):
+                                p = await pick_file(
+                                    "Select engine",
                                     ("Executables (*.exe;*.bin)",
                                      "All files (*.*)"))
-                if p:
-                    add_player(p)
-            ui.button("…", on_click=browse_add).props("dense") \
-                .tooltip("Browse for an engine")
+                                if p:
+                                    team_add(t, p)
+                            ui.button("…", on_click=browse_team) \
+                                .props("dense").tooltip("Browse for an engine")
+                            ui.button("✕", on_click=lambda i=ti: (
+                                teams.pop(i), teams_ui.refresh(),
+                                _sync_counts())) \
+                                .props("dense flat color=grey") \
+                                .tooltip("Remove this team")
+                        if not team["members"]:
+                            ui.label("Empty").classes("text-xs text-gray-500")
+                        for mi, m in enumerate(team["members"]):
+                            with ui.row().classes("w-full items-center gap-2 "
+                                                  "no-wrap pl-2"):
+                                ui.element("img") \
+                                    .props('src="/assets/ui/st_engine.png"') \
+                                    .style("height: 13px; width: auto;")
+                                ui.label(m["name"]).classes("text-sm w-44")
+                                rank_txt, rank_col = session.rank_line(m["name"])
+                                ui.label(rank_txt) \
+                                    .classes("text-xs no-wrap flex-grow") \
+                                    .style(f"color: {rank_col}")
+                                ui.button("✕", on_click=lambda t=team, i=mi: (
+                                    t["members"].pop(i), teams_ui.refresh(),
+                                    _sync_counts())) \
+                                    .props("dense flat color=grey")
 
-        @ui.refreshable
-        def roster_ui():
-            if not roster:
-                ui.label("No players yet — add at least 2 engines.") \
-                    .classes("text-xs text-gray-500")
+            teams_ui()
+
+        def _sync_counts():
+            """Say up front how much play the current setup adds up to."""
+            if fmt.value != Tournament.FORMAT_TEAM:
                 return
-            for i, r in enumerate(roster):
-                with ui.row().classes(
-                        "w-full items-center gap-2 no-wrap arena-log "
-                        "rounded px-2 py-1"):
-                    ui.element("img").props('src="/assets/ui/st_engine.png"') \
-                        .style("height: 14px; width: auto;")
-                    ui.input(value=r["name"],
-                             on_change=lambda e, r=r: r.__setitem__(
-                                 "name", e.value or r["name"])) \
-                        .props("dense borderless").classes("w-40 text-sm")
-                    ui.label(os.path.basename(r["path"])) \
-                        .classes("text-xs text-gray-500 flex-grow")
-                    rank_txt, rank_col = session.rank_line(r["name"])
-                    ui.label(rank_txt).classes("text-xs no-wrap") \
-                        .style(f"color: {rank_col}")
-                    ui.button("✕", on_click=lambda i=i: (
-                        roster.pop(i), roster_ui.refresh())) \
-                        .props("dense flat color=grey")
+            sizes = {len(t["members"]) for t in teams}
+            n = len(teams)
+            if n < 2:
+                count_lbl.set_text("Add at least 2 teams.")
+            elif len(sizes) > 1:
+                count_lbl.set_text(
+                    f"Teams must be the same size — currently "
+                    f"{', '.join(str(len(t['members'])) for t in teams)}.")
+            else:
+                size = sizes.pop()
+                if team_ko.value:
+                    matches = n - 1          # a bracket ends when one is left
+                    shape = f"{max(1, math.ceil(math.log2(n)))} round(s)"
+                else:
+                    matches = n * (n - 1) // 2
+                    if double_rr.value:
+                        matches *= 2
+                    shape = "every team meets every other"
+                count_lbl.set_text(
+                    f"{n} teams of {size} · {shape} · {matches} team "
+                    f"match(es) · {matches * size * size} games")
 
-        roster_ui()
+        double_rr.on_value_change(lambda e: _sync_counts())
 
         analyzer_note = ("Analyzer attached — move quality will be recorded"
                          if session.analyzer and session.analyzer.alive
@@ -683,19 +841,50 @@ def show_tournament_setup(session):
 
         def create():
             names = {r["name"] for r in roster}
-            if len(roster) < 2:
-                ui.notify("Add at least 2 players.", type="warning")
-                return
-            if len(names) != len(roster):
-                # Renaming a row by hand can still collide
-                ui.notify("Duplicate player names — each engine must be "
-                          "unique.", type="warning")
-                return
-            players = [TournamentPlayer(r["name"], r["path"]) for r in roster]
+            squads = []
+            if fmt.value == Tournament.FORMAT_TEAM:
+                if len(teams) < 2:
+                    ui.notify("A team event needs at least 2 teams.",
+                              type="warning")
+                    return
+                sizes = {len(x["members"]) for x in teams}
+                if sizes == {0} or 0 in sizes:
+                    ui.notify("Every team needs at least one engine.",
+                              type="warning")
+                    return
+                if len(sizes) > 1:
+                    # Unequal squads would give one side more games than
+                    # the other, so points would not compare
+                    ui.notify("Every team must have the same number of "
+                              "engines.", type="warning")
+                    return
+                team_names = [x["name"].strip() for x in teams]
+                if len(set(team_names)) != len(team_names) or "" in team_names:
+                    ui.notify("Each team needs its own name.", type="warning")
+                    return
+                squads = [
+                    TournamentTeam(x["name"], [
+                        TournamentPlayer(m["name"], m["path"])
+                        for m in x["members"]])
+                    for x in teams]
+                players = []
+            else:
+                if len(roster) < 2:
+                    ui.notify("Add at least 2 players.", type="warning")
+                    return
+                if len(names) != len(roster):
+                    # Renaming a row by hand can still collide
+                    ui.notify("Duplicate player names — each engine must be "
+                              "unique.", type="warning")
+                    return
+                players = [TournamentPlayer(r["name"], r["path"])
+                           for r in roster]
             t = Tournament(
                 name=(name_in.value or "Tournament").strip(),
                 fmt=fmt.value,
                 players=players,
+                teams=squads,
+                team_knockout=bool(team_ko.value),
                 rounds=int(rounds_in.value or 5),
                 movetime_ms=int(movetime_in.value or session.movetime_ms),
                 time_control=tc_sel.value or "classic",
@@ -810,14 +999,22 @@ def show_tournament_window(session, tsess: TournamentSession):
                     "Search engine, round, result, reason…") \
                     .classes("w-full") \
                     .on_value_change(lambda e: _refresh_tables())
+                is_team = t.format == Tournament.FORMAT_TEAM
                 with ui.tabs().classes("w-full") as tabs:
+                    tab_teams = ui.tab("Teams") if is_team else None
                     tab_stand = ui.tab("Standings")
                     tab_sched = ui.tab("Schedule")
                     tab_brack = (ui.tab("Bracket")
                                  if t.format == Tournament.FORMAT_KNOCKOUT
                                  else None)
-                with ui.tab_panels(tabs, value=tab_stand) \
+                with ui.tab_panels(tabs, value=tab_teams or tab_stand) \
                         .classes("w-full flex-grow"):
+                    if tab_teams:
+                        with ui.tab_panel(tab_teams):
+                            team_table = _team_table()
+                            widgets.hint("Points decide it — matches won "
+                                         "only separates teams that finish "
+                                         "level")
                     with ui.tab_panel(tab_stand):
                         stand_table = _standings_table(t)
                         stand_table.on("drop", lambda e: _drop_player(e.args))
@@ -1028,6 +1225,8 @@ def show_tournament_window(session, tsess: TournamentSession):
                 + (f"/{t.rounds}" if t.format != Tournament.FORMAT_KNOCKOUT
                    else ""))
             query = table_search.value or ""
+            if is_team:
+                _fill_teams(team_table, t)
             _fill_standings(stand_table, t, session, query)
             _fill_schedule(sched_table, t, query)
             if rounds_in.value != t.rounds:
@@ -1224,6 +1423,53 @@ async def _open_game_pgn(session, row, siblings=None):
             "Loading game replay…")
     else:
         ui.notify("Game not finished yet.", type="info")
+
+
+def _team_table():
+    columns = [
+        {"name": "rank", "label": "#", "field": "rank", "align": "center"},
+        {"name": "team", "label": "Team", "field": "team", "align": "left"},
+        {"name": "score", "label": "Points", "field": "score",
+         "align": "center"},
+        {"name": "wdl", "label": "W/D/L", "field": "wdl", "align": "center"},
+        {"name": "matches", "label": "Matches", "field": "matches",
+         "align": "left"},
+        {"name": "squad", "label": "Squad", "field": "squad", "align": "left"},
+    ]
+    table = ui.table(columns=columns, rows=[], row_key="team",
+                     pagination=0).classes("w-full arena-log")
+    table.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
+    return table
+
+
+def _fill_teams(table, t):
+    """Team standings, with each squad's match record spelled out."""
+    played = {x.name: [] for x in t.teams}
+    for rnd in range(1, t.current_round + 1):
+        games = [g for g in t.all_games
+                 if g.round_num == rnd and getattr(g, "home_team", None)]
+        if not games:
+            continue
+        home_name, away_name = games[0].home_team, games[0].away_team
+        home, away = t.match_scores(rnd)
+        # A match still being played is marked, so a leading score is not
+        # mistaken for a finished one
+        mark = "" if all(g.status == "done" for g in games) else "…"
+        for mine, theirs, us, them in ((home, away, home_name, away_name),
+                                       (away, home, away_name, home_name)):
+            if us in played:
+                played[us].append(f"{mine:g}-{theirs:g} {them}{mark}")
+
+    rows = []
+    for i, team in enumerate(t.get_team_standings(), 1):
+        rows.append({
+            "rank": i, "team": team.name, "score": f"{team.score:g}",
+            "wdl": f"{team.wins}/{team.draws}/{team.losses}",
+            "matches": "   ".join(played.get(team.name, [])) or "—",
+            "squad": ", ".join(p.name for p in team.players),
+        })
+    table.rows = rows
+    table.update()
 
 
 def _standings_table(t):
