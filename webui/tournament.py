@@ -807,18 +807,19 @@ def show_tournament_setup(session):
 
             def team_add_human(team):
                 if tc_sel.value != "classic":
-                    ui.notify("A human seat needs Classic — the other "
-                              "presets run a clock you would be playing "
-                              "against.", type="warning")
+                    ui.notify("A manual seat needs Classic — the other "
+                              "presets run a clock against a side that "
+                              "moves by hand.", type="warning")
                     return
-                if any(m.get("human") for x in teams for m in x["members"]):
-                    ui.notify("You are already in a team.", type="warning")
-                    return
-                name = (session.player_name or "Player").strip() or "Player"
-                if any(m["name"] == name for x in teams for m in x["members"]):
-                    ui.notify(f"{name} clashes with an engine name — change "
-                              f"your name in the main window.", type="warning")
-                    return
+                # The name is whatever is playing the seat: you, or an
+                # engine running somewhere else that you relay moves for.
+                # It is what the games are filed and rated under, so it
+                # starts as a placeholder and is meant to be typed over.
+                taken = {m["name"] for x in teams for m in x["members"]}
+                base = (session.player_name or "Manual").strip() or "Manual"
+                name, n = base, 2
+                while name in taken:
+                    name, n = f"{base} {n}", n + 1
                 team["members"].append({"name": name, "path": "",
                                         "human": True})
                 teams_ui.refresh()
@@ -864,12 +865,13 @@ def show_tournament_setup(session):
                                     team_add(t, p)
                             ui.button("…", on_click=browse_team) \
                                 .props("dense").tooltip("Browse for an engine")
-                            ui.button("+ Me", on_click=lambda t=team:
+                            ui.button("+ Manual", on_click=lambda t=team:
                                       team_add_human(t)) \
                                 .props("dense flat no-caps") \
-                                .tooltip("Take a seat in this team yourself. "
-                                         "Classic only — a human needs no "
-                                         "clock running.")
+                                .tooltip("A seat whose moves you enter on "
+                                         "the board — yourself, or an engine "
+                                         "running elsewhere that you relay "
+                                         "for. Classic only.")
                             ui.button("✕", on_click=lambda i=ti: (
                                 teams.pop(i), teams_ui.refresh(),
                                 _sync_counts())) \
@@ -885,12 +887,29 @@ def show_tournament_setup(session):
                                     ui.element("img") \
                                     .props('src="/assets/ui/st_engine.png"') \
                                     .style("height: 13px; width: auto;")
-                                ui.label(m["name"]).classes("text-sm w-44")
                                 if human:
-                                    ui.label("you — Classic only") \
+                                    # Editable: this is the name the games
+                                    # are saved and rated under, and the
+                                    # seat may be standing in for an engine
+                                    # running on another machine
+                                    ui.input(value=m["name"],
+                                             on_change=lambda e, m=m: (
+                                                 m.__setitem__(
+                                                     "name",
+                                                     (e.value or "").strip()
+                                                     or m["name"]),
+                                                 _sync_counts())) \
+                                        .props("dense borderless") \
+                                        .classes("w-44 text-sm") \
+                                        .tooltip("Who is playing this seat — "
+                                                 "type the engine's name if "
+                                                 "you are relaying its moves")
+                                    ui.label("moves entered by hand · "
+                                             "Classic only") \
                                         .classes("text-xs no-wrap flex-grow") \
                                         .style(f"color: {COLOR_GREEN}")
                                 else:
+                                    ui.label(m["name"]).classes("text-sm w-44")
                                     rank_txt, rank_col = session.rank_line(
                                         m["name"])
                                     ui.label(rank_txt) \
@@ -959,6 +978,19 @@ def show_tournament_setup(session):
                 team_names = [x["name"].strip() for x in teams]
                 if len(set(team_names)) != len(team_names) or "" in team_names:
                     ui.notify("Each team needs its own name.", type="warning")
+                    return
+                # Names are what the games are filed and rated under, so two
+                # seats sharing one would merge into a single engine
+                member_names = [m["name"].strip()
+                                for x in teams for m in x["members"]]
+                if "" in member_names:
+                    ui.notify("Every seat needs a name.", type="warning")
+                    return
+                if len(set(member_names)) != len(member_names):
+                    dupe = next(n for n in member_names
+                                if member_names.count(n) > 1)
+                    ui.notify(f"{dupe} appears twice — each seat needs its "
+                              f"own name.", type="warning")
                     return
                 if (tc_sel.value != "classic"
                         and any(m.get("human") for x in teams
