@@ -1083,15 +1083,17 @@ def show_tournament_window(session, tsess: TournamentSession):
                 tsess.board_dirty = False
                 tsess.tables_dirty = False
                 status = tsess.status_msg
+                cp = tsess.cp
+                opening = tsess.opening
+                game_label = tsess.game_label
                 sounds = list(tsess.sounds)
                 tsess.sounds.clear()
+            # Outside the lock: run_javascript must not hold it, and the
+            # runner thread is free to queue the next move meanwhile
             for kind in sounds:
                 # arenaPlaySound is defined once on the page and already
                 # honours the mute button
                 ui.run_javascript(f"window.arenaPlaySound('{kind}')")
-                cp = tsess.cp
-                opening = tsess.opening
-                game_label = tsess.game_label
             status_lbl.set_text(status)
             if tables_dirty:
                 session.invalidate_stats_caches()   # a game was saved
