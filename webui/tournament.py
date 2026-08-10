@@ -924,22 +924,34 @@ def show_tournament_setup(session):
                                     # are saved and rated under, and the
                                     # seat may be standing in for an engine
                                     # running on another machine
-                                    ui.input(value=m["name"],
-                                             on_change=lambda e, m=m: (
-                                                 m.__setitem__(
-                                                     "name",
-                                                     (e.value or "").strip()
-                                                     or m["name"]),
-                                                 _sync_counts())) \
+                                    name_in_m = ui.input(value=m["name"]) \
                                         .props("dense borderless") \
                                         .classes("w-44 text-sm") \
                                         .tooltip("Who is playing this seat — "
                                                  "type the engine's name if "
                                                  "you are relaying its moves")
-                                    ui.label("moves entered by hand · "
-                                             "Classic only") \
-                                        .classes("text-xs no-wrap flex-grow") \
-                                        .style(f"color: {COLOR_GREEN}")
+                                    rank_lbl = ui.label("") \
+                                        .classes("text-xs no-wrap flex-grow")
+
+                                    def _show_rank(m=m, lbl=rank_lbl):
+                                        # A relayed engine has a real
+                                        # record, so look the name up the
+                                        # same way the engine rows do
+                                        txt, col = session.rank_line(m["name"])
+                                        lbl.set_text(f"{txt}  ·  by hand")
+                                        lbl.style(f"color: {col}")
+
+                                    # Update the label in place rather than
+                                    # rebuilding the list: a refresh on
+                                    # every keystroke would steal focus
+                                    name_in_m.on_value_change(
+                                        lambda e, m=m, f=_show_rank: (
+                                            m.__setitem__(
+                                                "name",
+                                                (e.value or "").strip()
+                                                or m["name"]),
+                                            f(), _sync_counts()))
+                                    _show_rank()
                                 else:
                                     ui.label(m["name"]).classes("text-sm w-44")
                                     rank_txt, rank_col = session.rank_line(
