@@ -1512,7 +1512,12 @@ def show_tournament_window(session, tsess: TournamentSession):
             if tsess.state == "finished":
                 _sync_controls()
 
-        timer = ui.timer(0.4, _tick)
+        # The board is polled, not pushed, so the interval is how long a
+        # move sits invisible after it lands. Engines can wait; a seat
+        # played by hand should not watch its own move crawl in, so an
+        # event with one polls hard enough to feel direct.
+        has_manual = any(p.is_human for p in t.player_list)
+        timer = ui.timer(0.08 if has_manual else 0.4, _tick)
         dialog.on("hide", lambda: timer.cancel())
 
         def _close():

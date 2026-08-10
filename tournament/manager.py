@@ -2091,7 +2091,11 @@ class TournamentRunner:
             game.wtime_ms  = wtime
             game.btime_ms  = btime
             self.on_board_update(game, board, last_move, cp_val, mate_val, opening_name)
-            time.sleep(max(0.02, self.t.delay))
+            # The pacing delay exists so engine-vs-engine is watchable. A
+            # move somebody just made by hand took as long as it took, and
+            # padding it only makes their own move feel slow to land.
+            time.sleep(0.02 if player.is_human
+                       else max(0.02, self.t.delay))
 
         if not result:
             over, result, reason, winner_color = board.game_result()
@@ -2134,7 +2138,9 @@ class TournamentRunner:
             while True:
                 if self._stop_flag or self._adjudicate:
                     return None
-                if self._human_ready.wait(0.1):
+                # Short poll: this is the gap between the click landing and
+                # the move appearing on the board, and it is felt
+                if self._human_ready.wait(0.02):
                     move = (self._human_move or "").strip().lower()
                     if legal_ucis is None or move in legal_ucis:
                         return move
