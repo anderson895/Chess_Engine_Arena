@@ -1915,10 +1915,17 @@ class TournamentRunner:
             engine        = e_white if is_white_turn else e_black
             player        = game.white if is_white_turn else game.black
 
-            if not engine.alive:
-                result = '0-1' if is_white_turn else '1-0'
-                reason = f"{player.name} engine died"
-                break
+            # A manual seat has no process behind it — only an engine can
+            # have died, and only an engine should have been launched
+            if not player.is_human:
+                if engine is None:
+                    result = '0-1' if is_white_turn else '1-0'
+                    reason = f"{player.name} has no engine"
+                    break
+                if not engine.alive:
+                    result = '0-1' if is_white_turn else '1-0'
+                    reason = f"{player.name} engine died"
+                    break
 
             uci = None
 
@@ -1948,7 +1955,9 @@ class TournamentRunner:
                         continue          # let the loop apply the verdict
                     break                 # stopped
 
-            if not uci:
+            # Guarded rather than left to the branches above: reaching the
+            # search path with no engine is what crashed a manual seat
+            if not uci and engine is not None:
                 mvs = board.uci_moves_str()
                 try:
                     engine._drain()
