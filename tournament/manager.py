@@ -405,9 +405,12 @@ def _batch_tree_insert(widget: tk.Widget,
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentPlayer:
-    def __init__(self, name, engine_path):
+    def __init__(self, name, engine_path, is_human=False):
         self.name          = normalize_engine_name(name)
         self.engine_path   = engine_path
+        # A human entrant has no process to launch and no search to wait
+        # on: the runner stops and asks the board instead
+        self.is_human      = bool(is_human)
         self.score         = 0.0
         self.wins          = 0
         self.draws         = 0
@@ -862,7 +865,8 @@ class Tournament:
             return False, "Only Swiss tournaments can take late entrants."
         if self.finished:
             return False, "This tournament has already finished."
-        if not player.engine_path or not os.path.isfile(player.engine_path):
+        if not player.is_human and (not player.engine_path
+                                    or not os.path.isfile(player.engine_path)):
             return False, "That engine file no longer exists."
 
         name = normalize_engine_name(player.name)
@@ -1153,6 +1157,7 @@ class Tournament:
     @staticmethod
     def _player_dict(p):
         return {"name": p.name, "engine_path": p.engine_path,
+                "is_human": p.is_human,
                 "score": p.score, "wins": p.wins, "draws": p.draws,
                 "losses": p.losses, "buchholz": p.buchholz,
                 "sonneborn": p.sonneborn, "seed": p.seed,
@@ -1239,7 +1244,8 @@ class Tournament:
         """
         players = []
         for d in data.get("players", []):
-            p = TournamentPlayer(d.get("name", ""), d.get("engine_path", ""))
+            p = TournamentPlayer(d.get("name", ""), d.get("engine_path", ""),
+                                 is_human=d.get("is_human", False))
             p.score = d.get("score", 0.0)
             p.wins = d.get("wins", 0)
             p.draws = d.get("draws", 0)
@@ -1699,10 +1705,15 @@ class MiniBoardWidget(tk.Frame):
 class TournamentRunner:
     def __init__(self, tournament: Tournament, on_game_start,
                 on_board_update, on_game_end, on_round_end,
-                on_tournament_end, on_status):
+                on_tournament_end, on_status, on_human_turn=None):
         self.t               = tournament
         self.on_game_start   = on_game_start
         self.on_board_update = on_board_update
+        # Called with (game, board, player) when a human is to move, and
+        # with (None, None, None) once the move is in
+        self.on_human_turn   = on_human_turn or (lambda *a: None)
+        self._human_move     = None
+        self._human_ready    = threading.Event()
         self.on_game_end     = on_game_end
         self.on_round_end    = on_round_end
         self.on_tournament_end = on_tournament_end
@@ -1841,11 +1852,14 @@ class TournamentRunner:
 
         e_white = e_black = None
         try:
-            e_white = UCIEngine(game.white.engine_path, game.white.name)
-            e_black = UCIEngine(game.black.engine_path, game.black.name)
-            e_white.start()
-            e_black.start()
-            self.current_engines = [e_white, e_black]
+            # A human seat has no engine to launch
+            if not game.white.is_human:
+                e_white = UCIEngine(game.white.engine_path, game.white.name)
+                e_white.start()
+            if not game.black.is_human:
+                e_black = UCIEngine(game.black.engine_path, game.black.name)
+                e_black.start()
+            self.current_engines = [e for e in (e_white, e_black) if e]
         except Exception as ex:
             self._abort_game(game, str(ex))
             self._kill(e_white, e_black)
@@ -1924,6 +1938,15 @@ class TournamentRunner:
                     if legal_ucis is None or raw_norm in legal_ucis:
                         uci = raw_norm
                         book_moves_used += 1
+
+            if not uci and player.is_human:
+                # Stop and hand the board over. No clock runs here: a
+                # human seat is Classic-only for exactly this reason.
+                uci = self._await_human(game, board, player, legal_ucis)
+                if uci is None:
+                    if self._adjudicate:
+                        continue          # let the loop apply the verdict
+                    break                 # stopped
 
             if not uci:
                 mvs = board.uci_moves_str()
@@ -2080,6 +2103,37 @@ class TournamentRunner:
 
         self._kill(e_white, e_black)
         self.on_game_end(game)
+
+    def submit_human_move(self, uci):
+        """Hand the runner the move a human just made on the board."""
+        self._human_move = uci
+        self._human_ready.set()
+
+    def _await_human(self, game, board, player, legal_ucis):
+        """
+        Block until the human moves, or until the tournament is stopped.
+
+        Returns the UCI move, or None if the wait was cut short. Polls
+        rather than blocking outright so Stop and Decide Result still land
+        while it is somebody's turn — a tournament must never be stuck
+        behind a player who has walked away.
+        """
+        self._human_move = None
+        self._human_ready.clear()
+        self.on_human_turn(game, board, player)
+        try:
+            while True:
+                if self._stop_flag or self._adjudicate:
+                    return None
+                if self._human_ready.wait(0.1):
+                    move = (self._human_move or "").strip().lower()
+                    if legal_ucis is None or move in legal_ucis:
+                        return move
+                    # Ignore an illegal submission and keep waiting
+                    self._human_ready.clear()
+                    self.on_status(f"{move} is not legal — try again")
+        finally:
+            self.on_human_turn(None, None, None)
 
     def _book_probe(self, book, board):
         import re

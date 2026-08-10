@@ -132,7 +132,71 @@ class TournamentSession:
         # at once when it comes back.
         self.sounds = deque(maxlen=3)
 
+        # Human seat: the live board while it is somebody's turn to move,
+        # and the square they have picked up. The runner is blocked the
+        # whole time this is set, so the board is not being mutated.
+        self.human_board = None
+        self.human_player = None
+        self.human_selected = None
+
     # ── Runner callbacks (worker thread!) ─────────────────
+
+    def _cb_human_turn(self, game, board, player):
+        with self.lock:
+            self.human_board = board
+            self.human_player = player
+            self.human_selected = None
+            self.board_dirty = True
+            if player is not None:
+                self.status_msg = f"Your move — {player.name}"
+
+    # ── Human input (UI thread) ───────────────────────────
+
+    def human_click(self, r, c):
+        """
+        Handle a click on the tournament board.
+
+        First click picks up one of your own pieces, second click plays a
+        legal destination. Clicking elsewhere puts the piece down again.
+        Returns True if the board needs redrawing.
+        """
+        with self.lock:
+            board, player = self.human_board, self.human_player
+            selected = self.human_selected
+        if board is None or player is None:
+            return False
+
+        moves = board.legal_moves()
+        if selected is not None:
+            for fr, fc, tr, tc, promo in moves:
+                if (fr, fc) == selected and (tr, tc) == (r, c):
+                    uci = (f"{chr(ord('a') + fc)}{8 - fr}"
+                           f"{chr(ord('a') + tc)}{8 - tr}")
+                    # Always queen: a tournament has nobody to ask, and
+                    # anything else is a deliberate underpromotion
+                    if promo:
+                        uci += "q"
+                    with self.lock:
+                        self.human_selected = None
+                    if self.runner:
+                        self.runner.submit_human_move(uci)
+                    return True
+
+        piece = board.get(r, c)
+        mine = piece and piece != "." and (
+            piece.isupper() == (board.turn == "w"))
+        with self.lock:
+            self.human_selected = (r, c) if mine else None
+        return True
+
+    def human_dests(self):
+        """Squares the picked-up piece may legally reach."""
+        with self.lock:
+            board, selected = self.human_board, self.human_selected
+        if board is None or selected is None:
+            return set()
+        return {(tr, tc) for fr, fc, tr, tc, _ in board.legal_moves()
+                if (fr, fc) == selected}
 
     def _cb_game_start(self, game):
         with self.lock:
@@ -253,6 +317,7 @@ class TournamentSession:
                 on_round_end=self._cb_round_end,
                 on_tournament_end=self._cb_tournament_end,
                 on_status=self._cb_status,
+                on_human_turn=self._cb_human_turn,
             )
             self.runner.start()
         elif self.state == "paused":
@@ -740,6 +805,25 @@ def show_tournament_setup(session):
                 teams_ui.refresh()
                 _sync_counts()
 
+            def team_add_human(team):
+                if tc_sel.value != "classic":
+                    ui.notify("A human seat needs Classic — the other "
+                              "presets run a clock you would be playing "
+                              "against.", type="warning")
+                    return
+                if any(m.get("human") for x in teams for m in x["members"]):
+                    ui.notify("You are already in a team.", type="warning")
+                    return
+                name = (session.player_name or "Player").strip() or "Player"
+                if any(m["name"] == name for x in teams for m in x["members"]):
+                    ui.notify(f"{name} clashes with an engine name — change "
+                              f"your name in the main window.", type="warning")
+                    return
+                team["members"].append({"name": name, "path": "",
+                                        "human": True})
+                teams_ui.refresh()
+                _sync_counts()
+
             @ui.refreshable
             def teams_ui():
                 if not teams:
@@ -780,6 +864,12 @@ def show_tournament_setup(session):
                                     team_add(t, p)
                             ui.button("…", on_click=browse_team) \
                                 .props("dense").tooltip("Browse for an engine")
+                            ui.button("+ Me", on_click=lambda t=team:
+                                      team_add_human(t)) \
+                                .props("dense flat no-caps") \
+                                .tooltip("Take a seat in this team yourself. "
+                                         "Classic only — a human needs no "
+                                         "clock running.")
                             ui.button("✕", on_click=lambda i=ti: (
                                 teams.pop(i), teams_ui.refresh(),
                                 _sync_counts())) \
@@ -790,14 +880,22 @@ def show_tournament_setup(session):
                         for mi, m in enumerate(team["members"]):
                             with ui.row().classes("w-full items-center gap-2 "
                                                   "no-wrap pl-2"):
-                                ui.element("img") \
+                                human = m.get("human")
+                                widgets.icon("ic_user", 13) if human else \
+                                    ui.element("img") \
                                     .props('src="/assets/ui/st_engine.png"') \
                                     .style("height: 13px; width: auto;")
                                 ui.label(m["name"]).classes("text-sm w-44")
-                                rank_txt, rank_col = session.rank_line(m["name"])
-                                ui.label(rank_txt) \
-                                    .classes("text-xs no-wrap flex-grow") \
-                                    .style(f"color: {rank_col}")
+                                if human:
+                                    ui.label("you — Classic only") \
+                                        .classes("text-xs no-wrap flex-grow") \
+                                        .style(f"color: {COLOR_GREEN}")
+                                else:
+                                    rank_txt, rank_col = session.rank_line(
+                                        m["name"])
+                                    ui.label(rank_txt) \
+                                        .classes("text-xs no-wrap flex-grow") \
+                                        .style(f"color: {rank_col}")
                                 ui.button("✕", on_click=lambda t=team, i=mi: (
                                     t["members"].pop(i), teams_ui.refresh(),
                                     _sync_counts())) \
@@ -862,9 +960,16 @@ def show_tournament_setup(session):
                 if len(set(team_names)) != len(team_names) or "" in team_names:
                     ui.notify("Each team needs its own name.", type="warning")
                     return
+                if (tc_sel.value != "classic"
+                        and any(m.get("human") for x in teams
+                                for m in x["members"])):
+                    ui.notify("A human seat needs Classic. Change the time "
+                              "control or drop the seat.", type="warning")
+                    return
                 squads = [
                     TournamentTeam(x["name"], [
-                        TournamentPlayer(m["name"], m["path"])
+                        TournamentPlayer(m["name"], m["path"],
+                                         is_human=bool(m.get("human")))
                         for m in x["members"]])
                     for x in teams]
                 players = []
@@ -979,13 +1084,25 @@ def show_tournament_window(session, tsess: TournamentSession):
                             "items-center gap-0 py-1 self-stretch"):
                         eval_bar = EvalBar()
                     with ui.element("div").classes("flex-grow min-w-0"):
-                        board_view = BoardView(lambda: {
-                            "board": tsess.board,
-                            "last_move": tsess.last_move,
-                            "selected": None,
-                            "legal_dests": set(),
-                            "check_sq": None,
-                        })
+                        async def _human_click(br, bc):
+                            if tsess.human_click(br, bc):
+                                board_view.refresh()
+
+                        def _board_state():
+                            # While it is a human's turn the runner is
+                            # blocked, so the live board is safe to read
+                            # and is the only one that knows legality
+                            live = tsess.human_board
+                            return {
+                                "board": live or tsess.board,
+                                "last_move": tsess.last_move,
+                                "selected": tsess.human_selected,
+                                "legal_dests": tsess.human_dests(),
+                                "check_sq": None,
+                            }
+
+                        board_view = BoardView(_board_state,
+                                               on_click=_human_click)
 
                 white_banner, white_name_lbl, white_rank_lbl, \
                     white_clock_lbl, white_h2h_lbl = widgets.banner(COLOR_GOLD)
