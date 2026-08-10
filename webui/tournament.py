@@ -323,49 +323,79 @@ class TournamentSession:
 _POINTS = {"1-0": (1.0, 0.0), "0-1": (0.0, 1.0), "1/2-1/2": (0.5, 0.5)}
 
 
+def _restate(game, old, new):
+    """
+    Move both players' tallies from result *old* to result *new*.
+
+    Either may be None: no points before (a game that never counted) or
+    none after (one that has been taken away). Anything outside _POINTS —
+    an aborted '*', a game still running — scored nothing to begin with.
+    """
+    before = _POINTS.get(old or "")
+    after = _POINTS.get(new or "")
+    if before is None and after is None:
+        return
+    for player, i in ((game.white, 0), (game.black, 1)):
+        for points, step in ((before[i] if before else None, -1),
+                             (after[i] if after else None, +1)):
+            if points is None:
+                continue
+            player.score = round(player.score + step * points, 1)
+            if points == 1.0:
+                player.wins = max(0, player.wins + step)
+            elif points == 0.5:
+                player.draws = max(0, player.draws + step)
+            else:
+                player.losses = max(0, player.losses + step)
+
+
 def _reconcile_with_db(t, db):
     """
     Make the games table the last word on results the snapshot carries.
 
     A snapshot is the in-memory state of a running tournament, so editing
-    a game in the database — correcting a result, deleting a game — never
-    reached it, and the schedule went on showing the old outcome after a
-    restore. Completed games belong to the database; pairings, byes and
-    whose turn it is belong to the snapshot.
+    a game in the database — correcting a result, deleting one from Game
+    History — never reached it, and the schedule went on showing what was
+    there before. Completed games belong to the database; pairings, byes
+    and whose turn it is belong to the snapshot.
 
-    Returns the number of games brought back into line.
+    A game whose row has gone was deleted on purpose, so it leaves the
+    tournament too and gives back whatever it scored. The pairing stays in
+    played_pairs: those two did meet, and forgetting that would put them
+    back in the pool to be drawn against each other again.
+
+    Only games that reached the database are considered. One that was
+    never saved — no PGN, so nothing to save — has no id and is left
+    alone; absence of an id is not evidence of deletion.
+
+    Returns (corrected, removed).
     """
     played = {g.db_game_id: g for g in t.all_games
               if getattr(g, "db_game_id", None) is not None}
     if not played:
-        return 0
+        return 0, 0
     try:
         rows = db.results_for_games(list(played))
     except Exception as e:
         print(f"[tournament] could not reconcile with the database: {e}")
-        return 0
+        return 0, 0
 
-    fixed = 0
+    fixed = removed = 0
     for gid, game in played.items():
         truth = rows.get(gid)
-        if truth is None or truth[0] == game.result:
+        if truth is None:
+            _restate(game, game.result, None)
+            t.all_games.remove(game)
+            if game in t.round_games:
+                t.round_games.remove(game)
+            removed += 1
             continue
-        old, new = game.result, truth[0]
-        if old not in _POINTS or new not in _POINTS:
+        if truth[0] == game.result:
             continue
-        for player, o, n in ((game.white, _POINTS[old][0], _POINTS[new][0]),
-                             (game.black, _POINTS[old][1], _POINTS[new][1])):
-            player.score = round(player.score - o + n, 1)
-            for pts, step in ((o, -1), (n, 1)):
-                if pts == 1.0:
-                    player.wins = max(0, player.wins + step)
-                elif pts == 0.5:
-                    player.draws = max(0, player.draws + step)
-                else:
-                    player.losses = max(0, player.losses + step)
-        game.result, game.reason = new, truth[1]
+        _restate(game, game.result, truth[0])
+        game.result, game.reason = truth[0], truth[1]
         fixed += 1
-    return fixed
+    return fixed, removed
 
 
 def restore_tournaments(session):
@@ -394,11 +424,11 @@ def restore_tournaments(session):
         except Exception as e:
             print(f"[tournament] could not restore {tid}: {e}")
             continue
-        fixed = _reconcile_with_db(t, session.db)
+        fixed, removed = _reconcile_with_db(t, session.db)
         tsess = TournamentSession(t, session.db)
-        if fixed:
-            print(f"[tournament] {t.name}: {fixed} result(s) refreshed "
-                  f"from the database")
+        if fixed or removed:
+            print(f"[tournament] {t.name}: {fixed} result(s) refreshed, "
+                  f"{removed} deleted game(s) dropped")
             tsess.snapshot()
         tsess.state = "paused" if t.started else "ready"
         tsess.status_msg = ("Resumed — press Start to continue"
