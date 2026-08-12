@@ -268,7 +268,10 @@ def show_game_over(session, result, reason, winner_name,
 
         if winner_name:
             clean = normalize_engine_name(winner_name)
-            ratings, _, _ = session.elo_data()
+            # The control this game was played at, not the live selection:
+            # the game is over, so game_running no longer holds it open
+            tc = getattr(session, "_game_tc_label", "") or None
+            ratings, _, _ = session.elo_data(tc)
             elo = ratings.get(clean)
             ui.label(clean).classes("text-xl font-bold")
             if elo:

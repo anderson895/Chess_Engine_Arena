@@ -126,7 +126,8 @@ def get_tier(rating):
         for threshold, label, color in RANK_TIERS:
             if rating >= threshold:
                 return label, color
-    return "Novice", "#90EE90"
+    # No rating is not the bottom tier: it means too few games to say
+    return "Provisional", "#777"
 
 
 def classify_move_quality(cp_before, cp_after, is_white_moving):

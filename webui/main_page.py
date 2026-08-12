@@ -570,9 +570,9 @@ def main_page():
                     on_change=lambda e: setattr(
                         session, "time_control", e.value)) \
                     .props("dense options-dense").classes("w-full") \
-                    .tooltip("Bullet/Blitz/Rapid: engines manage their own "
-                             "clock and lose on time. Classic: no clock — "
-                             "fixed think time per move")
+                    .tooltip("Bullet/Blitz: engines manage their own clock "
+                             "and lose on time. Classic: no clock — fixed "
+                             "think time per move. Each is rated separately.")
                 ui.number(label="Move delay (s)", value=session.delay_s,
                           min=0.0, max=10.0, step=0.1,
                           on_change=lambda e: setattr(

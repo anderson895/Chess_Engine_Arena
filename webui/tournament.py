@@ -750,9 +750,9 @@ def show_tournament_setup(session):
                                value=draft["time_control"],
                                label="Time control") \
                 .props("dense options-dense").classes("w-36") \
-                .tooltip("Bullet/Blitz/Rapid: engines manage their own "
-                         "clock and lose on time. Classic: fixed think "
-                         "time per move")
+                .tooltip("Bullet/Blitz: engines manage their own clock and "
+                         "lose on time. Classic: fixed think time per move. "
+                         "Each is rated separately.")
             # Default to the regular game's pace so a Classic tournament
             # plays at the same speed a Classic single game does
             movetime_in = ui.number(
@@ -769,10 +769,14 @@ def show_tournament_setup(session):
                 on_change=lambda e: draft.__setitem__("delay", e.value)) \
                 .props("dense").classes("w-32")
 
-        # Move time only applies to the clockless Classic preset
+        # Move time only applies to the clockless Classic preset. The rank
+        # lines beside each engine are rated per control, so the lists are
+        # rebuilt too — otherwise picking Bullet would leave Classic
+        # ratings on screen to choose a squad by.
         tc_sel.on_value_change(lambda e: (
             draft.__setitem__("time_control", e.value),
-            movetime_in.set_visibility(e.value == "classic")))
+            movetime_in.set_visibility(e.value == "classic"),
+            roster_ui.refresh(), teams_ui.refresh()))
 
         ui.separator()
         solo_area = ui.column().classes("w-full gap-1")
@@ -853,7 +857,8 @@ def show_tournament_setup(session):
                             .props("dense borderless").classes("w-40 text-sm")
                         ui.label(os.path.basename(r["path"])) \
                             .classes("text-xs text-gray-500 flex-grow")
-                        rank_txt, rank_col = session.rank_line(r["name"])
+                        rank_txt, rank_col = session.rank_line(
+                            r["name"], draft["time_control"])
                         ui.label(rank_txt).classes("text-xs no-wrap") \
                             .style(f"color: {rank_col}")
                         ui.button("✕", on_click=lambda i=i: (
@@ -993,7 +998,8 @@ def show_tournament_setup(session):
                                         # A relayed engine has a real
                                         # record, so look the name up the
                                         # same way the engine rows do
-                                        txt, col = session.rank_line(m["name"])
+                                        txt, col = session.rank_line(
+                                            m["name"], draft["time_control"])
                                         lbl.set_text(f"{txt}  ·  by hand")
                                         lbl.style(f"color: {col}")
 
@@ -1011,7 +1017,7 @@ def show_tournament_setup(session):
                                 else:
                                     ui.label(m["name"]).classes("text-sm w-44")
                                     rank_txt, rank_col = session.rank_line(
-                                        m["name"])
+                                        m["name"], draft["time_control"])
                                     ui.label(rank_txt) \
                                         .classes("text-xs no-wrap flex-grow") \
                                         .style(f"color: {rank_col}")
@@ -1482,7 +1488,8 @@ def show_tournament_window(session, tsess: TournamentSession):
             white_name_lbl.set_text(white or "—")
             black_name_lbl.set_text(black or "—")
             for raw, lbl in ((white, white_rank_lbl), (black, black_rank_lbl)):
-                text, color = session.rank_line(raw) if raw else ("", "#555")
+                text, color = (session.rank_line(raw, t.time_control)
+                               if raw else ("", "#555"))
                 lbl.set_text(text)
                 lbl.style(f"color: {color}")
             # Head-to-head of the pairing; rescan only on new game/results
@@ -1657,7 +1664,7 @@ def _show_player_card(session, t, name):
         })
     rows.sort(key=lambda r: r["round"])
 
-    rank_txt, rank_col = session.rank_line(name)
+    rank_txt, rank_col = session.rank_line(name, t.time_control)
     with ui.dialog() as dlg, ui.card().classes(
             "arena-panel w-[860px] max-w-full gap-2 p-5"):
         with ui.row().classes("w-full items-center gap-3 no-wrap"):
@@ -1800,8 +1807,8 @@ def _fill_standings(table, t, session=None, query=""):
     editable = not t.started
     rows = []
     for i, p in enumerate(t.get_standings(), 1):
-        elo_txt, elo_col = (session.rank_line(p.name) if session
-                            else ("", COLOR_MUTED))
+        elo_txt, elo_col = (session.rank_line(p.name, t.time_control)
+                            if session else ("", COLOR_MUTED))
         rows.append({
             "rank": i, "player": p.name, "score": p.score,
             "elo": elo_txt, "elo_color": elo_col,

@@ -9,6 +9,7 @@
 import asyncio
 import os
 import time
+from collections import namedtuple
 from datetime import datetime
 
 from nicegui import run
@@ -16,7 +17,9 @@ from nicegui import run
 from core.board import Board
 from core.engine import UCIEngine, AnalyzerEngine
 from core.opening_book import OpeningBook
-from core.elo import compute_elo_ratings
+from core.elo import (
+    compute_elo_by_tc, tally_by_tc, tc_bucket, MIN_RATED_GAMES,
+)
 from core.utils import (
     normalize_engine_name, get_tier, classify_move_quality, build_pgn,
 )
@@ -25,6 +28,19 @@ from data.database import Database
 
 # Re-exported for the UI modules that import it from here
 from core.constants import TIME_CONTROLS  # noqa: E402
+
+
+# Everything the UI needs about one time control's ratings.
+#   ratings  — {engine: elo} for engines with enough games to quote
+#   rank_map — {engine: rank} over those, so #n/total means something
+#   total    — how many are in that ranking
+#   tally    — {engine: {games, wins, draws, losses}} for everyone
+#   fitted   — {engine: (elo, margin)} for everyone, provisional included
+EloBucket = namedtuple("EloBucket",
+                       "ratings rank_map total tally fitted")
+
+# A control nothing has been played at, so callers unpack the same shape
+EMPTY_BUCKET = EloBucket({}, {}, 0, {}, {})
 
 
 async def parse_opening_book(path):
@@ -109,10 +125,13 @@ class GameSession:
         self.player_color = "white"
         self.movetime_ms  = 1000   # analyzer/tournament fallback only
         self.delay_s      = 0.5
-        # Selected TIME_CONTROLS preset; base/inc are derived at start_game
-        self.time_control = "blitz"
-        self.base_min     = TIME_CONTROLS["blitz"][1]
-        self.inc_s        = TIME_CONTROLS["blitz"][2]
+        # Selected TIME_CONTROLS preset; base/inc are derived at start_game.
+        # Classic by default because it is where the games are: ratings are
+        # kept per control now, and opening on one with a handful of games
+        # would show a field of Unranked engines that have played hundreds.
+        self.time_control = "classic"
+        self.base_min     = TIME_CONTROLS["classic"][1]
+        self.inc_s        = TIME_CONTROLS["classic"][2]
         self.sound_muted  = False
 
         # Preset opening
@@ -131,9 +150,11 @@ class GameSession:
         self._game_task: asyncio.Task | None = None
         self._start_time = 0.0
 
-        # Clock state
-        self.wtime_ms = self.base_min * 60000
-        self.btime_ms = self.base_min * 60000
+        # Clock state. base_min is None for Classic, which is clockless —
+        # the same "or 0" start_game uses, and required now that Classic
+        # is the default preset.
+        self.wtime_ms = (self.base_min or 0) * 60000
+        self.btime_ms = (self.base_min or 0) * 60000
         self._think_start = None   # time.time() when current search began
 
         # Analysis state
@@ -253,25 +274,101 @@ class GameSession:
     #  Elo / ranking data (cached)
     # ═══════════════════════════════════════════════════════
 
-    def elo_data(self):
-        """Return cached (ratings, rank_map, total); recompute after saves."""
+    def rating_tc(self):
+        """
+        The rating bucket the banners should read from.
+
+        While a game runs this answers from the control it started under
+        rather than the live selection: the Time control dropdown stays
+        editable during a game, and a banner that switched buckets
+        mid-game would start describing a different set of results.
+        """
+        if self.game_running:
+            label = getattr(self, "_game_tc_label", "")
+            if label:
+                return tc_bucket(label)
+        return tc_bucket(self.time_control)
+
+    def elo_by_tc(self):
+        """
+        {bucket: EloBucket}, all of them built on one pass over the DB.
+
+        Every bucket is computed together because they come from the same
+        read; keeping the other two costs a dictionary and saves reading
+        the games table again the moment the time control changes.
+
+        An engine under MIN_RATED_GAMES still has a rating in *fitted* —
+        the solver has no reason to skip it — but is left out of
+        *ratings*, so it takes no rank and does not inflate the total a
+        rank is quoted against. Being 40th of 110 rated engines means
+        something; 40th of 147 where a third have played twice does not.
+        """
         if self._elo_cache is None:
-            games = self.db.get_all_games_for_elo()
-            ratings = compute_elo_ratings(games)
-            ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
-            rank_map = {name: i + 1 for i, (name, _) in enumerate(ordered)}
-            self._elo_cache = (ratings, rank_map, len(ordered))
+            rows = self.db.get_all_games_for_elo_tc()
+            tallies = tally_by_tc(rows)
+            cache = {}
+            for key, fitted in compute_elo_by_tc(rows).items():
+                tally = tallies.get(key, {})
+                rated = {
+                    n: elo for n, (elo, _) in fitted.items()
+                    if tally.get(n, {}).get("games", 0) >= MIN_RATED_GAMES}
+                ordered = sorted(rated.items(), key=lambda x: -x[1])
+                rank_map = {n: i + 1 for i, (n, _) in enumerate(ordered)}
+                cache[key] = EloBucket(rated, rank_map, len(ordered),
+                                       tally, fitted)
+            self._elo_cache = cache
         return self._elo_cache
 
-    def rank_line(self, raw_name):
-        """'#3/12  🏆 GM  •  2410 Elo' text + color for a player banner."""
-        ratings, rank_map, total = self.elo_data()
+    def bucket_data(self, tc=None):
+        """The EloBucket for one control; the one being played by default."""
+        bucket = tc_bucket(tc) if tc else self.rating_tc()
+        return self.elo_by_tc().get(bucket, EMPTY_BUCKET)
+
+    def elo_data(self, tc=None):
+        """(ratings, rank_map, total) for a bucket, the played one default."""
+        b = self.bucket_data(tc)
+        return b.ratings, b.rank_map, b.total
+
+    def engine_tally(self, raw_name, tc=None):
+        """{games, wins, draws, losses} for an engine in one bucket."""
+        return self.bucket_data(tc).tally.get(
+            normalize_engine_name(raw_name),
+            {"games": 0, "wins": 0, "draws": 0, "losses": 0})
+
+    def elo_estimate(self, raw_name, tc=None):
+        """
+        (elo, margin, is_provisional) for an engine, or None if never played.
+
+        A provisional engine has a rating like any other — it comes out of
+        the same fit, off the same games, and it already carries how much
+        the beaten opponents were worth. What it does not have is enough
+        of them for the number to be worth quoting flatly, and the margin
+        says by how much. Showing it marked beats showing nothing: an
+        engine that has just beaten three strong opponents is not a blank.
+        """
+        b = self.bucket_data(tc)
         key = normalize_engine_name(raw_name)
-        elo = ratings.get(key)
-        if elo is None:
+        fitted = b.fitted.get(key)
+        if fitted is None:
+            return None
+        elo, margin = fitted
+        return elo, margin, key not in b.ratings
+
+    def rank_line(self, raw_name, tc=None):
+        """'#3/110  Club  •  2410 ±74' text + colour for a player banner."""
+        b = self.bucket_data(tc)
+        key = normalize_engine_name(raw_name)
+        est = self.elo_estimate(raw_name, tc)
+        if est is None:
             return "Unranked", "#555"
+        elo, margin, provisional = est
+        if provisional:
+            played = self.engine_tally(raw_name, tc)["games"]
+            return (f"Provisional {played}/{MIN_RATED_GAMES}  •  "
+                    f"{elo}? ±{margin}"), "#777"
         tier_lbl, tier_col = get_tier(elo)
-        return f"#{rank_map.get(key, '?')}/{total}  {tier_lbl}  •  {elo} Elo", tier_col
+        return (f"#{b.rank_map.get(key, '?')}/{b.total}  {tier_lbl}  •  "
+                f"{elo} ±{margin}"), tier_col
 
     def invalidate_stats_caches(self):
         """Force Elo and head-to-head recomputation after new games land."""

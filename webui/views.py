@@ -9,25 +9,43 @@ import re
 from nicegui import ui, run
 
 from core.board import Board
-from core.constants import RANK_TIERS, QUALITY_COLORS
-from core.elo import compute_elo_history, compute_elo_ratings
+from core.constants import RANK_TIERS, QUALITY_COLORS, TIME_CONTROLS
+from core.scale import SCALE_NOTE
+from core.elo import fit_elo_history, tc_bucket, MIN_RATED_GAMES
 from core.utils import normalize_engine_name, get_tier, classify_move_quality
 from webui import widgets
+from webui.session import EMPTY_BUCKET
 from webui.board import BoardView, EvalBar
 from webui.theme import COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_RED
 
 _TIER_CELL_SLOT = """
 <q-td :props="props">
   <span :style="{color: props.row.tier_col}">{{ props.row.tier }}</span>
+  <span v-if="props.row.rank === 0" class="text-grey-7 q-ml-xs">
+    {{ props.row.matches }}/{{ props.row.needed }}
+  </span>
+</q-td>
+"""
+
+# A provisional rating is shown, not hidden — with the "?" every rating
+# site marks an unsettled one with, so it is never mistaken for settled.
+_ELO_CELL_SLOT = """
+<q-td :props="props" class="text-center">
+  <span v-if="props.row.elo > 0">
+    {{ props.row.elo }}<span v-if="props.row.rank === 0"
+                             class="text-grey-7">?</span>
+  </span>
+  <span v-else>—</span>
 </q-td>
 """
 
 _RANK_CELL_SLOT = """
 <q-td :props="props" class="text-center">
-  <img v-if="props.row.rank <= 3"
+  <img v-if="props.row.rank >= 1 && props.row.rank <= 3"
        :src="'/assets/ui/medal_' + props.row.rank + '.png'"
        style="height: 26px; width: auto; vertical-align: middle;" />
-  <span v-else>#{{ props.row.rank }}</span>
+  <span v-else-if="props.row.rank">#{{ props.row.rank }}</span>
+  <span v-else>—</span>
 </q-td>
 """
 
@@ -40,23 +58,34 @@ def show_rankings(session):
     with ui.dialog().props("maximized") as dialog, ui.card().classes(
             "arena-panel w-full h-full flex flex-col"):
         widgets.heading("ic_trophy", "RANKINGS & STATISTICS")
-        ui.label("Elo ratings and W/D/L from all recorded games — "
-                 "Bullet/Blitz/Rapid/Classic columns show each engine's "
-                 "Elo rating per time control") \
+        ui.label("Each time control is rated on its own games — an engine "
+                 "that budgets a clock well is not the same engine as one "
+                 "given a fixed think time, so the two are never pooled.") \
             .classes("text-xs text-gray-500")
+        ui.label(SCALE_NOTE + "  ± is a 95% interval: two engines whose "
+                 "ranges overlap have not been told apart yet.") \
+            .classes("text-xs text-gray-600")
 
         with ui.row().classes("gap-2 flex-wrap"):
             for threshold, label, color in RANK_TIERS:
                 txt = f"{label} ≥{threshold}" if threshold > 0 else label
                 ui.label(txt).classes("text-xs").style(f"color: {color}")
 
-        search = widgets.search_input("Filter engines, tiers or openings…") \
-            .classes("w-full")
+        with ui.row().classes("w-full items-center gap-3 no-wrap"):
+            tc_toggle = ui.toggle(
+                {k: v[0].split(" ")[0] for k, v in TIME_CONTROLS.items()},
+                value=session.rating_tc()).props("dense no-caps")
+            count_lbl = ui.label("").classes("text-xs text-gray-500")
+            search = widgets.search_input(
+                "Filter engines, tiers or openings…").classes("flex-grow")
 
         columns = [
             {"name": "rank",    "label": "#",     "field": "rank",  "align": "center", "sortable": True},
             {"name": "engine",  "label": "Engine", "field": "engine", "align": "left",  "sortable": True},
-            {"name": "elo",     "label": "Elo",   "field": "elo",   "align": "center", "sortable": True},
+            {"name": "elo",     "label": "Elo",   "field": "elo",   "align": "center",
+             "sortable": True, ":format": "val => val > 0 ? val : '—'"},
+            {"name": "margin",  "label": "±",     "field": "margin", "align": "center",
+             "sortable": True, ":format": "val => val > 0 ? '±' + val : '—'"},
             {"name": "tier",    "label": "Tier",  "field": "tier",  "align": "left"},
             {"name": "matches", "label": "Games", "field": "matches", "align": "center", "sortable": True},
             {"name": "wins",    "label": "W",     "field": "wins",  "align": "center"},
@@ -66,8 +95,6 @@ def show_rankings(session):
             {"name": "bullet",  "label": "Bullet", "field": "bullet", "align": "center",
              "sortable": True, ":format": "val => val > 0 ? val : '—'"},
             {"name": "blitz",   "label": "Blitz",  "field": "blitz",  "align": "center",
-             "sortable": True, ":format": "val => val > 0 ? val : '—'"},
-            {"name": "rapid",   "label": "Rapid",  "field": "rapid",  "align": "center",
              "sortable": True, ":format": "val => val > 0 ? val : '—'"},
             {"name": "classic", "label": "Classic", "field": "classic", "align": "center",
              "sortable": True, ":format": "val => val > 0 ? val : '—'"},
@@ -81,6 +108,7 @@ def show_rankings(session):
             .classes("w-full flex-grow arena-log dlg-table")
         table.add_slot("body-cell-tier", _TIER_CELL_SLOT)
         table.add_slot("body-cell-rank", _RANK_CELL_SLOT)
+        table.add_slot("body-cell-elo", _ELO_CELL_SLOT)
         table.add_slot("body-cell-actions", """
 <q-td :props="props" class="text-center">
   <q-btn dense flat size="sm" icon="history" color="secondary"
@@ -99,41 +127,56 @@ def show_rankings(session):
 """)
 
         def refresh():
-            ratings, _, _ = session.elo_data()
-            stats_map = {s["engine"]: s for s in session.db.get_engine_stats()}
+            bucket = tc_toggle.value or "classic"
+            by_tc = session.elo_by_tc()
+            b = by_tc.get(bucket, EMPTY_BUCKET)
             top_map = session.db.get_top_openings()
-            # Per-time-control Elo: bucket games by TC prefix and run an
-            # independent Elo computation over each bucket.
-            tc_games = {}
-            for white, black, result, tc in session.db.get_all_games_for_elo_tc():
-                key = (tc or "Classic").split(" ")[0].split("(")[0].lower()
-                tc_games.setdefault(key, []).append((white, black, result))
-            tc_ratings = {key: compute_elo_ratings(games)
-                          for key, games in tc_games.items()}
 
             def tc_rating(engine, key):
                 """Numeric Elo for sorting; 0 renders as '—' via :format."""
-                return tc_ratings.get(key, {}).get(engine) or 0
+                other = by_tc.get(key, EMPTY_BUCKET)
+                fitted = other.fitted.get(engine)
+                return fitted[0] if fitted else 0
 
+            # Everyone who has played at this control, rated or not. A
+            # provisional engine keeps its number rather than being blanked
+            # — it is a real estimate off real opponents, and the margin
+            # beside it says how much to lean on it. It gets no rank, which
+            # is the part the games do not yet support.
             rows = []
-            ordered = sorted(ratings.items(), key=lambda x: x[1], reverse=True)
-            for i, (engine, elo) in enumerate(ordered, 1):
-                s = stats_map.get(engine, {})
-                tier_lbl, tier_col = get_tier(elo)
+            for engine, rec in b.tally.items():
+                elo = b.ratings.get(engine)
+                fitted = b.fitted.get(engine, (0, 0))
+                if elo is None:
+                    tier_lbl, tier_col, rank = "Provisional", "#777", 0
+                else:
+                    tier_lbl, tier_col = get_tier(elo)
+                    rank = b.rank_map.get(engine, 0)
+                games = rec["games"]
                 top = top_map.get(engine)
+                wr = 100.0 * rec["wins"] / games if games else 0.0
                 rows.append({
-                    "rank": i, "engine": engine, "elo": elo,
+                    "rank": rank, "engine": engine, "elo": fitted[0],
+                    "margin": fitted[1],
                     "tier": tier_lbl, "tier_col": tier_col,
-                    "matches": s.get("matches", 0), "wins": s.get("wins", 0),
-                    "draws": s.get("draws", 0), "loses": s.get("loses", 0),
-                    "wr": f"{s.get('win_rate', 0.0):.1f}",
+                    "matches": games, "needed": MIN_RATED_GAMES,
+                    "wins": rec["wins"],
+                    "draws": rec["draws"], "loses": rec["losses"],
+                    "wr": f"{wr:.1f}",
                     "bullet":  tc_rating(engine, "bullet"),
                     "blitz":   tc_rating(engine, "blitz"),
-                    "rapid":   tc_rating(engine, "rapid"),
                     "classic": tc_rating(engine, "classic"),
                     "top_opening": (f"{top['opening']} ({top['games']}×)"
                                     if top else "—"),
                 })
+            # Rated first by rating, then the provisional by how close they
+            # are to being rated — that ordering is the queue they leave in.
+            rows.sort(key=lambda r: (r["rank"] == 0,
+                                     r["rank"] or -r["matches"]))
+            provisional = sum(1 for r in rows if r["rank"] == 0)
+            count_lbl.set_text(
+                f"{b.total} rated · {provisional} provisional "
+                f"(under {MIN_RATED_GAMES} games)")
             q = (search.value or "").lower()
             if q:
                 rows = [r for r in rows
@@ -143,10 +186,12 @@ def show_rankings(session):
             table.update()
 
         search.on_value_change(lambda e: refresh())
+        tc_toggle.on_value_change(lambda e: refresh())
         table.on("rowDblclick",
                  lambda e: widgets.with_loader(
-                     lambda: show_elo_history(session, e.args[1]["engine"]),
-                     "Loading Elo history…"))
+                     lambda: show_elo_history(session, e.args[1]["engine"],
+                                              tc_toggle.value),
+                     "Refitting Elo history…"))
         table.on("games",
                  lambda e: widgets.with_loader(
                      lambda: show_game_history(
@@ -154,8 +199,9 @@ def show_rankings(session):
                      "Loading game history…"))
         table.on("elo",
                  lambda e: widgets.with_loader(
-                     lambda: show_elo_history(session, e.args["engine"]),
-                     "Loading Elo history…"))
+                     lambda: show_elo_history(session, e.args["engine"],
+                                              tc_toggle.value),
+                     "Refitting Elo history…"))
 
         def on_rename(e):
             engine = e.args["engine"]
@@ -211,24 +257,40 @@ def show_rankings(session):
 #  Elo history chart
 # ═══════════════════════════════════════════════════════════
 
-def show_elo_history(session, engine_name):
-    games = session.db.get_all_games_for_elo()
-    history = compute_elo_history(games, engine_name)
+def show_elo_history(session, engine_name, tc=None):
+    bucket = tc_bucket(tc) if tc else session.rating_tc()
+    games = [(w, b, r)
+             for w, b, r, g_tc in session.db.get_all_games_for_elo_tc()
+             if tc_bucket(g_tc) == bucket]
+    history = fit_elo_history(games, engine_name)
     if not history:
-        ui.notify(f"No games found for {engine_name}", type="info")
+        ui.notify(f"{engine_name} has no games at "
+                  f"{TIME_CONTROLS.get(bucket, (bucket,))[0]}", type="info")
         return
 
     elos = [e for _, e in history]
     final_elo = elos[-1]
     tier_lbl, tier_col = get_tier(final_elo)
+    played = session.engine_tally(engine_name, bucket)["games"]
+    label = TIME_CONTROLS.get(bucket, (bucket,))[0]
 
     with ui.dialog() as dialog, ui.card().classes(
             "arena-panel w-[780px] max-w-full"):
         widgets.heading("ic_chart",
                         f"Elo History — {normalize_engine_name(engine_name)}",
                         text_cls="text-lg font-bold text-primary")
-        ui.label(f"Current: {final_elo}  ·  {tier_lbl}") \
-            .classes("font-bold").style(f"color: {tier_col}")
+        if played < MIN_RATED_GAMES:
+            # The rankings withhold this engine's number; saying "Current"
+            # here would hand it back with more confidence than it has
+            ui.label(f"Provisional  ·  {played} of {MIN_RATED_GAMES} games "
+                     f"·  {label}").classes("font-bold").style("color: #777")
+        else:
+            ui.label(f"Current: {final_elo}  ·  {tier_lbl}  ·  {label}") \
+                .classes("font-bold").style(f"color: {tier_col}")
+        ui.label("Each point is the rating the results up to that game "
+                 "imply, refitted — so the last point is the rating on "
+                 "the rankings, not a running tally that drifted there.") \
+            .classes("text-xs text-gray-500")
 
         ui.echart({
             "backgroundColor": "transparent",

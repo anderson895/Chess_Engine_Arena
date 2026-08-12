@@ -15,10 +15,13 @@ PIECE_VALUES = {'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9, 'k': 0}
 # "go wtime/btime winc/binc" so engines manage their own time and lose
 # on time when the clock runs out. "Classic" has no clock (base is
 # None): engines get a fixed think time per move and never lose on time.
+# Rapid (10+5) was dropped: two engines with ten minutes each turn one
+# game into most of an hour and a tournament into a week. The handful
+# already played at it stay in the history and keep their own rating
+# bucket; there is just no way to start another.
 TIME_CONTROLS = {
     "bullet":  ("Bullet (1+0)",  1.0, 0.0),
     "blitz":   ("Blitz (3+2)",   3.0, 2.0),
-    "rapid":   ("Rapid (10+5)", 10.0, 5.0),
     "classic": ("Classic",       None, None),
 }
 
@@ -53,15 +56,22 @@ QUALITY_COLORS = {
 }
 
 # ── Rank tiers ────────────────────────────────────────────
+# Bands of engine strength, not borrowed human titles. Every engine here
+# is far beyond any human, so "GM" said nothing about one and "Super
+# Computer" said it of all of them. The thresholds are set against what
+# this collection actually spans (see core/scale.py) rather than a scale
+# from elsewhere — the old ladder topped out at 2900 and started its
+# tiers at 1400, which on a pool averaging 1500 left its four highest
+# unreachable and put every engine in the same two bands.
 RANK_TIERS = [
-    (2900, "Super Computer", "#FF0000"),
-    (2700, "Super GM",       "#FFE600"),
-    (2400, "GM",             "#57FF35"),
-    (2000, "IM",             "#42FF8A"),
-    (1800, "FM",             "#4274FF"),
-    (1600, "Candidate",      "#CF87EB"),
-    (1400, "Beta",           "#AAAAAA"),
-    (   0, "Unrated",        "#DBDBDB"),
+    (3000, "Top Engine",  "#FF0000"),
+    (2850, "Elite",       "#FFE600"),
+    (2700, "Strong",      "#57FF35"),
+    (2500, "Established", "#42FF8A"),
+    (2300, "Club",        "#4274FF"),
+    (2100, "Hobby",       "#CF87EB"),
+    (1800, "Legacy",      "#AAAAAA"),
+    (   0, "Toy",         "#DBDBDB"),
 ]
 
 # ── Piece movement directions ─────────────────────────────
