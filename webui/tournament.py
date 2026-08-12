@@ -18,7 +18,7 @@ from datetime import datetime
 from nicegui import app, ui
 
 from core.constants import TIME_CONTROLS
-from core.utils import normalize_engine_name
+from core.utils import normalize_engine_name, fmt_clock, low_time_warning
 from tournament.manager import (
     Tournament, TournamentPlayer, TournamentRunner, TournamentTeam,
 )
@@ -93,12 +93,6 @@ _DROP_SLOT = """
   </q-btn>
 </q-td>
 """
-
-
-def _fmt_clock(ms):
-    """mm:ss for a clock value in milliseconds (never negative)."""
-    s = max(0, int(ms / 1000))
-    return f"{s // 60}:{s % 60:02d}"
 
 
 class SnapshotBoard:
@@ -1444,12 +1438,47 @@ def show_tournament_window(session, tsess: TournamentSession):
 
         h2h_state = {"key": None, "w": "", "b": ""}
 
+        # Whether each side was last seen under ten seconds; see below
+        low_time = {}
+
+        def _refresh_clocks():
+            """
+            The two clock labels, on their own poll.
+
+            Split off the banner refresh because it needs a different rate:
+            names and head-to-head change once a game, tenths change ten
+            times a second, and running the whole banner that often would
+            re-render the h2h HTML for nothing.
+            """
+            with tsess.lock:
+                use_clock, white = tsess.use_clock, tsess.white_name
+                wtime, btime = tsess.wtime_ms, tsess.btime_ms
+                turn, clock_at, state = tsess.turn, tsess.clock_at, tsess.state
+            if not (use_clock and white):
+                white_clock_lbl.set_text("")
+                black_clock_lbl.set_text("")
+                low_time.clear()
+                return
+            # live countdown for the side currently thinking
+            if state == "running":
+                elapsed = (time.time() - clock_at) * 1000
+                if turn == "w":
+                    wtime -= elapsed
+                else:
+                    btime -= elapsed
+            white_clock_lbl.set_text(fmt_clock(wtime))
+            black_clock_lbl.set_text(fmt_clock(btime))
+            if state != "running":
+                return
+            for side, ms in (("w", wtime), ("b", btime)):
+                warn, low_time[side] = low_time_warning(ms, low_time.get(side))
+                if warn:
+                    ui.run_javascript("window.arenaPlaySound('low_time')")
+
         def _refresh_banners(force_h2h=False):
             with tsess.lock:
                 white, black = tsess.white_name, tsess.black_name
-                use_clock = tsess.use_clock
-                wtime, btime = tsess.wtime_ms, tsess.btime_ms
-                turn, clock_at = tsess.turn, tsess.clock_at
+                turn = tsess.turn
             white_name_lbl.set_text(white or "—")
             black_name_lbl.set_text(black or "—")
             for raw, lbl in ((white, white_rank_lbl), (black, black_rank_lbl)):
@@ -1465,19 +1494,6 @@ def show_tournament_window(session, tsess: TournamentSession):
                                  b=widgets.h2h_html(b_w, dr, w_w))
             white_h2h_lbl.set_content(h2h_state["w"])
             black_h2h_lbl.set_content(h2h_state["b"])
-            if use_clock and white:
-                # live countdown for the side currently thinking
-                if tsess.state == "running":
-                    elapsed = (time.time() - clock_at) * 1000
-                    if turn == "w":
-                        wtime -= elapsed
-                    else:
-                        btime -= elapsed
-                white_clock_lbl.set_text(_fmt_clock(wtime))
-                black_clock_lbl.set_text(_fmt_clock(btime))
-            else:
-                white_clock_lbl.set_text("")
-                black_clock_lbl.set_text("")
             if turn == "b":
                 black_banner.classes(add="active")
                 white_banner.classes(remove="active")
@@ -1580,10 +1596,16 @@ def show_tournament_window(session, tsess: TournamentSession):
         # event with one polls hard enough to feel direct.
         has_manual = any(p.is_human for p in t.player_list)
         timer = ui.timer(0.08 if has_manual else 0.4, _tick)
-        dialog.on("hide", lambda: timer.cancel())
+        # The clocks run on their own poll: 0.4 s would show the tenths
+        # under ten seconds in 0.4 s steps, which is worse than not showing
+        # them. Only two labels, and set_text is a no-op when the string
+        # has not changed, so the extra polls cost nothing on the wire.
+        clock_timer = ui.timer(0.1, _refresh_clocks)
+        dialog.on("hide", lambda: (timer.cancel(), clock_timer.cancel()))
 
         def _close():
             timer.cancel()
+            clock_timer.cancel()
             dialog.close()
 
         sched_table.on("rowDblclick",

@@ -83,6 +83,43 @@ def get_masters_db_path():
     return os.path.join(_db_dir(), "masters.db")
 
 
+# Below this the clock shows tenths and the warning sounds. Ten seconds is
+# where a chess clock stops being a number you glance at and starts being
+# the thing you are playing against, and it is what every online board uses.
+LOW_TIME_MS = 10_000
+
+
+def fmt_clock(ms):
+    """
+    m:ss for a clock value in milliseconds, m:ss.t under ten seconds.
+
+    Truncates rather than rounds, the way a chess clock does: 0:00.0 has
+    to mean "under a tenth left", never "a tenth already past".
+    """
+    ms = max(0, int(ms))
+    s = ms // 1000
+    if ms < LOW_TIME_MS:
+        return f"{s // 60}:{s % 60:02d}.{ms % 1000 // 100}"
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def low_time_warning(ms, was_low):
+    """
+    Whether a clock at *ms* has just crossed into its last ten seconds.
+
+    Returns (warn, low) — *warn* is True only on the poll that crosses the
+    line, and *low* is the state to hand back next time. Clocks are polled,
+    so the crossing has to be remembered; without it the warning would
+    sound on every poll for ten seconds.
+
+    A clock back above the line has been reset by an increment or a new
+    game and can warn again. Otherwise one game spent under ten seconds
+    would silence every game after it.
+    """
+    low = ms < LOW_TIME_MS
+    return (low and not was_low), low
+
+
 def get_tier(rating):
     """Return the (label, color) tier tuple for a given Elo rating."""
     if rating is not None:

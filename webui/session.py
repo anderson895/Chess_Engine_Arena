@@ -232,8 +232,14 @@ class GameSession:
         return TIME_CONTROLS.get(
             self.time_control, TIME_CONTROLS["blitz"])[1] is not None
 
-    def clock_strings(self):
-        """Formatted (white, black) clock texts, live during a search."""
+    def clock_ms(self):
+        """
+        Live (white, black) clock values in ms, counting the search in flight.
+
+        The stored values only move when a search returns, so between moves
+        the thinking side's clock is stale by however long it has been
+        thinking. Anything that reads a clock wants that subtracted.
+        """
         w, b = self.wtime_ms, self.btime_ms
         if self._think_start is not None and self.game_running:
             elapsed = (time.time() - self._think_start) * 1000
@@ -241,11 +247,7 @@ class GameSession:
                 w -= elapsed
             else:
                 b -= elapsed
-
-        def fmt(ms):
-            s = max(0, int(ms / 1000))
-            return f"{s // 60}:{s % 60:02d}"
-        return fmt(w), fmt(b)
+        return w, b
 
     # ═══════════════════════════════════════════════════════
     #  Elo / ranking data (cached)

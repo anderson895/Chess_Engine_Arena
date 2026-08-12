@@ -8,7 +8,9 @@ from nicegui import app, ui, run
 
 from core.constants import QUALITY_COLORS
 from core.opening_book import OpeningBook
-from core.utils import get_base_path, get_resource_path
+from core.utils import (
+    get_base_path, get_resource_path, fmt_clock, low_time_warning,
+)
 from webui import dialogs, masters, tournament, views, widgets
 from webui.board import BoardView, EvalBar
 from webui.session import GameSession, parse_opening_book, TIME_CONTROLS
@@ -220,6 +222,7 @@ def main_page():
         move: 'move-self', move_opp: 'move-opponent', capture: 'capture',
         castle: 'castle', promote: 'promote', check: 'move-check',
         game_start: 'game-start', game_end: 'game-end', illegal: 'illegal',
+        low_time: 'tenseconds',
     }};
     // Report sound problems back to the server terminal (the native
     // window has no visible devtools console).
@@ -757,14 +760,30 @@ def main_page():
             check_lbl.set_text("")
         refresh_banners()
 
+    # Whether each side was last seen under ten seconds, so the warning
+    # sounds on the poll that crosses the line and not on the nine after
+    low_time = {}
+
     def _update_clocks():
         if not session.uses_clock():
             white_clock_lbl.set_text("")
             black_clock_lbl.set_text("")
+            low_time.clear()
             return
-        w, b = session.clock_strings()
-        white_clock_lbl.set_text(w)
-        black_clock_lbl.set_text(b)
+        w, b = session.clock_ms()
+        white_clock_lbl.set_text(fmt_clock(w))
+        black_clock_lbl.set_text(fmt_clock(b))
+        if not session.game_running:
+            return
+        # Both clocks are checked, not just the side to move: a frozen one
+        # cannot cross the line anyway, so this costs a comparison and
+        # saves having to know which side the game loop is waiting on.
+        for side, ms in (("w", w), ("b", b)):
+            warn, low_time[side] = low_time_warning(ms, low_time.get(side))
+            if warn:
+                # not ui.run_javascript: this also runs as the session's
+                # "clock" handler, on the game loop, with no slot context
+                client.run_javascript("window.arenaPlaySound('low_time')")
 
     def on_quality(quality):
         if not quality:
@@ -807,8 +826,11 @@ def main_page():
     session.on("clock", _update_clocks)
     session.on("sound", lambda kind: client.run_javascript(
         f"window.arenaPlaySound('{kind}')"))
-    # Live countdown while an engine is thinking (clock mode)
-    ui.timer(0.25, _update_clocks)
+    # Live countdown while an engine is thinking (clock mode). 0.1 s so the
+    # tenths shown under ten seconds actually move; set_text is a no-op when
+    # the string is unchanged, so the other 9 polls in every second cost
+    # nothing on the wire.
+    ui.timer(0.1, _update_clocks)
     session.on("error", _on_error)
     session.on("eval", lambda side, ev, dp: eng_log.push(
         f"[{side.upper()}] eval {ev}  depth {dp}"))
