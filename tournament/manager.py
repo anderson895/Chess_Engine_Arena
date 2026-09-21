@@ -480,6 +480,11 @@ class TournamentGame:
         self.round_num    = round_num
         self.white        = white
         self.black        = black
+        # Which board of a team match this is, 1-based; 0 outside one.
+        # Unlike home_team, which names a squad this class knows nothing
+        # about, a board number is just a fact about the game — every read
+        # is simpler for it always being there.
+        self.board        = 0
         self.result       = None
         self.reason       = ""
         self.pgn          = ""
@@ -650,14 +655,25 @@ class Tournament:
     FORMAT_KNOCKOUT    = "Knockout"
     FORMAT_TEAM        = "Team"
 
+    # How a team match is played out. Board order is the Olympiad shape —
+    # board 1 meets board 1 — so a 4-a-side match is 4 games; all-play-all
+    # is the full grid, and the same match is 16.
+    TEAM_BOARD_ORDER   = "board"
+    TEAM_ALL_PLAY_ALL  = "all"
+
     def __init__(self, name, fmt, players, rounds, movetime_ms=1000,
                 double_rr=False, delay=0.3, analyzer_path=None,
                 opening_book=None, time_control="classic", teams=None,
-                team_knockout=False):
+                team_knockout=False, team_style=TEAM_BOARD_ORDER):
         self.name          = name
         self.format        = fmt
         self.teams         = list(teams or [])
         self.team_knockout = bool(team_knockout)
+        # Anything unrecognised is a hand-edited snapshot, and there is no
+        # third behaviour to fall into — take the default
+        self.team_style = (team_style if team_style in
+                           (self.TEAM_BOARD_ORDER, self.TEAM_ALL_PLAY_ALL)
+                           else self.TEAM_BOARD_ORDER)
         if self.teams and not players:
             # The roster of a team event is its squads flattened, so every
             # per-player path — standings, pairing history, Elo — keeps
@@ -776,15 +792,36 @@ class Tournament:
                             if idx < len(self._team_schedule) else [])
 
             for home, away in pairings:
-                for i, hp in enumerate(home.players):
-                    for j, ap in enumerate(away.players):
-                        # Alternate the colours across the grid so nobody
-                        # plays every one of their games with White
-                        w, b = ((hp, ap) if (i + j) % 2 == 0 else (ap, hp))
-                        g = TournamentGame(self.current_round, w, b)
-                        g.home_team, g.away_team = home.name, away.name
-                        self.round_games.append(g)
-                        self.all_games.append(g)
+                if self.team_style == self.TEAM_ALL_PLAY_ALL:
+                    for i, hp in enumerate(home.players):
+                        for j, ap in enumerate(away.players):
+                            # Alternate the colours across the grid so
+                            # nobody plays every one of their games with
+                            # White
+                            w, b = ((hp, ap) if (i + j) % 2 == 0
+                                    else (ap, hp))
+                            self._team_game(home, away, w, b)
+                else:
+                    # Board order: like meets like, so a 4-a-side match is
+                    # 4 games rather than 16. Squads are seated strongest
+                    # first, so this is board 1 against board 1.
+                    #
+                    # The grid's (i + j) trick cannot be reused: on a board
+                    # i == j, so it would hand the home side White on every
+                    # one. The Olympiad convention does the job — home has
+                    # White on the odd boards and Black on the even ones,
+                    # which splits a squad's colours evenly and gives the
+                    # return leg the other half, since a double round-robin
+                    # swaps home and away.
+                    #
+                    # zip stops at the shorter squad. The setup dialog
+                    # refuses unequal sides, but from_dict drops a member
+                    # no longer on the roster, so a truncated snapshot
+                    # plays a short match rather than raising.
+                    for n, (hp, ap) in enumerate(
+                            zip(home.players, away.players), 1):
+                        w, b = (hp, ap) if n % 2 else (ap, hp)
+                        self._team_game(home, away, w, b, board=n)
 
         elif self.format == self.FORMAT_KNOCKOUT:
             if self.current_round == 1:
@@ -812,6 +849,15 @@ class Tournament:
                     self.round_games.append(g)
                     self.all_games.append(g)
                 self._ko_round_games[self.current_round] = list(self.round_games)
+
+    def _team_game(self, home, away, white, black, board=0):
+        """One game of a team match, filed under both squads."""
+        g = TournamentGame(self.current_round, white, black)
+        g.home_team, g.away_team = home.name, away.name
+        g.board = board
+        self.round_games.append(g)
+        self.all_games.append(g)
+        return g
 
     def record_game_result(self, game: TournamentGame, result, reason,
                            move_history, pgn, duration, opening=None,
@@ -1152,7 +1198,11 @@ class Tournament:
 
     # ── Resume snapshot ───────────────────────────────────
 
-    SNAPSHOT_VERSION = 1
+    # 2 added team_style: a team match is no longer always the full grid.
+    # There is no version gate — from_dict defaults every key it reads, and
+    # a stricter restore would drop a half-finished event rather than open
+    # it, since restore_tournaments simply skips whatever raises.
+    SNAPSHOT_VERSION = 2
 
     @staticmethod
     def _player_dict(p):
@@ -1173,7 +1223,8 @@ class Tournament:
                 "opening": g.opening,
                 "db_game_id": getattr(g, "db_game_id", None),
                 "home_team": getattr(g, "home_team", None),
-                "away_team": getattr(g, "away_team", None)}
+                "away_team": getattr(g, "away_team", None),
+                "board": g.board}
 
     def to_dict(self):
         """
@@ -1213,6 +1264,7 @@ class Tournament:
                 "team_schedule": [[h.name, a.name]
                                   for h, a in self._team_schedule],
                 "team_knockout": self.team_knockout,
+                "team_style": self.team_style,
                 "team_alive": [t.name for t in self._team_alive],
                 "team_bracket": {str(r): [list(p) for p in pairs]
                                  for r, pairs in self._team_bracket.items()},
@@ -1267,7 +1319,13 @@ class Tournament:
                 analyzer_path=data.get("analyzer_path"),
                 opening_book=opening_book,
                 time_control=data.get("time_control", "classic"),
-                team_knockout=data.get("team_knockout", False))
+                team_knockout=data.get("team_knockout", False),
+                # A snapshot written before board order existed is an
+                # all-play-all grid, and the games it has already played
+                # are on disk in that shape. The constructor defaults the
+                # other way for the same reason: a new event should get
+                # the board order, an old one must keep what it has.
+                team_style=data.get("team_style", cls.TEAM_ALL_PLAY_ALL))
 
         by_name = {p.name: p for p in players}
         t.tournament_id = data.get("tournament_id") or t.tournament_id
@@ -1305,6 +1363,7 @@ class Tournament:
             if gd.get("home_team"):
                 g.home_team = gd["home_team"]
                 g.away_team = gd.get("away_team")
+                g.board = gd.get("board", 0)
             games.append(g)
         t.all_games = games
 

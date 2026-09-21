@@ -43,6 +43,7 @@ _DRAFT: dict = {
     "rounds": 5,
     "double_rr": False,
     "team_ko": False,
+    "team_style": Tournament.TEAM_BOARD_ORDER,
     "time_control": "classic",
     "movetime": None,           # None → the session's own pace
     "delay": None,
@@ -721,6 +722,16 @@ def show_tournament_setup(session):
                 .tooltip("Teams are paired off and the loser is out. "
                          "Points still decide each tie — the squad that "
                          "scores more across it goes through.")
+            style_sel = ui.select(
+                {Tournament.TEAM_BOARD_ORDER: "Board order (FIDE)",
+                 Tournament.TEAM_ALL_PLAY_ALL: "All-play-all"},
+                value=draft["team_style"], label="Match style") \
+                .props("dense options-dense").classes("w-44") \
+                .tooltip("Board order: board 1 meets board 1, board 2 meets "
+                         "board 2 — a 4-a-side match is 4 games, and the "
+                         "boards are seated by rating. All-play-all: every "
+                         "engine meets every engine on the other side, so "
+                         "the same match is 16.")
 
         def _apply_format():
             """Show the controls the chosen format actually uses."""
@@ -728,6 +739,7 @@ def show_tournament_setup(session):
             team_mode = value == Tournament.FORMAT_TEAM
             rounds_in.set_visibility(value == Tournament.FORMAT_SWISS)
             team_ko.set_visibility(team_mode)
+            style_sel.set_visibility(team_mode)
             double_rr.set_visibility(
                 value == Tournament.FORMAT_ROUNDROBIN
                 or (team_mode and not team_ko.value))
@@ -744,6 +756,11 @@ def show_tournament_setup(session):
             draft.__setitem__("team_ko", e.value), _apply_format()))
         double_rr.on_value_change(
             lambda e: draft.__setitem__("double_rr", e.value))
+        # Board numbers only mean anything in one of the two styles, so the
+        # squads are redrawn as well as recounted
+        style_sel.on_value_change(lambda e: (
+            draft.__setitem__("team_style", e.value),
+            teams_ui.refresh(), _sync_counts()))
 
         with ui.row().classes("w-full items-center gap-4"):
             tc_sel = ui.select({k: v[0] for k, v in TIME_CONTROLS.items()},
@@ -772,10 +789,13 @@ def show_tournament_setup(session):
         # Move time only applies to the clockless Classic preset. The rank
         # lines beside each engine are rated per control, so the lists are
         # rebuilt too — otherwise picking Bullet would leave Classic
-        # ratings on screen to choose a squad by.
+        # ratings on screen to choose a squad by. The boards go with them,
+        # for the same reason: a squad seated by its Classic strength is
+        # the wrong lineup for a Bullet event.
         tc_sel.on_value_change(lambda e: (
             draft.__setitem__("time_control", e.value),
             movetime_in.set_visibility(e.value == "classic"),
+            _reseat_all(),
             roster_ui.refresh(), teams_ui.refresh()))
 
         ui.separator()
@@ -790,6 +810,53 @@ def show_tournament_setup(session):
                 return None
             return normalize_engine_name(
                 os.path.splitext(os.path.basename(path))[0]), path
+
+        # A squad's member list is its board order: members[0] is Board 1.
+        # It is seated by rating to begin with, because the event already
+        # knows every engine's strength and that is how a team is fielded,
+        # but the moment a board is moved by hand that squad is left alone
+        # — an arrangement someone typed out should not be undone by a
+        # rating that shifted, or by a glance at another time control.
+
+        def _rating_key(m):
+            # An engine with no games has no number to be placed by, so it
+            # sits behind everyone who has one; sort() is stable, so the
+            # order they were added settles the rest
+            est = session.elo_estimate(m["name"], draft["time_control"])
+            return (0, -est[0]) if est else (1, 0)
+
+        def _autoseat(team):
+            """Re-seat by rating, unless this squad is arranged by hand."""
+            if not team.get("manual"):
+                team["members"].sort(key=_rating_key)
+
+        def _reseat_all():
+            for team in teams:
+                _autoseat(team)
+
+        def _seat_by_rating(team):
+            """The button: sort now, and hand the squad back to the rating."""
+            team["manual"] = False
+            team["members"].sort(key=_rating_key)
+
+        def _move_member(team, member, delta):
+            """Move a seat one board up or down."""
+            ms = team["members"]
+            # The row's button closes over the seat, not its place, so a
+            # click that lands after the list moved on finds nothing to do
+            i = next((k for k, m in enumerate(ms) if m is member), None)
+            if i is None:
+                return
+            j = i + delta
+            if 0 <= j < len(ms):
+                ms[i], ms[j] = ms[j], ms[i]
+                team["manual"] = True
+
+        def _drop_member(team, member):
+            # Match on identity rather than on the row's position: a row
+            # can be redrawn, and a stale index deletes the wrong engine
+            team["members"][:] = [m for m in team["members"]
+                                  if m is not member]
 
         with solo_area:
             ui.label("PLAYERS (engines)").classes("arena-heading")
@@ -874,7 +941,7 @@ def show_tournament_setup(session):
                 ui.space()
                 ui.button("+ Add team", on_click=lambda: (
                     teams.append({"name": f"Team {len(teams) + 1}",
-                                  "members": []}),
+                                  "members": [], "manual": False}),
                     teams_ui.refresh(), _sync_counts())) \
                     .props("dense flat no-caps")
             count_lbl = ui.label("").classes("text-xs") \
@@ -895,6 +962,7 @@ def show_tournament_setup(session):
                                   type="warning")
                         return
                 team["members"].append({"name": name, "path": p})
+                _autoseat(team)
                 teams_ui.refresh()
                 _sync_counts()
 
@@ -915,11 +983,18 @@ def show_tournament_setup(session):
                     name, n = f"{base} {n}", n + 1
                 team["members"].append({"name": name, "path": "",
                                         "human": True})
+                _autoseat(team)
                 teams_ui.refresh()
                 _sync_counts()
 
             @ui.refreshable
             def teams_ui():
+                board = style_sel.value == Tournament.TEAM_BOARD_ORDER
+                if board:
+                    widgets.hint("Boards start seated by rating for the "
+                                 "chosen time control — strongest on Board "
+                                 "1. Use ▲▼ to arrange a squad yourself; it "
+                                 "then keeps your order.")
                 if not teams:
                     ui.label("No teams yet — add at least 2, then put "
                              "engines in each.").classes("text-xs text-gray-500")
@@ -935,8 +1010,9 @@ def show_tournament_setup(session):
                                          _sync_counts())) \
                                 .props("dense borderless") \
                                 .classes("w-44 text-sm font-bold")
-                            ui.label(f"{len(team['members'])} engine(s)") \
-                                .classes("text-xs text-gray-500")
+                            ui.label(f"{len(team['members'])} "
+                                     f"{'board' if board else 'engine'}(s)") \
+                                .classes("text-xs text-gray-500 no-wrap")
                             ui.space()
                             sel = ui.select(_discover_engines()
                                             or {"": "— none found —"},
@@ -961,6 +1037,7 @@ def show_tournament_setup(session):
                             ui.button("+ Manual", on_click=lambda t=team:
                                       team_add_human(t)) \
                                 .props("dense flat no-caps") \
+                                .classes("no-wrap") \
                                 .tooltip("A seat whose moves you enter on "
                                          "the board — yourself, or an engine "
                                          "running elsewhere that you relay "
@@ -972,9 +1049,49 @@ def show_tournament_setup(session):
                                 .tooltip("Remove this team")
                         if not team["members"]:
                             ui.label("Empty").classes("text-xs text-gray-500")
-                        for mi, m in enumerate(team["members"]):
+                        # Its own line rather than the header row, which is
+                        # already carrying the team name, the engine picker
+                        # and three buttons. Both only appear once the
+                        # rating has been overruled: until then the squad
+                        # is in rating order and the button is a no-op.
+                        if board and team.get("manual"):
                             with ui.row().classes("w-full items-center gap-2 "
                                                   "no-wrap pl-2"):
+                                ui.label("Manual order — the rating no "
+                                         "longer re-seats this squad") \
+                                    .classes("text-xs no-wrap") \
+                                    .style(f"color: {COLOR_ORANGE}")
+                                ui.button("Sort by rating",
+                                          on_click=lambda t=team: (
+                                              _seat_by_rating(t),
+                                              teams_ui.refresh())) \
+                                    .props("dense flat no-caps") \
+                                    .classes("text-xs no-wrap") \
+                                    .tooltip("Hand this squad back to the "
+                                             "rating — strongest on Board 1")
+                        for bn, m in enumerate(team["members"], 1):
+                            with ui.row().classes("w-full items-center gap-2 "
+                                                  "no-wrap pl-2"):
+                                if board:
+                                    ui.label(f"Board {bn}") \
+                                        .classes("text-xs w-14 no-wrap") \
+                                        .style(f"color: {COLOR_MUTED}")
+                                    up = ui.button(
+                                        "▲", on_click=lambda t=team, m=m: (
+                                            _move_member(t, m, -1),
+                                            teams_ui.refresh())) \
+                                        .props("dense flat color=grey") \
+                                        .tooltip("Move up a board")
+                                    down = ui.button(
+                                        "▼", on_click=lambda t=team, m=m: (
+                                            _move_member(t, m, 1),
+                                            teams_ui.refresh())) \
+                                        .props("dense flat color=grey") \
+                                        .tooltip("Move down a board")
+                                    # Disabled rather than hidden, so the
+                                    # rows stay in line down the card
+                                    up.set_enabled(bn > 1)
+                                    down.set_enabled(bn < len(team["members"]))
                                 human = m.get("human")
                                 widgets.icon("ic_user", 13) if human else \
                                     ui.element("img") \
@@ -1014,6 +1131,14 @@ def show_tournament_setup(session):
                                                 or m["name"]),
                                             f(), _sync_counts()))
                                     _show_rank()
+                                    # A rename is what gives a relayed seat
+                                    # a rating, so it can change which
+                                    # board the seat belongs on — but only
+                                    # once it is finished, since re-seating
+                                    # per keystroke would take the focus
+                                    # with it
+                                    name_in_m.on("blur", lambda t=team: (
+                                        _autoseat(t), teams_ui.refresh()))
                                 else:
                                     ui.label(m["name"]).classes("text-sm w-44")
                                     rank_txt, rank_col = session.rank_line(
@@ -1021,8 +1146,8 @@ def show_tournament_setup(session):
                                     ui.label(rank_txt) \
                                         .classes("text-xs no-wrap flex-grow") \
                                         .style(f"color: {rank_col}")
-                                ui.button("✕", on_click=lambda t=team, i=mi: (
-                                    t["members"].pop(i), teams_ui.refresh(),
+                                ui.button("✕", on_click=lambda t=team, m=m: (
+                                    _drop_member(t, m), teams_ui.refresh(),
                                     _sync_counts())) \
                                     .props("dense flat color=grey")
 
@@ -1050,9 +1175,15 @@ def show_tournament_setup(session):
                     if double_rr.value:
                         matches *= 2
                     shape = "every team meets every other"
+                # The per-match count is the whole point of the choice, so
+                # it gets said rather than left to be divided out
+                per_match = (size
+                             if style_sel.value == Tournament.TEAM_BOARD_ORDER
+                             else size * size)
                 count_lbl.set_text(
                     f"{n} teams of {size} · {shape} · {matches} team "
-                    f"match(es) · {matches * size * size} games")
+                    f"match(es) · {per_match} game(s) each · "
+                    f"{matches * per_match} games")
 
         # Everything is built: show the controls the restored format uses.
         # on_value_change only fires on a change, so a reopened draft would
@@ -1108,6 +1239,11 @@ def show_tournament_setup(session):
                     ui.notify("A human seat needs Classic. Change the time "
                               "control or drop the seat.", type="warning")
                     return
+                # A squad's player order is its board order, and the list
+                # above is already in it — whether the rating seated it or
+                # the arrows did. All-play-all carries the order too: it
+                # does not pair by it, but the Squad column then reads as
+                # the lineup either way.
                 squads = [
                     TournamentTeam(x["name"], [
                         TournamentPlayer(m["name"], m["path"],
@@ -1132,6 +1268,7 @@ def show_tournament_setup(session):
                 players=players,
                 teams=squads,
                 team_knockout=bool(team_ko.value),
+                team_style=style_sel.value or Tournament.TEAM_BOARD_ORDER,
                 rounds=int(rounds_in.value or 5),
                 movetime_ms=int(movetime_in.value or session.movetime_ms),
                 time_control=tc_sel.value or "classic",
@@ -1147,8 +1284,9 @@ def show_tournament_setup(session):
             # The draft has become a tournament, so the next New Tournament
             # starts from a clean form rather than repeating this one
             _DRAFT.update(name=None, format=None, rounds=5, double_rr=False,
-                          team_ko=False, time_control="classic",
-                          movetime=None, delay=None)
+                          team_ko=False,
+                          team_style=Tournament.TEAM_BOARD_ORDER,
+                          time_control="classic", movetime=None, delay=None)
             _DRAFT["roster"] = []
             _DRAFT["teams"] = []
             dialog.close()
@@ -1261,11 +1399,12 @@ def show_tournament_window(session, tsess: TournamentSession):
                 # One box for both tables: the terms that make sense in a
                 # tournament — an engine name, a round, a result — read the
                 # same either way
+                is_team = t.format == Tournament.FORMAT_TEAM
                 table_search = widgets.search_input(
-                    "Search engine, round, result, reason…") \
+                    "Search engine, board, round, result, reason…" if is_team
+                    else "Search engine, round, result, reason…") \
                     .classes("w-full") \
                     .on_value_change(lambda e: _refresh_tables())
-                is_team = t.format == Tournament.FORMAT_TEAM
                 with ui.tabs().classes("w-full") as tabs:
                     tab_teams = ui.tab("Teams") if is_team else None
                     tab_stand = ui.tab("Standings")
@@ -1286,7 +1425,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                         stand_table.on("drop", lambda e: _drop_player(e.args))
                         widgets.hint("Double-click an engine to see its games")
                     with ui.tab_panel(tab_sched):
-                        sched_table = _schedule_table()
+                        sched_table = _schedule_table(is_team)
                     if tab_brack:
                         with ui.tab_panel(tab_brack):
                             bracket_html = ui.html("").classes(
@@ -1822,11 +1961,19 @@ def _fill_standings(table, t, session=None, query=""):
     table.update()
 
 
-def _schedule_table():
+def _schedule_table(is_team=False):
     columns = [
         {"name": "badge",  "label": "",       "field": "badge", "align": "center",
          "style": "width: 80px"},
         {"name": "round",  "label": "Rd",     "field": "round", "align": "center"},
+    ]
+    if is_team:
+        # Only a team match has boards. A restored all-play-all event still
+        # lands here, which is why 0 renders as a dash rather than the
+        # column being dropped per row.
+        columns.append({"name": "board", "label": "Board", "field": "board",
+                        "align": "center", "style": "width: 60px"})
+    columns += [
         {"name": "white",  "label": "White",  "field": "white", "align": "left"},
         {"name": "black",  "label": "Black",  "field": "black", "align": "left"},
         {"name": "result", "label": "Result", "field": "result", "align": "center"},
@@ -1851,14 +1998,15 @@ def _fill_schedule(table, t, query=""):
     rows = [
         {
             "gid": g.id, "badge": badge_map.get(g.status, "upcoming"),
-            "round": g.round_num, "white": g.white.name, "black": g.black.name,
+            "round": g.round_num, "board": g.board or "—",
+            "white": g.white.name, "black": g.black.name,
             "result": g.result or "—", "reason": g.reason or "",
             "db_id": getattr(g, "db_game_id", None),
         }
         for g in t.all_games
     ]
     table.rows = [r for r in rows
-                  if _match(r, query, ("round", "white", "black",
+                  if _match(r, query, ("round", "board", "white", "black",
                                        "result", "reason"))]
     table.update()
 
