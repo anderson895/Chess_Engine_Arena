@@ -7,6 +7,7 @@ native desktop window (pywebview/WebView2) or in the browser.
 - [Download](#download)
 - [Features](#features)
 - [Getting Started](#getting-started)
+- [The Main Screen](#the-main-screen)
 - [Adding Engines and Files](#adding-engines-and-files)
 - [Game Review](#game-review)
 - [Masters Database](#masters-database)
@@ -32,6 +33,8 @@ To run from source instead, see [Getting Started](#getting-started).
 - **Human vs Engine** — play as White or Black against any UCI engine
 - **2 Players** — two people at one board; every move is graded as it is
   played, and finished games are saved and rated under the players' names
+- **Undo** — take back a move in a game you play: against an engine, your
+  move and its reply; with two players, the last move ([details](#undo))
 - **Drag and drop** — move a piece by dragging it to its square, or by
   clicking it and then the square; its legal moves show while it is held
 - **Tournaments** — Swiss (Buchholz tiebreaks), Round Robin (single/double),
@@ -57,6 +60,9 @@ To run from source instead, see [Getting Started](#getting-started).
   imported from Lichess broadcasts, Chess.com, TWIC and PGN Mentor, with
   filters for player, colour, opponent, event, ECO, rating and year
   ([details](#masters-database))
+- **chess.com-style look** — warm dark theme, a green board by default,
+  player bars with clocks, and the same look on every screen
+  ([details](#the-main-screen))
 - **Sprite-based UI** — all pieces, nav cards, medals, badges and icons
   come from `assets/Chess_packs.png` (no emoji dependence)
 
@@ -83,6 +89,37 @@ the parsed book is cached to disk, so every launch after that is fast.
 
 The database lives at `~/.chess_arena/chess_arena.db` (auto-created) and is
 shared by regular games and tournaments.
+
+## The Main Screen
+
+The layout follows chess.com: navigation down the left, the board in the
+middle, and one panel with tabs on the right.
+
+- **Sidebar** — Play, Rankings, Openings, Tournaments, History and Masters.
+  **Settings** at the bottom holds the board style (green by default) and
+  the piece design; **Sound** turns the move sounds on and off.
+- **Board** — the status line on top, and a player bar above and below the
+  board: avatar, name, rating, head-to-head record, material lead and, in
+  Bullet and Blitz, the clock (lit for the side to move, red under ten
+  seconds). **Flip** turns the board and swaps the bars.
+- **Play** tab — Engine vs Engine, Play vs Engine or 2 Players; the engines
+  or player names, the time control and an optional starting opening; then
+  **Start Game**.
+- **Game** tab — the coach's line about the latest move, the opening, the
+  move list with each move's grade (click a move to look at that position;
+  **Back to game** returns), step buttons, **Undo**, Pause, Stop, Flip,
+  **Game Review**, New Game and Export PGN.
+- **Engine** tab — the engines' output, and the opening book and analyzer
+  in use, with buttons to load others.
+
+### Undo
+
+**Undo** takes back moves in a game you play. Against an engine it takes
+back your last move and the engine's reply, so it is your move again; with
+two players it takes back the last move. Moves already graded keep their
+grades, and the clocks go back to where they stood. The moves of a chosen
+starting opening are never taken back, and Undo is unavailable while the
+engine is thinking. Games with takebacks are saved and rated as usual.
 
 ## Adding Engines and Files
 
@@ -119,7 +156,7 @@ The bundled book is generated from the
 
 ## Game Review
 
-Open a review with **GAME REVIEW** on the main screen (the game on the
+Open a review with **Game Review** in the Game tab (the game on the
 board, or the one that just ended), with the **Game Review** button when a
 game finishes, or by double-clicking a game in Game History, a tournament
 or the Masters database.
@@ -183,7 +220,7 @@ unless given `--apply`).
 
 ## Masters Database
 
-Open **MASTERS** in the header. This is a separate collection of games
+Open **Masters** in the sidebar. This is a separate collection of games
 played by real people — grandmasters, IMs and rated club players — kept in
 its own database so that human results can never reach the engine Elo
 ratings.
@@ -310,15 +347,16 @@ Chess_Engine_Arena/
 │
 ├── webui/                     # User interface (NiceGUI)
 │   ├── session.py             #   GameSession — UI-agnostic game controller
-│   ├── main_page.py           #   main layout, config panel, startup loading
+│   ├── main_page.py           #   main layout: board, Play/Game/Engine tabs
+│   ├── sidebar.py             #   the navigation bar down the left
 │   ├── board.py               #   board component + eval bar (diffed updates)
 │   ├── review.py              #   Game Review screen
-│   ├── quality.py             #   move-class badges (SVG) and labels
+│   ├── quality.py             #   move-class badges, coach line, move list
 │   ├── views.py               #   rankings, stats, history
 │   ├── dialogs.py             #   promotion, stop-game, opening picker…
 │   ├── tournament.py          #   tournament list/setup/live/history UI
-│   ├── widgets.py             #   sprite-icon helpers, loader overlay
-│   └── theme.py               #   colours + global CSS
+│   ├── widgets.py             #   player bars, panel tabs, sprite icons
+│   └── theme.py               #   chess.com-style palette + global CSS
 │
 ├── tournament/
 │   └── manager.py             #   tournament logic: formats, pairing, runner

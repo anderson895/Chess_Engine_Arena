@@ -27,8 +27,7 @@ from webui.board import BoardView, EvalBar
 from webui.quality import MoveVerdict
 from webui.session import sound_for_san
 from webui.theme import (
-    COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN, COLOR_ORANGE,
-    COLOR_MUTED,
+    COLOR_GOLD, COLOR_BLUE, COLOR_GREEN, COLOR_ORANGE, COLOR_MUTED, TEXT_1,
 )
 
 # Live tournaments registry: {tournament_id: TournamentSession}
@@ -129,6 +128,7 @@ class TournamentSession:
         self.last_move = None
         self.cp = None
         self.opening = ""
+        self.last_review = None       # grade of the last move (core.review)
         self.game_label = "—"
         self.status_msg = "Ready — press Start"
         self.state = "ready"          # ready | running | paused | stopped | finished
@@ -572,7 +572,7 @@ def show_tournament_list(session):
         with ui.row().classes("w-full items-center gap-2"):
             ui.element("img").props('src="/assets/ui/nav_tournaments.png"') \
                 .style("height: 44px; width: auto;")
-            ui.label("TOURNAMENTS").classes("text-xl font-bold text-primary")
+            ui.label("TOURNAMENTS").classes("text-xl font-bold arena-title")
             ui.space()
             widgets.icon_button(
                 "New Tournament", "ic_trophy",
@@ -928,7 +928,8 @@ def show_tournament_setup(session):
                                          "All files (*.*)"))
                     if p:
                         add_player(p)
-                ui.button("…", on_click=browse_add).props("dense") \
+                ui.button("…", on_click=browse_add) \
+                    .props("dense color=secondary") \
                     .tooltip("Browse for an engine")
 
             @ui.refreshable
@@ -1059,7 +1060,8 @@ def show_tournament_setup(session):
                                 if p:
                                     team_add(t, p)
                             ui.button("…", on_click=browse_team) \
-                                .props("dense").tooltip("Browse for an engine")
+                                .props("dense color=secondary") \
+                                .tooltip("Browse for an engine")
                             ui.button("+ Manual", on_click=lambda t=team:
                                       team_add_human(t)) \
                                 .props("dense flat no-caps") \
@@ -1345,7 +1347,7 @@ def show_tournament_window(session, tsess: TournamentSession):
             ui.element("img").props('src="/assets/ui/nav_tournaments.png"') \
                 .style("height: 44px; width: auto;")
             with ui.column().classes("gap-0"):
-                ui.label(t.name).classes("text-lg font-bold text-primary")
+                ui.label(t.name).classes("text-lg font-bold arena-title")
                 fmt_lbl = ui.label("").classes("text-xs text-gray-500")
             ui.space()
             status_lbl = ui.label(tsess.status_msg).classes("text-sm") \
@@ -1390,8 +1392,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                     .style(f"color: {COLOR_BLUE}")
                 verdict = MoveVerdict(20)
 
-                black_banner, black_name_lbl, black_rank_lbl, \
-                    black_clock_lbl, black_h2h_lbl = widgets.banner(COLOR_SILVER)
+                black_bar = widgets.PlayerBar()
 
                 with ui.row().classes("w-full no-wrap flex-grow gap-2 "
                                       "justify-center items-stretch"):
@@ -1431,8 +1432,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                                                on_drag_start=_human_pick,
                                                on_drop=_human_drop)
 
-                white_banner, white_name_lbl, white_rank_lbl, \
-                    white_clock_lbl, white_h2h_lbl = widgets.banner(COLOR_GOLD)
+                white_bar = widgets.PlayerBar()
 
             # ── Right: standings / schedule / bracket ─────
             with ui.column().classes("flex-grow min-w-0"):
@@ -1555,7 +1555,8 @@ def show_tournament_window(session, tsess: TournamentSession):
                                          "All files (*.*)"))
                     if p:
                         _do_add(p)
-                ui.button("…", on_click=_browse_add).props("dense") \
+                ui.button("…", on_click=_browse_add) \
+                    .props("dense color=secondary") \
                     .tooltip("Browse for an engine")
             with ui.row().classes("w-full justify-end gap-2"):
                 ui.button("Cancel", on_click=add_dlg.close) \
@@ -1640,8 +1641,8 @@ def show_tournament_window(session, tsess: TournamentSession):
                 wtime, btime = tsess.wtime_ms, tsess.btime_ms
                 turn, clock_at, state = tsess.turn, tsess.clock_at, tsess.state
             if not (use_clock and white):
-                white_clock_lbl.set_text("")
-                black_clock_lbl.set_text("")
+                white_bar.set_clock("")
+                black_bar.set_clock("")
                 low_time.clear()
                 return
             # live countdown for the side currently thinking
@@ -1651,9 +1652,10 @@ def show_tournament_window(session, tsess: TournamentSession):
                     wtime -= elapsed
                 else:
                     btime -= elapsed
-            white_clock_lbl.set_text(fmt_clock(wtime))
-            black_clock_lbl.set_text(fmt_clock(btime))
-            if state != "running":
+            running = state == "running"
+            white_bar.set_clock(fmt_clock(wtime), low=running and wtime < 10000)
+            black_bar.set_clock(fmt_clock(btime), low=running and btime < 10000)
+            if not running:
                 return
             for side, ms in (("w", wtime), ("b", btime)):
                 warn, low_time[side] = low_time_warning(ms, low_time.get(side))
@@ -1663,14 +1665,7 @@ def show_tournament_window(session, tsess: TournamentSession):
         def _refresh_banners(force_h2h=False):
             with tsess.lock:
                 white, black = tsess.white_name, tsess.black_name
-                turn = tsess.turn
-            white_name_lbl.set_text(white or "—")
-            black_name_lbl.set_text(black or "—")
-            for raw, lbl in ((white, white_rank_lbl), (black, black_rank_lbl)):
-                text, color = (session.rank_line(raw, t.time_control)
-                               if raw else ("", "#555"))
-                lbl.set_text(text)
-                lbl.style(f"color: {color}")
+                turn, state = tsess.turn, tsess.state
             # Head-to-head of the pairing; rescan only on new game/results
             if force_h2h or h2h_state["key"] != (white, black):
                 w_w, dr, b_w = (session.head_to_head(white, black)
@@ -1678,14 +1673,11 @@ def show_tournament_window(session, tsess: TournamentSession):
                 h2h_state.update(key=(white, black),
                                  w=widgets.h2h_html(w_w, dr, b_w),
                                  b=widgets.h2h_html(b_w, dr, w_w))
-            white_h2h_lbl.set_content(h2h_state["w"])
-            black_h2h_lbl.set_content(h2h_state["b"])
-            if turn == "b":
-                black_banner.classes(add="active")
-                white_banner.classes(remove="active")
-            else:
-                white_banner.classes(add="active")
-                black_banner.classes(remove="active")
+            for bar, side, raw in ((white_bar, "w", white), (black_bar, "b", black)):
+                text, color = (session.rank_line(raw, t.time_control)
+                               if raw else ("", None))
+                bar.show(side, raw or "—", text, color, h2h_state[side])
+                bar.set_active(state == "running" and turn == side)
 
         def _refresh_tables():
             fmt_lbl.set_text(
@@ -1720,7 +1712,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                 ui.element("img").props('src="/assets/ui/badge_crown.png"') \
                     .style("height: 72px; width: auto;")
                 ui.label("TOURNAMENT CHAMPION") \
-                    .classes("text-2xl font-bold text-primary")
+                    .classes("text-2xl font-bold arena-title")
                 ui.label(t.winner.name if t.winner else "?") \
                     .classes("text-xl font-bold").style(f"color: {COLOR_GOLD}")
                 ui.label(f"{t.name}  ·  {t.format}  ·  "
@@ -1853,7 +1845,7 @@ def _show_player_card(session, t, name):
         with ui.row().classes("w-full items-center gap-3 no-wrap"):
             ui.element("img").props('src="/assets/ui/st_engine.png"') \
                 .style("height: 18px; width: auto;")
-            ui.label(name).classes("text-lg font-bold text-primary")
+            ui.label(name).classes("text-lg font-bold arena-title")
             ui.label(rank_txt).classes("text-xs") \
                 .style(f"color: {rank_col}")
             ui.space()
@@ -2059,14 +2051,14 @@ def _bracket_text(t):
     """Simple text bracket for knockout tournaments."""
     lines = []
     for rnd in sorted(t._ko_round_games):
-        lines.append(f'<b style="color:#E94560">Round {rnd}</b>')
+        lines.append(f'<b style="color:{TEXT_1}">Round {rnd}</b>')
         for g in t._ko_round_games[rnd]:
             res = g.result or "…"
             lines.append(
                 f'&nbsp;&nbsp;{g.white.name} vs {g.black.name}'
-                f'  <span style="color:#00BFFF">{res}</span>')
+                f'  <span style="color:{COLOR_BLUE}">{res}</span>')
     if t.winner:
-        lines.append(f'<b style="color:#FFD700">Winner: {t.winner.name}</b>')
+        lines.append(f'<b style="color:{COLOR_GOLD}">Winner: {t.winner.name}</b>')
     return "<br>".join(lines) or "Bracket not generated yet."
 
 
@@ -2109,7 +2101,7 @@ def show_tournament_history(session, tournament_id, name):
         with ui.row().classes("w-full items-center gap-2"):
             ui.element("img").props('src="/assets/ui/st_finished.png"') \
                 .style("height: 20px; width: auto;")
-            ui.label(name).classes("text-xl font-bold text-primary")
+            ui.label(name).classes("text-xl font-bold arena-title")
             ui.label(f"{fmt}  ·  {len(rows)} games  ·  {rows[0]['date']}") \
                 .classes("text-xs text-gray-500")
 

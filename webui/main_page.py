@@ -3,11 +3,9 @@
 # ═══════════════════════════════════════════════════════════
 
 import os
-from html import escape
 
 from nicegui import app, ui, run
 
-from core.opening_book import OpeningBook
 from core.review import move_number
 from core.utils import (
     get_base_path, get_db_path, get_resource_path, fmt_clock,
@@ -16,11 +14,11 @@ from core.utils import (
 from data.database import retag_openings_once
 from webui import dialogs, masters, review, tournament, views, widgets
 from webui.board import BoardView, EvalBar
-from webui.quality import MoveVerdict
+from webui.quality import MOVE_CLICK_JS, coach_html, move_list_html
 from webui.session import GameSession, parse_opening_book, TIME_CONTROLS
+from webui.sidebar import Sidebar
 from webui.theme import (
-    apply_theme, COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN,
-    COLOR_ORANGE, COLOR_MUTED,
+    apply_theme, COLOR_BLUE, COLOR_GREEN, COLOR_ORANGE, COLOR_MUTED,
     PIECE_SETS, piece_folder, set_piece_folder,
     BOARD_THEMES, board_theme, set_board_theme, push_board_colors,
 )
@@ -372,85 +370,123 @@ def main_page():
     </script>
     """)
 
-    # ── Header ────────────────────────────────────────────
-    # "row" is explicit: NiceGUI 3.x headers no longer default to it
-    with ui.header().classes(
-            "row no-wrap items-center bg-[#0F0F1E] px-4 py-2 gap-3"):
-        ui.element("img").props('src="/assets/pieces/wN.png"') \
-            .style("height: 34px; width: auto;")
-        ui.label("ENGINE ARENA").classes("text-lg font-bold text-primary")
-        ui.space()
-        for card, handler, tip in [
-            ("rankings",
-             lambda: widgets.with_loader(
-                 lambda: views.show_rankings(session), "Loading rankings…"),
-             "Rankings & statistics"),
-            ("openings",
-             lambda: widgets.with_loader(
-                 lambda: views.show_opening_stats(session),
-                 "Analyzing openings…"),
-             "Opening statistics"),
-            ("tournaments",
-             lambda: widgets.with_loader(
-                 lambda: tournament.show_tournament_list(session),
-                 "Loading tournaments…"),
-             "Tournaments"),
-            ("history",
-             lambda: widgets.with_loader(
-                 lambda: views.show_game_history(session),
-                 "Loading game history…"),
-             "Game history"),
-            ("masters",
-             lambda: widgets.with_loader(
-                 lambda: masters.show_masters_db(session),
-                 "Loading masters database…"),
-             "Real games by GMs, IMs and other rated human players"),
-        ]:
-            nav_img = ui.element("img") \
-                .props(f'src="/assets/ui/nav_{card}.png"') \
-                .classes("nav-card").on("click", handler) \
-                .tooltip(tip)
-            if card == "masters":
-                with nav_img:
-                    masters_badge = ui.badge("") \
-                        .props("floating color=positive")
-                    masters_badge.set_visibility(False)
-        # Pulls newly relayed tournament games on a worker thread a few
-        # seconds from now; no-ops unless the user turned auto-sync on.
-        masters.schedule_auto_sync(session, masters_badge)
-        ui.space()
-        pick_btn = ui.button("Pick Opening",
-                             on_click=lambda: _pick_opening(pick_btn)) \
-            .props("dense no-caps color=secondary")
-        with pick_btn:
-            ui.element("img").props('src="/assets/ui/ic_book.png"') \
-                .classes("btn-ic ml-2")
-        ui.button("✕", on_click=lambda: _clear_preset(pick_btn)) \
-            .props("dense flat color=grey")
+    # ── Sidebar: one row per screen, as on chess.com ──────
+    nav = Sidebar("Engine Arena")
+    nav.item("Play", "ic_play", current=True)
+    for label, icon_name, handler, tip in [
+        ("Rankings", "ic_trophy",
+         lambda: widgets.with_loader(
+             lambda: views.show_rankings(session), "Loading rankings…"),
+         "Rankings & statistics"),
+        ("Openings", "ic_book",
+         lambda: widgets.with_loader(
+             lambda: views.show_opening_stats(session),
+             "Analyzing openings…"),
+         "Opening statistics"),
+        ("Tournaments", "badge_swords",
+         lambda: widgets.with_loader(
+             lambda: tournament.show_tournament_list(session),
+             "Loading tournaments…"),
+         "Tournaments"),
+        ("History", "ic_calendar",
+         lambda: widgets.with_loader(
+             lambda: views.show_game_history(session),
+             "Loading game history…"),
+         "Game history"),
+        ("Masters", "ic_database",
+         lambda: widgets.with_loader(
+             lambda: masters.show_masters_db(session),
+             "Loading masters database…"),
+         "Real games by GMs, IMs and other rated human players"),
+    ]:
+        item = nav.item(label, icon_name, handler, tooltip=tip)
+    with item.row:                      # the last row: Masters
+        masters_badge = ui.badge("").props("floating color=positive")
+        masters_badge.set_visibility(False)
+    # Pulls newly relayed tournament games on a worker thread a few
+    # seconds from now; no-ops unless the user turned auto-sync on.
+    masters.schedule_auto_sync(session, masters_badge)
 
-        def _toggle_sound():
-            session.sound_muted = not session.sound_muted
-            snd_btn.props(f"icon={'volume_off' if session.sound_muted else 'volume_up'}")
-            ui.run_javascript(
-                f"window.arenaSoundMuted = {str(session.sound_muted).lower()}")
+    def _toggle_sound():
+        session.sound_muted = not session.sound_muted
+        sound_item.set_text("Sound off" if session.sound_muted else "Sound on")
+        ui.run_javascript(
+            f"window.arenaSoundMuted = {str(session.sound_muted).lower()}")
 
-        snd_btn = ui.button(on_click=_toggle_sound) \
-            .props(f"dense flat round color=grey "
-                   f"icon={'volume_off' if session.sound_muted else 'volume_up'}") \
-            .tooltip("Toggle sound effects")
+    nav.item("Settings", "ic_settings", lambda: settings_dlg.open(),
+             footer=True, tooltip="Board and piece style")
+    sound_item = nav.item("Sound off" if session.sound_muted else "Sound on",
+                          "ic_bell", _toggle_sound, footer=True,
+                          tooltip="Toggle sound effects")
 
-    # ── Main 3-column layout ──────────────────────────────
-    with ui.row().classes("w-full no-wrap gap-3 p-2 items-stretch"):
+    # ── Settings dialog, opened from the sidebar ──────────
+    with ui.dialog() as settings_dlg, \
+            ui.card().classes("arena-panel w-[360px] gap-3"):
+        widgets.heading("ic_settings", "Settings", size=18,
+                        text_cls="text-lg font-bold arena-title")
 
-        # ══ Left: configuration ══
-        with ui.column().classes("w-[290px] shrink-0 gap-2"):
-            with ui.card().classes("arena-panel w-full gap-1 p-3"):
-                ui.label("CONFIGURATION").classes("arena-heading")
-                mode = ui.radio(
+        def on_piece_set(e):
+            set_piece_folder(e.value)
+            board_view.redraw_pieces()
+            refresh_banners()           # the avatars follow
+            config_ui.refresh()         # and the kings by the names
+        ui.select(PIECE_SETS, value=piece_folder(), label="Piece design",
+                  on_change=on_piece_set) \
+            .props("options-dense").classes("w-full")
+
+        def on_board_theme(e):
+            set_board_theme(e.value)
+            push_board_colors()
+        ui.select({k: label for k, (label, _, _) in BOARD_THEMES.items()},
+                  value=board_theme(), label="Board style",
+                  on_change=on_board_theme) \
+            .props("options-dense").classes("w-full")
+        with ui.row().classes("w-full justify-end"):
+            ui.button("Close", on_click=settings_dlg.close) \
+                .props("flat no-caps color=grey")
+
+    # ── Board column and side panel ───────────────────────
+    with ui.row().classes("w-full no-wrap gap-4 items-start justify-center"):
+
+        # ══ Board: status, player bars, eval bar ══
+        # As wide as the board (its height limit plus the eval bar), so the
+        # clocks line up with the board's right edge
+        with ui.column().classes("flex-grow min-w-0 gap-1 items-stretch") \
+                .style("max-width: calc(100vh - 136px)"):
+            status_lbl = ui.label("Ready — set up a game and press Start Game") \
+                .classes("arena-status w-full text-center")
+            top_bar = widgets.PlayerBar()
+            with ui.row().classes("w-full no-wrap gap-2 items-stretch"):
+                with ui.column().classes("gap-0 self-stretch"):
+                    eval_bar = EvalBar()
+                with ui.element("div").classes("flex-grow min-w-0"):
+                    # overlay: the grade badge of a move being previewed.
+                    # Pieces move by click-click or by drag and drop.
+                    board_view = BoardView(_board_state, on_click=_square_clicked,
+                                           overlay=True,
+                                           on_drag_start=_piece_picked,
+                                           on_drop=_piece_dropped)
+            bottom_bar = widgets.PlayerBar()
+
+        # ══ Side panel: Play / Game / Engine ══
+        with ui.column().classes("side-panel w-[400px] shrink-0 gap-0 no-wrap") \
+                .style("height: calc(100vh - 32px)"):
+            tabs = widgets.PanelTabs([("play", "Play", "ic_play"),
+                                      ("game", "Game", "ic_flag"),
+                                      ("engine", "Engine", "ic_power")])
+
+            # ── Play: set a game up ──
+            with tabs.page("play"), \
+                    ui.scroll_area().classes("w-full flex-grow min-h-0"), \
+                    ui.column().classes("panel-body w-full gap-2"):
+                mode = ui.toggle(
                     {GameSession.MODE_EVE: "Engine vs Engine",
                      GameSession.MODE_HVE: "Play vs Engine",
                      GameSession.MODE_HVH: "2 Players"},
-                    value=session.play_mode).props("dense")
+                    value=session.play_mode) \
+                    .props("spread no-caps unelevated toggle-color=primary "
+                           "color=secondary text-color=white") \
+                    .classes("w-full")
 
                 config_area = ui.column().classes("w-full gap-1")
 
@@ -469,24 +505,15 @@ def main_page():
                     if session.play_mode == GameSession.MODE_EVE:
                         # No display-name input in EvE: the name is derived
                         # from the selected engine file anyway
-                        _engine_config("BLACK", "e1", COLOR_SILVER, "bK",
-                                       name_input=False)
-                        with ui.row().classes("w-full justify-center"):
-                            locked.append(
-                                ui.button("⇄ SWITCH COLORS",
-                                          on_click=_swap_colors)
-                                .props("dense flat size=sm")
-                                .classes("text-xs")
-                                .tooltip("Swap the colors of the two engines"))
-                        _engine_config("WHITE", "e2", COLOR_GOLD, "wK",
-                                       name_input=False)
+                        _engine_config("BLACK", "e1", "bK", name_input=False)
+                        _switch_colors_button("Swap the colors of the two engines")
+                        _engine_config("WHITE", "e2", "wK", name_input=False)
                     elif session.play_mode == GameSession.MODE_HVH:
                         _two_player_config()
                     else:
                         with ui.row().classes("items-center gap-1 no-wrap"):
                             widgets.icon("ic_user", 14)
-                            ui.label("PLAYER INFO").classes(
-                                "text-xs font-bold").style("color:#00FF00")
+                            ui.label("YOU").classes("arena-heading")
                         locked.append(
                             ui.input(label="Your name",
                                      value=session.player_name,
@@ -499,14 +526,8 @@ def main_page():
                                      on_change=lambda e: setattr(
                                          session, "player_color", e.value))
                             .props("inline dense"))
-                        with ui.row().classes("w-full justify-center"):
-                            locked.append(
-                                ui.button("⇄ SWITCH COLORS",
-                                          on_click=_swap_colors)
-                                .props("dense flat size=sm")
-                                .classes("text-xs")
-                                .tooltip("Swap colors with the engine"))
-                        _engine_config("OPPONENT", "e2", COLOR_GOLD, "wK")
+                        _switch_colors_button("Swap colors with the engine")
+                        _engine_config("OPPONENT", "e2", "wK")
                     for w in locked:
                         w.set_enabled(not session.game_running)
 
@@ -514,8 +535,7 @@ def main_page():
                     """Two names, one board: both sides are played by hand."""
                     with ui.row().classes("items-center gap-1 no-wrap"):
                         widgets.icon("ic_user", 14)
-                        ui.label("2 PLAYERS").classes(
-                            "text-xs font-bold").style("color:#00FF00")
+                        ui.label("PLAYERS").classes("arena-heading")
                     for attr, label, piece_code in (
                             ("white_player", "White", "wK"),
                             ("black_player", "Black", "bK")):
@@ -528,21 +548,24 @@ def main_page():
                                              setattr(session, attr, e.value or ""),
                                              refresh_banners()))
                                 .props("dense").classes("flex-grow"))
-                    with ui.row().classes("w-full justify-center"):
-                        locked.append(
-                            ui.button("⇄ SWITCH COLORS", on_click=_swap_colors)
-                            .props("dense flat size=sm").classes("text-xs")
-                            .tooltip("Swap which player has White"))
+                    _switch_colors_button("Swap which player has White")
                     widgets.hint("Every move is graded as you play. Finished "
                                  "games are saved and rated under these names.")
 
-                def _engine_config(title, prefix, color, piece_code=None,
+                def _switch_colors_button(tip):
+                    """The ⇄ link between the two sides' settings."""
+                    with ui.row().classes("w-full justify-center"):
+                        locked.append(
+                            ui.button("⇄ Switch colors", on_click=_swap_colors)
+                            .props("dense flat no-caps size=sm color=grey-5")
+                            .tooltip(tip))
+
+                def _engine_config(title, prefix, piece_code=None,
                                    name_input=True):
                     with ui.row().classes("items-center gap-1 no-wrap"):
                         if piece_code:
-                            widgets.piece(piece_code, 16)
-                        ui.label(title).classes("text-xs font-bold") \
-                            .style(f"color: {color}")
+                            widgets.piece(piece_code, 18)
+                        ui.label(title).classes("arena-heading")
 
                     def apply_engine(path, prefix=prefix):
                         name = os.path.splitext(os.path.basename(path))[0]
@@ -584,7 +607,8 @@ def main_page():
                                 config_ui.refresh()
                                 refresh_banners()
                         locked.append(
-                            ui.button("…", on_click=browse).props("dense")
+                            ui.button("…", on_click=browse)
+                            .props("dense color=secondary")
                             .tooltip("Browse for an engine .exe"))
                     if name_input:
                         locked.append(
@@ -622,7 +646,7 @@ def main_page():
                     config_ui()
 
                 ui.separator()
-                widgets.heading("ic_settings", "SETTINGS", size=15, text_cls="arena-heading")
+                ui.label("TIME CONTROL").classes("arena-heading")
                 tc_sel = ui.select(
                     {k: v[0] for k, v in TIME_CONTROLS.items()},
                     value=session.time_control, label="Time control",
@@ -638,42 +662,88 @@ def main_page():
                               session, "delay_s", float(e.value or 0.5))) \
                     .props("dense").classes("w-full")
 
-                def on_piece_set(e):
-                    set_piece_folder(e.value)
-                    board_view.redraw_pieces()
-                    config_ui.refresh()      # sidebar king icons follow
-                ui.select(PIECE_SETS, value=piece_folder(),
-                          label="Piece design", on_change=on_piece_set) \
-                    .props("dense options-dense").classes("w-full")
-
-                def on_board_theme(e):
-                    set_board_theme(e.value)
-                    push_board_colors()
-                ui.select({k: label for k, (label, _, _)
-                           in BOARD_THEMES.items()},
-                          value=board_theme(), label="Board style",
-                          on_change=on_board_theme) \
-                    .props("dense options-dense").classes("w-full")
-
-            with ui.card().classes("arena-panel w-full gap-1 p-3"):
-                _action_btn("ic_play",    "START GAME",     session.start_game,
-                            primary=True)
-                _action_btn("ic_pause",   "PAUSE / RESUME", session.toggle_pause)
-                _action_btn("ic_stop",    "STOP GAME",      _stop_game)
-                _action_btn("ic_refresh", "NEW GAME",       session.new_game)
-                _action_btn(None,         "FLIP BOARD",
-                            lambda: board_view.flip())
-                _action_btn("ic_export",  "EXPORT PGN",     _export_pgn)
-                _action_btn("ic_search",  "GAME REVIEW",    _open_review)
-
-            with ui.card().classes("arena-panel w-full gap-1 p-3"):
-                widgets.heading("ic_flag", "STARTING OPENING", size=15, text_cls="arena-heading")
-                preset_lbl = ui.label("Normal start") \
-                    .classes("text-xs").style(f"color: {COLOR_MUTED}")
                 ui.separator()
-                ui.label("Material balance").classes("text-xs text-gray-500")
-                material_lbl = ui.label("Equal").classes("mono text-sm")
+                ui.label("STARTING POSITION").classes("arena-heading")
+                preset_lbl = ui.label("Normal start").classes("text-sm") \
+                    .style(f"color: {COLOR_MUTED}")
+                with ui.row().classes("w-full no-wrap gap-2"):
+                    pick_btn = ui.button(
+                        "Pick Opening", on_click=lambda: _pick_opening(pick_btn)) \
+                        .props("dense no-caps color=secondary") \
+                        .classes("flex-grow") \
+                        .tooltip("Start the game from a book opening")
+                    ui.button(icon="close", on_click=lambda: _clear_preset(pick_btn)) \
+                        .props("dense flat color=grey").tooltip("Normal start")
+
+            with tabs.page("play"), ui.column().classes("panel-foot w-full"):
+                # color=None: the green comes from .cta
+                ui.button("Start Game", color=None,
+                          on_click=lambda: _start_game()) \
+                    .props("no-caps unelevated").classes("cta w-full")
+
+            # ── Game: the coach, the moves, the controls ──
+            with tabs.page("game"):
+                with ui.element("div").classes("coach panel-body w-full"):
+                    ui.element("img").props('src="/assets/logo.png"')
+                    coach = ui.html("", sanitize=False).classes("coach-bubble")
+                with ui.row().classes("w-full items-center no-wrap gap-2 px-[14px]"):
+                    opening_lbl = ui.label("").classes("opening-line flex-grow")
+                    # Shown while the board previews an earlier move
+                    preview_bar = ui.button("Back to game", on_click=preview.leave) \
+                        .props("dense no-caps unelevated color=secondary") \
+                        .tooltip("Show the position as it stands in the game")
+                    preview_bar.set_visibility(False)
+                moves_area = ui.scroll_area().classes(
+                    "w-full flex-grow min-h-0 px-[14px]")
+                with moves_area:
+                    # Our own markup; SAN comes from the board and is escaped
+                    moves_html = ui.html("", sanitize=False).classes("move-grid w-full")
+                    # A click on a move previews the position after it
+                    moves_html.on("click", lambda e: preview.show(e.args),
+                                  js_handler=MOVE_CLICK_JS)
+                with ui.column().classes("panel-foot w-full gap-3"):
+                    with ui.row().classes("nav-row w-full no-wrap gap-2"):
+                        for icon_name, where, tip in (
+                                ("first_page", "start", "Start position"),
+                                ("chevron_left", "back", "Previous move"),
+                                ("chevron_right", "forward", "Next move"),
+                                ("last_page", "end", "Back to the game")):
+                            ui.button(icon=icon_name, color=None,
+                                      on_click=lambda w=where: _step(w)) \
+                                .props("flat dense").classes("flex-grow").tooltip(tip)
+                    with ui.row().classes("nav-row w-full no-wrap gap-2"):
+                        undo_btn = ui.button("Undo", icon="undo", color=None,
+                                             on_click=lambda: _undo()) \
+                            .props("flat dense no-caps").classes("flex-grow") \
+                            .tooltip("Take back your last move (against an "
+                                     "engine, its reply too)")
+                        pause_btn = ui.button("Pause", icon="pause", color=None,
+                                              on_click=session.toggle_pause) \
+                            .props("flat dense no-caps").classes("flex-grow")
+                        stop_btn = ui.button("Stop", icon="stop", color=None,
+                                             on_click=_stop_game) \
+                            .props("flat dense no-caps").classes("flex-grow")
+                        ui.button("Flip", icon="swap_vert", color=None,
+                                  on_click=lambda: _flip()) \
+                            .props("flat dense no-caps").classes("flex-grow")
+                    ui.button("Game Review", color=None, on_click=_open_review) \
+                        .props("no-caps unelevated").classes("cta w-full")
+                    with ui.row().classes("w-full no-wrap gap-2"):
+                        ui.button("New Game", on_click=lambda: _new_game()) \
+                            .props("no-caps color=secondary").classes("flex-grow")
+                        ui.button("Export PGN", on_click=_export_pgn) \
+                            .props("no-caps color=secondary").classes("flex-grow")
+
+            # ── Engine: what the engines say, and the assets ──
+            with tabs.page("engine"), ui.column().classes(
+                    "panel-body w-full flex-grow min-h-0 gap-2 no-wrap"):
+                ui.label("ENGINE OUTPUT").classes("arena-heading")
+                eng_log = ui.log(max_lines=300).classes(
+                    "w-full flex-grow min-h-0 arena-log text-xs")
+                info_lbl = ui.label("").classes("text-xs") \
+                    .style(f"color: {COLOR_MUTED}")
                 ui.separator()
+                ui.label("OPENING BOOK").classes("arena-heading")
                 book_lbl = ui.label("Loading openings…").classes("text-xs")
 
                 async def _load_csv():
@@ -688,7 +758,7 @@ def main_page():
                                     on_click=_load_csv, secondary=True,
                                     dense=True, classes="w-full")
                 ui.separator()
-                widgets.heading("ic_search", "ANALYZER", size=15, text_cls="arena-heading")
+                ui.label("ANALYZER").classes("arena-heading")
                 analyzer_lbl = ui.label("Loading analyzer…").classes("text-xs")
 
                 async def _load_analyzer():
@@ -702,110 +772,21 @@ def main_page():
                                     on_click=_load_analyzer, secondary=True,
                                     dense=True, classes="w-full")
 
-        # ══ Center: board ══
-        with ui.column().classes("flex-grow items-stretch gap-1 min-w-0"):
-            status_lbl = ui.label("Ready — load engines and press START") \
-                .classes("text-center font-bold text-primary w-full")
-            opening_lbl = ui.label("").classes(
-                "text-center italic text-sm w-full rounded px-2 py-1") \
-                .style(f"color: {COLOR_BLUE}; background: #0D1B2A; "
-                       f"border: 1px solid #003366")
-
-            black_banner, black_name_lbl, black_rank_lbl, black_clock_lbl, \
-                black_h2h_lbl = widgets.banner(COLOR_SILVER)
-
-            # No flex-grow: the row hugs the board so the white banner sits
-            # right below it instead of being pushed to the column bottom.
-            with ui.row().classes("w-full no-wrap gap-2 "
-                                  "justify-center items-stretch"):
-                with ui.column().classes("items-center gap-0 py-1 self-stretch"):
-                    ui.element("img").props('src="/assets/pieces/bK.png"') \
-                        .style("height: 18px; width: auto;")
-                    eval_bar = EvalBar()
-                    ui.element("img").props('src="/assets/pieces/wK.png"') \
-                        .style("height: 18px; width: auto;")
-                with ui.element("div").classes("flex-grow min-w-0"):
-                    # overlay: the grade badge of a move being previewed.
-                    # Pieces move by click-click or by drag and drop.
-                    board_view = BoardView(_board_state, on_click=_square_clicked,
-                                           overlay=True,
-                                           on_drag_start=_piece_picked,
-                                           on_drop=_piece_dropped)
-
-            white_banner, white_name_lbl, white_rank_lbl, white_clock_lbl, \
-                white_h2h_lbl = widgets.banner(COLOR_GOLD)
-
-            check_lbl = ui.label("").classes("text-center font-bold w-full") \
-                .style("color: #FF4444")
-            verdict = MoveVerdict(22)
-            info_lbl = ui.label("").classes("text-center text-xs text-gray-500 w-full")
-
-        # ══ Right: logs ══
-        with ui.column().classes("w-[300px] shrink-0 gap-2"):
-            with ui.card().classes("arena-panel w-full p-3 gap-1 h-[46%]"):
-                with ui.row().classes("w-full items-center no-wrap gap-1"):
-                    ui.label("MOVES (SAN)").classes("arena-heading")
-                    ui.space()
-                    # Shown while the board previews an earlier move
-                    preview_bar = ui.button("Back to game", on_click=preview.leave) \
-                        .props("dense size=sm no-caps").classes("px-2") \
-                        .tooltip("Show the position as it stands in the game")
-                preview_lbl = ui.label("").classes("text-xs font-bold") \
-                    .style(f"color: {COLOR_BLUE}")
-                preview_bar.set_visibility(False)
-                preview_lbl.set_visibility(False)
-                moves_area = ui.scroll_area().classes("w-full flex-grow arena-log p-2")
-                with moves_area:
-                    # Our own markup; SAN comes from the board and is escaped
-                    moves_html = ui.html("", sanitize=False) \
-                        .classes("move-list mono text-sm leading-6")
-                    # A click on a move previews the position after it
-                    moves_html.on(
-                        "click", lambda e: preview.show(e.args),
-                        js_handler="(e) => { const t = e.target.closest("
-                                   "'[data-ply]'); if (t) emit(Number("
-                                   "t.dataset.ply)); }")
-            with ui.card().classes("arena-panel w-full p-3 gap-1 flex-grow"):
-                ui.label("ENGINE OUTPUT").classes("arena-heading")
-                eng_log = ui.log(max_lines=300).classes(
-                    "w-full flex-grow arena-log text-xs")
-
     # ═══════════════════════════════════════════════════════
     #  Rendering helpers (closures over the widgets above)
     # ═══════════════════════════════════════════════════════
 
     def render_moves():
         """The move list: each move with its grade badge, clickable to preview."""
-        reviews = session.analyst.reviews
-        current = preview.shown_ply
-        parts = []
-        for num, w_san, b_san in session.san_pairs():
-            # One unbreakable "12. Nf3 Nc6" unit, so a line never ends
-            # between a move number and its move
-            part = f'<span class="pair"><span class="n">{num}.</span>'
-            for ply, san in ((2 * num - 1, w_san), (2 * num, b_san)):
-                if not san:
-                    continue
-                rv = reviews[ply - 1] if ply <= len(reviews) else None
-                badge = (f"<i class='qi qi-{rv.cls.lower()}'></i>"
-                         if rv and rv.cls else "")
-                kind = "w" if ply % 2 else "b"
-                if "+" in san or "#" in san:
-                    kind += " chk"
-                if ply == current:
-                    kind += " cur"
-                part += (f' <span class="mv {kind}" data-ply="{ply}">'
-                         f'{badge}{escape(san)}</span>')
-            parts.append(part + "</span>")
-        if session.game_result and session.game_result not in ("", "*"):
-            parts.append(f'<br><b style="color:#E94560">{session.game_result}</b>')
-        moves_html.set_content(" ".join(parts))
+        analyst = session.analyst
+        moves_html.set_content(move_list_html(
+            analyst.sans, analyst.reviews, preview.shown_ply,
+            session.game_result))
         if not preview.active:
             moves_area.scroll_to(percent=1.0)
 
     def show_shown_move():
-        """Grade, eval and preview bar for the move the board shows."""
-        verdict.show(preview.review())
+        """The coach's line, the eval bar and Back to game for the move shown."""
         analyst = session.analyst
         ply = preview.shown_ply
         evaluation = analyst.eval_after(ply)
@@ -817,11 +798,19 @@ def main_page():
         if evaluation != (None, None):
             eval_bar.set_eval(*evaluation)
         preview_bar.set_visibility(preview.active)
-        preview_lbl.set_visibility(preview.active)
-        if preview.active:
-            preview_lbl.set_text(
-                f"Viewing {move_number(ply)} {analyst.sans[ply - 1]}" if ply
-                else "Viewing the start position")
+        if ply:
+            rv = preview.review()
+            if ply <= session.preset_plies:
+                waiting = " — from the chosen opening"     # never graded live
+            else:
+                waiting = " — grading…" if session.analyzer else ""
+            coach.set_content(coach_html(
+                rv, f"{move_number(ply)} {analyst.sans[ply - 1]}", evaluation,
+                analyst.best_line_san(ply) if rv else (), waiting))
+        else:
+            coach.set_content(
+                "<div class='title'>Start position</div>"
+                "<div>Every move is graded here as it is played.</div>")
 
     def on_preview_change():
         board_view.refresh()
@@ -850,55 +839,63 @@ def main_page():
         tc_sel.set_enabled(not running)
         config_ui.refresh()
 
+    def bars_by_side():
+        """{'w': bar, 'b': bar} — White sits at the bottom unless flipped."""
+        if board_view.flipped:
+            return {"w": top_bar, "b": bottom_bar}
+        return {"w": bottom_bar, "b": top_bar}
+
     def refresh_banners():
         white, black = session.player_names()
-        white_name_lbl.set_text(white)
-        black_name_lbl.set_text(black)
-        for raw, lbl in ((white, white_rank_lbl), (black, black_rank_lbl)):
-            text, color = session.rank_line(raw)
-            lbl.set_text(text)
-            lbl.style(f"color: {color}")
         # Head-to-head record of this exact pairing (from saved games)
         w_wins, draws, b_wins = session.head_to_head(white, black)
-        white_h2h_lbl.set_content(widgets.h2h_html(w_wins, draws, b_wins))
-        black_h2h_lbl.set_content(widgets.h2h_html(b_wins, draws, w_wins))
-        # Active-turn highlight
-        if session.board.turn == "b":
-            black_banner.classes(add="active")
-            white_banner.classes(remove="active")
-        else:
-            white_banner.classes(add="active")
-            black_banner.classes(remove="active")
+        white_pts, black_pts = session.board.material()
+        lead = white_pts - black_pts
+        bars = bars_by_side()
+        for side, name, h2h, ahead in (
+                ("w", white, widgets.h2h_html(w_wins, draws, b_wins), lead),
+                ("b", black, widgets.h2h_html(b_wins, draws, w_wins), -lead)):
+            text, color = session.rank_line(name)
+            bars[side].show(side, name, text, color, h2h)
+            bars[side].set_material(ahead)
+            # The side to move has its clock lit, as on chess.com
+            bars[side].set_active(session.game_running
+                                  and session.board.turn == side)
+        _update_clocks()
+
+    def sync_controls():
+        """Undo, Pause and Stop are live only when they can do something."""
+        undo_btn.set_enabled(session.can_undo())
+        pause_btn.set_enabled(session.game_running)
+        stop_btn.set_enabled(session.game_running)
+        pause_btn.set_text("Resume" if session.game_paused else "Pause")
 
     def on_board_changed():
         if preview.active and preview.ply >= session.analyst.ply:
-            # The game was reset under the preview (new game, new start)
+            # The game was reset under the preview (new game, takeback)
             preview.ply = None
-            show_shown_move()
         board_view.refresh()
         render_moves()
-        material_lbl.set_text(session.material_text())
+        show_shown_move()
         info_lbl.set_text(session.info_text())
-        if session.board.in_check():
-            side = "White" if session.board.turn == "w" else "Black"
-            check_lbl.set_text(f"{side} is in CHECK!")
-        else:
-            check_lbl.set_text("")
         refresh_banners()
+        sync_controls()
 
     # Whether each side was last seen under ten seconds, so the warning
     # sounds on the poll that crosses the line and not on the nine after
     low_time = {}
 
     def _update_clocks():
+        bars = bars_by_side()
         if not session.uses_clock():
-            white_clock_lbl.set_text("")
-            black_clock_lbl.set_text("")
+            for bar in bars.values():
+                bar.set_clock("")
             low_time.clear()
             return
         w, b = session.clock_ms()
-        white_clock_lbl.set_text(fmt_clock(w))
-        black_clock_lbl.set_text(fmt_clock(b))
+        for side, ms in (("w", w), ("b", b)):
+            bars[side].set_clock(fmt_clock(ms),
+                                 low=session.game_running and ms < 10000)
         if not session.game_running:
             return
         # Both clocks are checked, not just the side to move: a frozen one
@@ -911,14 +908,37 @@ def main_page():
                 # "clock" handler, on the game loop, with no slot context
                 client.run_javascript("window.arenaPlaySound('low_time')")
 
-    def on_move_review(rv):
-        """Badge and name of the last graded move, plus the analyzer's eval."""
-        render_moves()                  # its badge joins the move list
-        if preview.active:
-            return                      # the board shows an earlier move
-        verdict.show(rv)
-        if rv is not None and rv.evaluation:
-            eval_bar.set_eval(*rv.evaluation)
+    def on_move_review(_rv):
+        """A move was graded: its badge joins the list, the coach speaks."""
+        render_moves()
+        if not preview.active:          # else the board shows an earlier move
+            show_shown_move()
+
+    async def _start_game():
+        await session.start_game()
+        if session.game_running:
+            tabs.select("game")
+
+    async def _new_game():
+        await session.new_game()
+        tabs.select("play")
+
+    def _undo():
+        if not session.undo():
+            ui.notify("Nothing to take back right now", type="info")
+
+    def _flip():
+        board_view.flip()
+        eval_bar.set_flipped(board_view.flipped)
+        refresh_banners()
+
+    def _step(where):
+        """Walk the board through the game: start, back, forward, end."""
+        latest = session.analyst.ply
+        ply = preview.shown_ply
+        target = {"start": 0, "back": ply - 1, "forward": ply + 1,
+                  "end": latest}[where]
+        preview.show(max(0, min(latest, target)))
 
     def on_eval_bar(cp):
         if not preview.active:
@@ -936,8 +956,7 @@ def main_page():
             config_ui.refresh()         # auto color-swap changed the selectors
             dialogs.show_game_over(
                 session, result, reason, winner,
-                on_new_game=lambda: ui.timer(
-                    0.05, session.new_game, once=True),
+                on_new_game=lambda: ui.timer(0.05, _new_game, once=True),
                 on_rankings=lambda: views.show_rankings(session),
                 on_export=_export_pgn,
                 on_review=_open_review)
@@ -955,6 +974,8 @@ def main_page():
     session.on("banners", refresh_banners)
     session.on("banners", _sync_config_lock)
     session.on("status", lambda _msg: _sync_config_lock())
+    session.on("status", lambda _msg: sync_controls())
+    session.on("banners", sync_controls)
     session.on("clock", _update_clocks)
     session.on("sound", lambda kind: client.run_javascript(
         f"window.arenaPlaySound('{kind}')"))
@@ -979,7 +1000,7 @@ def main_page():
             ui.element("img").props('src="/assets/pieces/wN.png"') \
                 .style("height: 72px; width: auto;")
             ui.label("CHESS ENGINE ARENA") \
-                .classes("text-xl font-bold text-primary")
+                .classes("text-xl font-bold arena-title")
             ui.spinner(size="46px", color="primary")
             boot_status = ui.label("Preparing…").classes("text-sm text-gray-400")
             widgets.hint("Only the first run is slow — cached after that")
@@ -995,12 +1016,12 @@ def main_page():
     else:
         refresh_asset_labels(book_lbl, analyzer_lbl, opening_lbl)
 
-    # keep references used by the header closures
+    # keep references used by the module-level handlers below
     main_page._preset_lbl = preset_lbl
 
 
 # ═══════════════════════════════════════════════════════════
-#  Header / button handlers
+#  Board and button handlers
 # ═══════════════════════════════════════════════════════════
 
 class BoardPreview:
@@ -1088,20 +1109,6 @@ def _piece_picked(br, bc):
 async def _piece_dropped(fr, fc, br, bc):
     if not preview.active:
         await session.drop_piece(fr, fc, br, bc)
-
-
-def _action_btn(icon, text, on_click, primary=False):
-    """Full-width action button with an optional sprite icon."""
-    btn = ui.button(on_click=on_click).classes("w-full")
-    if not primary:
-        btn.props("color=secondary")
-    with btn:
-        with ui.row().classes("items-center justify-center gap-2 no-wrap"):
-            if icon:
-                ui.element("img").props(f'src="/assets/ui/{icon}.png"') \
-                    .classes("btn-ic")
-            ui.label(text).classes("text-sm font-medium")
-    return btn
 
 
 async def _pick_opening(pick_btn):

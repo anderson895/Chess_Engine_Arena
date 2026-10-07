@@ -11,7 +11,8 @@ from core.elo import fit_elo_history, tc_bucket, MIN_RATED_GAMES
 from core.utils import normalize_engine_name, get_tier
 from webui import review, widgets
 from webui.session import EMPTY_BUCKET
-from webui.theme import COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_RED
+from webui.theme import (COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN,
+                         COLOR_RED, TEXT_1)
 
 _TIER_CELL_SLOT = """
 <q-td :props="props">
@@ -203,7 +204,7 @@ def show_rankings(session):
             with ui.dialog() as dlg, ui.card().classes(
                     "arena-panel w-[460px] max-w-full gap-3 p-5"):
                 widgets.heading("ic_settings", "RENAME ENGINE",
-                                text_cls="text-lg font-bold text-primary")
+                                text_cls="text-lg font-bold arena-title")
                 ui.label(f"Current name:  {engine}") \
                     .classes("text-sm text-gray-400 mono")
                 name_in = ui.input(label="New name", value=engine) \
@@ -273,7 +274,7 @@ def show_elo_history(session, engine_name, tc=None):
             "arena-panel w-[780px] max-w-full"):
         widgets.heading("ic_chart",
                         f"Elo History — {normalize_engine_name(engine_name)}",
-                        text_cls="text-lg font-bold text-primary")
+                        text_cls="text-lg font-bold arena-title")
         if played < MIN_RATED_GAMES:
             # The rankings withhold this engine's number; saying "Current"
             # here would hand it back with more confidence than it has
@@ -320,10 +321,10 @@ def show_elo_history(session, engine_name, tc=None):
             with ui.row().classes("w-full justify-around"):
                 for label, val, col in [
                     ("Peak", str(max(elos)), COLOR_GOLD),
-                    ("Lowest", str(min(elos)), "#FF6B6B"),
+                    ("Lowest", str(min(elos)), COLOR_RED),
                     ("Change", f"{change:+d}",
-                     "#00FF80" if change >= 0 else COLOR_RED),
-                    ("Games", str(len(elos)), "#EAEAEA"),
+                     COLOR_GREEN if change >= 0 else COLOR_RED),
+                    ("Games", str(len(elos)), TEXT_1),
                 ]:
                     with ui.column().classes("items-center gap-0"):
                         ui.label(label).classes("text-xs text-gray-500")
@@ -514,7 +515,7 @@ def show_game_history(session, filter_engine=None):
             with ui.dialog() as dlg, ui.card().classes(
                     "arena-panel w-[460px] max-w-full gap-3 p-5"):
                 widgets.heading("ic_stop", "DELETE GAME RECORD",
-                                text_cls="text-lg font-bold text-primary")
+                                text_cls="text-lg font-bold arena-title")
                 ui.label(f"#{row['id']}  ·  {row['white']} vs {row['black']} "
                          f"·  {row['result']}").classes("text-sm mono")
                 widgets.hint("This also removes it from Elo ratings and "

@@ -805,6 +805,32 @@ class GameAnalyst:
         self.record(uci)
         return self.grade(self.ply)
 
+    def truncated(self, ply):
+        """
+        A new analyst for this game's first *ply* moves — a takeback —
+        keeping every analysis and grade already made for them. A grade
+        still being worked out for a later move lands on this old analyst
+        and is lost with it.
+        """
+        g = GameAnalyst(self.book, self._analyse)
+        for uci in self.moves[:ply]:
+            g.record(uci)
+        g.analyses[:ply + 1] = self.analyses[:ply + 1]
+        g.reviews[:ply] = self.reviews[:ply]
+        return g
+
+    def best_line_san(self, ply, limit=6):
+        """
+        SAN of the engine's best line from the position the move *ply* was
+        played in, or [] when that position has not been analysed.
+        """
+        lines = (self.analyses[ply - 1] or {}).get("lines") or []
+        pv = lines[0].get("pv") if lines else None
+        if not pv:
+            rv = self.reviews[ply - 1]
+            pv = [rv.best_uci] if rv and rv.best_uci else []
+        return san_line(self.boards[ply - 1].to_fen(), pv, limit)
+
     # ── The whole game ────────────────────────────────────
 
     def summary(self):

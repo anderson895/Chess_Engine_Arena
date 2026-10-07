@@ -137,7 +137,7 @@ async def ask_opening_choice(opening_book):
     with ui.dialog() as dialog, \
             ui.card().classes("arena-panel w-[820px] max-w-full h-[640px]"):
         widgets.heading("ic_book", "CHOOSE STARTING OPENING",
-                        text_cls="text-lg font-bold text-primary")
+                        text_cls="text-lg font-bold arena-title")
         ui.label(f"{len(all_entries)} openings — the game will start "
                  "from the selected line").classes("text-xs text-gray-500")
 
@@ -285,7 +285,7 @@ def show_game_over(session, result, reason, winner_name,
             ui.card().classes("arena-panel items-center w-[440px]"):
         ui.element("img").props(f'src="{badge}"') \
             .style("height: 72px; width: auto;")
-        ui.label(title).classes("text-3xl font-bold text-primary")
+        ui.label(title).classes("text-3xl font-bold arena-title")
 
         if winner_name:
             clean = normalize_engine_name(winner_name)
@@ -314,14 +314,15 @@ def show_game_over(session, result, reason, winner_name,
             .classes("text-xs italic").style(f"color: {COLOR_BLUE}")
 
         if on_review:
-            # No Quasar colour: the green comes from .review-cta
+            # No Quasar colour: the green comes from .cta
             ui.button("Game Review", color=None,
                       on_click=lambda: (dialog.close(), on_review())) \
-                .props("no-caps unelevated").classes("review-cta w-full mt-2")
+                .props("no-caps unelevated").classes("cta w-full mt-2")
         with ui.row().classes("w-full justify-center gap-2 mt-2"):
             if on_new_game:
                 ui.button("New Game",
-                          on_click=lambda: (dialog.close(), on_new_game()))
+                          on_click=lambda: (dialog.close(), on_new_game())) \
+                    .props("color=secondary no-caps")
             if on_rankings:
                 widgets.icon_button("Rankings", "ic_trophy", secondary=True,
                                     on_click=lambda: (dialog.close(),
@@ -329,6 +330,7 @@ def show_game_over(session, result, reason, winner_name,
             if on_export:
                 ui.button("Export PGN",
                           on_click=lambda: (dialog.close(), on_export())) \
-                    .props("color=secondary")
-            ui.button("Close", on_click=dialog.close).props("flat color=grey")
+                    .props("color=secondary no-caps")
+            ui.button("Close", on_click=dialog.close) \
+                .props("flat color=grey no-caps")
     dialog.open()

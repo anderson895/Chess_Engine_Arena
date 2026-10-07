@@ -169,6 +169,13 @@ class GameSession:
         self.btime_ms = (self.base_min or 0) * 60000
         self._think_start = None   # time.time() when current search began
 
+        # Takebacks: the clocks after every ply (index = plies played), the
+        # preset opening moves (never taken back) and the opening name the
+        # game started under
+        self._clock_log: list[tuple[float, float]] = []
+        self._preset_plies = 0
+        self._start_opening_name = None
+
         # Analysis state. The analyst follows the game being played: it
         # names the opening as positions arrive and grades each move.
         self._analyzer_alock = asyncio.Lock()
@@ -214,13 +221,10 @@ class GameSession:
     #  Derived state for the UI
     # ═══════════════════════════════════════════════════════
 
-    def san_pairs(self):
-        """Return [(move_num, white_san, black_san|None), …] from history."""
-        sans = [m[1] for m in self.board.move_history]
-        return [
-            (i // 2 + 1, sans[i], sans[i + 1] if i + 1 < len(sans) else None)
-            for i in range(0, len(sans), 2)
-        ]
+    @property
+    def preset_plies(self):
+        """How many of the game's first moves came from the chosen opening."""
+        return self._preset_plies
 
     def human_to_move(self):
         """True when a person, not an engine, plays the side to move."""
@@ -255,11 +259,6 @@ class GameSession:
                 return human, self.e2_name
             return self.e2_name, human
         return self.e2_name, self.e1_name
-
-    def material_text(self):
-        wm, bm = self.board.material()
-        d = wm - bm
-        return "Equal" if d == 0 else (f"White +{d}" if d > 0 else f"Black +{-d}")
 
     def info_text(self):
         t = "Black" if self.board.turn == "b" else "White"
@@ -556,6 +555,19 @@ class GameSession:
         elif self.current_opening_name:
             self._emit("opening", self.current_opening_name)
 
+    def _show_opening(self):
+        """
+        The opening line for a game just started or taken back: the named
+        position it stands in, else the opening it was started from, else
+        the book's readiness.
+        """
+        if self.analyst.opening[1]:
+            self._refresh_opening_display()
+        elif self.current_opening_name:
+            self._emit("opening", self.current_opening_name)
+        else:
+            self._refresh_opening_display(reset=True)
+
     # ═══════════════════════════════════════════════════════
     #  Game control
     # ═══════════════════════════════════════════════════════
@@ -620,12 +632,10 @@ class GameSession:
             if self.board.move_history:
                 self.last_move = self.board.move_history[-1][0]
         self._restart_analyst()           # preset moves included
-        if self.analyst.opening[1]:
-            self._refresh_opening_display()
-        elif self.current_opening_name:
-            self._emit("opening", self.current_opening_name)
-        else:
-            self._refresh_opening_display(reset=True)
+        self._preset_plies = len(self.board.move_history)
+        self._start_opening_name = self.current_opening_name
+        self._clock_log = [(self.wtime_ms, self.btime_ms)] * (self._preset_plies + 1)
+        self._show_opening()
 
         self._emit("eval_bar", 0)
         self._emit("move_review", None)
@@ -655,7 +665,7 @@ class GameSession:
             human_to_move = (
                 (self.player_color == "white") == (self.board.turn == "w"))
             if human_to_move:
-                self._emit("status", "Your turn — click a piece to move")
+                self._emit("status", self._your_turn_prompt())
             else:
                 self._game_task = asyncio.create_task(self._engine_turn())
         else:
@@ -734,12 +744,15 @@ class GameSession:
         self.selected_square = None
         self.game_result = ""
         self.eval_bar_cp = 0
+        self._clock_log = []
+        self._preset_plies = 0
+        self._start_opening_name = None
         self._restart_analyst()
         self._refresh_opening_display(reset=True)
         self._emit("eval_bar", 0)
         self._emit("move_review", None)
         self._emit("board_changed")
-        self._emit("status", "New game — load engines and press START")
+        self._emit("status", "New game — set it up and press Start Game")
 
     def swap_colors(self):
         """Swap sides for the next game (between games only).
@@ -1031,6 +1044,75 @@ class GameSession:
         check = " — in CHECK!" if self.board.in_check() else ""
         return f"{name} to move ({side}){check}"
 
+    def _your_turn_prompt(self):
+        """Status line when it is the person's move against the engine."""
+        if self.board.in_check():
+            return "CHECK! Your turn — you must get out of check!"
+        return "Your turn — click or drag a piece to move"
+
+    # ═══════════════════════════════════════════════════════
+    #  Takebacks
+    # ═══════════════════════════════════════════════════════
+
+    def _undo_plies(self):
+        """
+        How many plies an Undo takes back now: one in 2-player mode; the
+        person's last move and the engine's reply against an engine, so it
+        is their turn again. 0 when nothing can be taken back — the preset
+        opening moves never are.
+        """
+        if (not self.game_running or self.game_paused
+                or self._engine_thinking):
+            return 0
+        played = len(self.board.move_history) - self._preset_plies
+        if self.play_mode == self.MODE_HVH:
+            return 1 if played >= 1 else 0
+        if self.play_mode == self.MODE_HVE and self.human_to_move():
+            return 2 if played >= 2 else 0
+        return 0
+
+    def can_undo(self):
+        """True when the person at the board may take a move back now."""
+        return self._undo_plies() > 0
+
+    def undo(self):
+        """
+        Take moves back (see _undo_plies). The board is replayed up to the
+        position kept, so repetition counts and captured pieces are right,
+        and the clocks go back to where they stood. Moves already graded
+        keep their grades. Returns True if anything was taken back.
+        """
+        plies = self._undo_plies()
+        if not plies:
+            return False
+        keep = len(self.board.move_history) - plies
+        moves = self.board.uci_moves_list()[:keep]
+        self.board.reset()
+        for uci in moves:
+            self.board.apply_uci(uci)
+        self.last_move = moves[-1] if moves else None
+        self.selected_square = None
+        if len(self._clock_log) > keep:
+            self.wtime_ms, self.btime_ms = self._clock_log[keep]
+            del self._clock_log[keep + 1:]
+        self.analyst = self.analyst.truncated(keep)
+        self.current_opening_name = self._start_opening_name
+        self._show_opening()
+
+        last = self.analyst.reviews[keep - 1] if keep else None
+        self._emit("sound", "move")
+        self._emit("board_changed")
+        self._emit("move_review", last)
+        self._emit("clock")
+        self._emit("banners")
+        self._emit("status", self._turn_prompt()
+                   if self.play_mode == self.MODE_HVH
+                   else self._your_turn_prompt())
+        if keep > self._preset_plies and last is None:
+            # Its grade was still being worked out on the old analyst
+            asyncio.create_task(self._grade_move(self.analyst, keep))
+        return True
+
     async def _engine_turn(self):
         """The engine's reply in human-vs-engine mode."""
         self._engine_thinking = True
@@ -1048,10 +1130,7 @@ class GameSession:
             is_black = (self.player_color == "white")
             if not await self._play_engine_move(self.engine2, self.e2_name, is_black):
                 return
-            msg = ("CHECK! Your turn — you must get out of check!"
-                   if self.board.in_check()
-                   else "Your turn — click a piece to move")
-            self._emit("status", msg)
+            self._emit("status", self._your_turn_prompt())
         except asyncio.CancelledError:
             pass
         finally:
@@ -1074,6 +1153,7 @@ class GameSession:
     def _after_move(self, moves_before, was_white, san):
         # The analyst first: the board's listeners read it (move list grades)
         self.analyst.record(self.board.move_history[-1][0])
+        self._clock_log.append((self.wtime_ms, self.btime_ms))
         self._emit("sound", self._sound_for_san(san, was_white))
         self._emit("board_changed")
         self._refresh_opening_display()

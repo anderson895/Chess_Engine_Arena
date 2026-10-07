@@ -585,7 +585,7 @@ def show_masters_db(session):
             with ui.dialog() as dlg, ui.card().classes(
                     "arena-panel w-[460px] max-w-full gap-3 p-5"):
                 widgets.heading("ic_power", "REMOVE GAME",
-                                text_cls="text-lg font-bold text-primary")
+                                text_cls="text-lg font-bold arena-title")
                 ui.label(f"{row['white']} vs {row['black']} · {row['res']} · "
                          f"{row['date']}").classes("text-sm mono")
                 widgets.hint("Only removes it from the masters database. "
@@ -740,7 +740,7 @@ def show_maintenance_dialog(session, on_done=None):
                 with ui.dialog() as dlg, ui.card().classes(
                         "arena-panel w-[440px] max-w-full gap-3 p-5"):
                     widgets.heading("ic_power", "DELETE SOURCE",
-                                    text_cls="text-lg font-bold text-primary")
+                                    text_cls="text-lg font-bold arena-title")
                     ui.label(f"Delete all {n:,} games imported from "
                              f"'{src}'?").classes("text-sm")
                     widgets.hint("Engine games and ratings are untouched. "

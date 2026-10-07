@@ -21,12 +21,13 @@ from nicegui import run, ui
 from core.constants import QUALITY_COLORS
 from core.pgn import read_game
 from core.opening_book import opening_label
-from core.review import (GameAnalyst, PHASES, TABLE_ORDER, format_eval,
-                         move_number, san_line)
+from core.review import GameAnalyst, PHASES, TABLE_ORDER, move_number
 from data.reviews import ReviewCache
 from webui.board import BoardView, EvalBar
-from webui.quality import QUALITY_TIPS, icon_svg
+from webui.quality import (MOVE_CLICK_JS, NO_BEST_HINT, QUALITY_TIPS,
+                           coach_html, icon_svg, move_list_html)
 from webui.theme import piece_src
+from webui.widgets import PlayerBar
 
 # Search per position: label, milliseconds
 SPEEDS = {
@@ -37,9 +38,6 @@ SPEEDS = {
 DEFAULT_SPEED = "balanced"
 BOOK_SHARE = 0.3        # a book position only feeds the graph: search it less
 BEST_ARROW = "#81B64C"
-# Moves that need no "the best move was…" hint: they are best already,
-# or there was nothing to choose
-NO_BEST_HINT = ("Brilliant", "Great", "Best", "Book", "Forced")
 GRAPH_MOMENTS = ("Brilliant", "Great", "Miss", "Mistake", "Blunder")
 GRAPH_EVERY = 6         # redraw the graph every this many positions analysed
 
@@ -99,31 +97,6 @@ class ReviewSource:
                    engine_rating(session, white, tc),
                    engine_rating(session, black, tc),
                    "Current game", session.export_pgn_text() or "")
-
-
-class _PlayerBar:
-    """Avatar, name, rating and material lead — above or below the board."""
-
-    def __init__(self):
-        with ui.row().classes("review-player w-full no-wrap items-center gap-2"):
-            self.avatar = ui.element("div").classes("review-avatar")
-            with self.avatar:
-                self.img = ui.element("img")
-            with ui.column().classes("gap-0 min-w-0"):
-                with ui.row().classes("items-baseline gap-2 no-wrap"):
-                    self.name = ui.label("").classes("review-name ellipsis")
-                    self.rating = ui.label("").classes("review-rating")
-                self.material = ui.label("").classes("review-material")
-
-    def show(self, color, name, rating, lead, winner):
-        self.img.props(f'src="{piece_src(color + "K")}"')
-        self.name.set_text(name)
-        self.rating.set_text(f"({rating})" if rating else "")
-        self.material.set_text(f"+{lead}" if lead > 0 else "")
-        if winner:
-            self.avatar.classes(add="winner")
-        else:
-            self.avatar.classes(remove="winner")
 
 
 class ReviewScreen:
@@ -202,21 +175,21 @@ class ReviewScreen:
                                  "justify-center gap-1"):
             with ui.column().classes("gap-1 w-full items-stretch") \
                     .style("max-width: calc(100vh - 110px)"):
-                self.top_bar = _PlayerBar()
+                self.top_bar = PlayerBar()
                 with ui.row().classes("w-full no-wrap gap-2 items-stretch"):
                     with ui.column().classes("gap-0 self-stretch"):
                         self.eval_bar = EvalBar()
                     with ui.element("div").classes("flex-grow min-w-0"):
                         self.board = BoardView(self._board_state, overlay=True)
-                self.bottom_bar = _PlayerBar()
+                self.bottom_bar = PlayerBar()
 
     def _build_panel(self):
         with ui.column().classes("review-panel w-[430px] shrink-0 h-full "
                                  "no-wrap gap-0"):
             self._build_header()
-            with ui.element("div").classes("review-coach w-full"):
+            with ui.element("div").classes("coach review-coach w-full"):
                 ui.element("img").props('src="/assets/logo.png"')
-                self.bubble = ui.html("", sanitize=False).classes("review-bubble")
+                self.bubble = ui.html("", sanitize=False).classes("coach-bubble")
             self.graph = ui.echart(self._graph_options(),
                                    on_point_click=lambda e: self.goto(e.data_index)) \
                 .classes("review-graph").style("height: 84px")
@@ -228,29 +201,27 @@ class ReviewScreen:
                 self.speed_sel = ui.select(
                     {k: label for k, (label, _) in SPEEDS.items()},
                     value=self.speed, on_change=lambda e: self._set_speed(e.value)) \
-                    .props("dense borderless options-dense dark") \
+                    .props("dense borderless options-dense dark",
+                           remove="filled") \
                     .classes("review-speed ml-auto") \
                     .tooltip("Engine time per position — deeper is slower "
                              "but surer about Brilliant and Great moves")
             with ui.scroll_area().classes("w-full flex-grow min-h-0"):
                 self.summary_box = ui.column().classes("w-full gap-0")
                 self.walk_box = ui.column().classes("w-full gap-1")
-                with self.walk_box:
-                    self.opening_lbl = ui.label("").classes("review-opening")
+                with self.walk_box.classes("review-walk"):
+                    self.opening_lbl = ui.label("").classes("opening-line")
                     self.move_list = ui.html("", sanitize=False) \
-                        .classes("review-moves w-full")
-                    self.move_list.on(
-                        "click", lambda e: self.goto(int(e.args)),
-                        js_handler="(e) => { const t = e.target.closest("
-                                   "'[data-ply]'); if (t) emit(Number("
-                                   "t.dataset.ply)); }")
+                        .classes("move-grid w-full")
+                    self.move_list.on("click", lambda e: self.goto(int(e.args)),
+                                      js_handler=MOVE_CLICK_JS)
             # Buttons here take no Quasar colour (color=None): the review's
             # own greys and green come from the theme CSS
             with ui.column().classes("review-foot w-full gap-2"):
                 self.start_btn = ui.button("Start Review", color=None,
                                            on_click=lambda: self.set_mode("review")) \
-                    .props("no-caps unelevated").classes("review-cta w-full")
-                with ui.row().classes("review-nav w-full no-wrap gap-2") \
+                    .props("no-caps unelevated").classes("cta w-full")
+                with ui.row().classes("nav-row w-full no-wrap gap-2") \
                         as self.nav_row:
                     for icon, step, tip in (("first_page", "start", "Start"),
                                             ("chevron_left", "back", "Previous move"),
@@ -262,7 +233,7 @@ class ReviewScreen:
                     ui.button("Next", color=None,
                               on_click=lambda: self.step("forward")) \
                         .props("no-caps unelevated") \
-                        .classes("review-cta flex-grow").style("font-size: 1rem")
+                        .classes("cta flex-grow").style("font-size: 1rem")
         self.set_mode("summary")
 
     def step(self, where):
@@ -338,7 +309,7 @@ class ReviewScreen:
 
     def _summary_avatar(self, side):
         with ui.column().classes("items-center gap-0 min-w-0"):
-            with ui.element("div").classes("review-avatar"):
+            with ui.element("div").classes("pb-avatar"):
                 ui.element("img").props(f'src="{piece_src(side + "K")}"')
             name = self.src.white if side == "w" else self.src.black
             ui.label(name).classes("text-xs ellipsis w-full text-center") \
@@ -367,43 +338,18 @@ class ReviewScreen:
     # ── Walkthrough view ──────────────────────────────────
 
     def _render_move_list(self):
-        rows = []
-        for i in range(0, self.n, 2):
-            rows.append(f"<span class='n'>{i // 2 + 1}.</span>")
-            for ply in (i + 1, i + 2):
-                if ply > self.n:
-                    rows.append("<span></span>")
-                    continue
-                rv = self._review_at(ply)
-                badge = (f"<i class='qi qi-{rv.cls.lower()}'></i>"
-                         if rv and rv.cls else "")
-                cur = " cur" if ply == self.ply else ""
-                rows.append(f"<span class='mv{cur}' data-ply='{ply}'>"
-                            f"{badge}{escape(self.analyst.sans[ply - 1])}</span>")
-        self.move_list.set_content("".join(rows))
+        self.move_list.set_content(move_list_html(
+            self.analyst.sans, self.analyst.reviews, self.ply))
 
     def _bubble_for_move(self):
         if self.ply == 0:
             return self._summary_text()
         rv = self._review_at(self.ply)
-        label = escape(f"{move_number(self.ply)} {self.analyst.sans[self.ply - 1]}")
-        cp, mate = self.analyst.eval_after(self.ply)
-        white_ahead = (mate or 0) > 0 or (mate is None and (cp or 0) >= 0)
-        chip = (f"<span class='review-chip{' white' if white_ahead else ''}'>"
-                f"{escape(format_eval(cp, mate))}</span>")
-        if not rv or not rv.cls:
-            pending = " — analysing…" if self.summary is None else ""
-            return f"<div class='title'>{label}{pending}{chip}</div>"
-        color = QUALITY_COLORS.get(rv.cls, "#312E2B")
-        line = ""
-        if rv.best_uci and rv.best_uci != rv.uci and rv.cls not in NO_BEST_HINT:
-            top = (self.analyst.analyses[self.ply - 1] or {}).get("lines") or []
-            pv = top[0]["pv"] if top else [rv.best_uci]
-            best = " ".join(san_line(self.analyst.boards[self.ply - 1].to_fen(), pv, 6))
-            line = f"<div class='line'>Best: {escape(best)}</div>"
-        return (f"<div class='title'>{icon_svg(rv.cls, 20)}"
-                f"<span style='color:{color}'>{label}</span>{chip}</div>"
-                f"<div>{escape(rv.comment)}</div>{line}")
+        return coach_html(
+            rv, f"{move_number(self.ply)} {self.analyst.sans[self.ply - 1]}",
+            self.analyst.eval_after(self.ply),
+            self.analyst.best_line_san(self.ply) if rv else (),
+            waiting=" — analysing…" if self.summary is None else "")
 
     # ── Navigation ────────────────────────────────────────
 
@@ -455,8 +401,10 @@ class ReviewScreen:
         sides = [("w", self.src.white, self.src.white_rating, lead, result == "1-0"),
                  ("b", self.src.black, self.src.black_rating, -lead, result == "0-1")]
         bottom, top = (sides[1], sides[0]) if self.flipped else (sides[0], sides[1])
-        self.bottom_bar.show(*bottom)
-        self.top_bar.show(*top)
+        for bar, (side, name, rating, ahead, won) in ((self.bottom_bar, bottom),
+                                                     (self.top_bar, top)):
+            bar.show(side, name, f"({rating})" if rating else "", winner=won)
+            bar.set_material(ahead)
 
     def _refresh_text(self):
         if self.mode == "summary":

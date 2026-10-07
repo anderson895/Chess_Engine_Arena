@@ -13,6 +13,15 @@ from urllib.parse import quote
 from nicegui import ui
 
 from core.constants import QUALITY_COLORS, QUALITY_SYMBOLS
+from core.review import format_eval
+
+# Moves that need no "the best move was…" hint: they are best already,
+# or there was nothing to choose
+NO_BEST_HINT = ("Brilliant", "Great", "Best", "Book", "Forced")
+
+# Click handler for a move list: report the ply of the move clicked
+MOVE_CLICK_JS = ("(e) => { const t = e.target.closest('[data-ply]');"
+                 " if (t) emit(Number(t.dataset.ply)); }")
 
 # Short explanations shown on hover in the review table
 QUALITY_TIPS = {
@@ -88,6 +97,61 @@ def label_html(cls, size=20, text_cls=""):
             f'{icon_svg(cls, size)}'
             f'<span class="{escape(text_cls)}" style="color:{color};font-weight:700">'
             f'{escape(cls)}</span></span>')
+
+
+def coach_html(review, label, evaluation=(None, None), best_line=(),
+               waiting=""):
+    """
+    The coach's line about one move, as HTML for a .coach-bubble: the
+    badge, the numbered move in its class colour, an evaluation chip, the
+    comment and — when the move was not the best — the engine's line.
+
+    review     : core.review.MoveReview, or None while it is ungraded
+    label      : the move as written, e.g. '5. Nxe5'
+    evaluation : (cp, mate) after the move, from White's side
+    best_line  : SAN of the engine's best line from before the move
+    waiting    : added after the label while the move is ungraded
+    """
+    cp, mate = evaluation
+    text = format_eval(cp, mate)
+    white_ahead = (mate or 0) > 0 or (mate is None and (cp or 0) >= 0)
+    chip = (f"<span class='eval-chip{' white' if white_ahead else ''}'>"
+            f"{escape(text)}</span>" if text else "")
+    label = escape(label)
+    if review is None or not review.cls:
+        return f"<div class='title'>{label}{escape(waiting)}{chip}</div>"
+    color = QUALITY_COLORS.get(review.cls, "#312E2B")
+    line = ""
+    if (best_line and review.best_uci != review.uci
+            and review.cls not in NO_BEST_HINT):
+        line = f"<div class='line'>Best: {escape(' '.join(best_line))}</div>"
+    return (f"<div class='title'>{icon_svg(review.cls, 20)}"
+            f"<span style='color:{color}'>{label}</span>{chip}</div>"
+            f"<div>{escape(review.comment)}</div>{line}")
+
+
+def move_list_html(sans, reviews, current=None, result=""):
+    """
+    A game's moves as cells for a .move-grid: number, White's move, Black's
+    move, each with its grade badge and clickable (data-ply). The move at
+    ply *current* is highlighted, and *result* ('1-0'…) closes the list.
+    """
+    cells = []
+    for i in range(0, len(sans), 2):
+        cells.append(f"<span class='n'>{i // 2 + 1}.</span>")
+        for ply in (i + 1, i + 2):
+            if ply > len(sans):
+                cells.append("<span></span>")
+                continue
+            rv = reviews[ply - 1] if ply <= len(reviews) else None
+            badge = (f"<i class='qi qi-{rv.cls.lower()}'></i>"
+                     if rv and rv.cls else "")
+            cur = " cur" if ply == current else ""
+            cells.append(f"<span class='mv{cur}' data-ply='{ply}'>"
+                         f"{badge}{escape(sans[ply - 1])}</span>")
+    if result and result != "*":
+        cells.append(f"<span class='result'>{escape(result)}</span>")
+    return "".join(cells)
 
 
 class MoveVerdict:
