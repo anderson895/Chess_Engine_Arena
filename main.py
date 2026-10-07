@@ -5,6 +5,7 @@
 #        python main.py --browser   → open in the web browser
 # ═══════════════════════════════════════════════════════════
 
+import multiprocessing
 import os
 import sys
 
@@ -63,4 +64,9 @@ def main():
 
 # "__mp_main__" guard is required: NiceGUI's native mode uses multiprocessing
 if __name__ in {"__main__", "__mp_main__"}:
+    # A frozen build starts each worker process (the native window,
+    # run.cpu_bound) by launching this executable again; this turns such a
+    # launch into the worker instead of a second copy of the app. It does
+    # nothing when run from source.
+    multiprocessing.freeze_support()
     main()

@@ -212,8 +212,15 @@ async def _retag_stored_openings(csv_path):
         changed = await run.cpu_bound(retag_openings_once, get_db_path(),
                                       csv_path)
     except Exception as e:
-        print(f"[openings] re-tag failed: {e}")
-        return
+        # Same fallback as the book parse: no worker process, use a thread
+        print(f"[openings] re-tag in a worker process failed ({e}); "
+              "using a thread")
+        try:
+            changed = await run.io_bound(retag_openings_once, get_db_path(),
+                                         csv_path)
+        except Exception as e:
+            print(f"[openings] re-tag failed: {e}")
+            return
     if changed:
         session.invalidate_stats_caches()
         ui.notify(f"Opening names updated for {changed} saved games "
