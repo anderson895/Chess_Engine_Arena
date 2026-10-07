@@ -38,10 +38,11 @@ To run from source instead, see [Getting Started](#getting-started).
   move and its reply; with two players, the last move ([details](#undo))
 - **Drag and drop** — move a piece by dragging it to its square, or by
   clicking it and then the square; its legal moves show while it is held
-- **Tournaments** — Swiss (Buchholz tiebreaks), Round Robin (single/double),
-  Knockout brackets and team events, with a live board, standings, schedule
-  and per-game review; every game is saved to the database, and a finished
-  event can be continued or extended ([details](#tournaments))
+- **Tournaments** — Swiss (no rematches, Buchholz tiebreaks), Round Robin
+  (single/double), Knockout brackets and team events, with a live board,
+  standings, schedule and per-game review; every game is saved to the
+  database, and a finished event can be continued or extended
+  ([details](#tournaments))
 - **Game Review** — a chess.com-style review of any game: accuracy for
   both players, how many Brilliant / Great / Book / Best / Excellent /
   Good / Inaccuracy / Mistake / Miss / Blunder moves each made, an
@@ -131,6 +132,12 @@ the live board, the standings and the schedule. **Pause** halts an event to
 pick up later, and so does closing the app — the game that was in progress
 is played again from the start when the event resumes. **Stop** ends the
 event where it stands and declares a winner.
+
+A Swiss is paired top-down by standing — the leader against the
+highest-placed player they have not met, and so on down — and never
+repeats a pairing while some other way of pairing the round avoids it.
+Only an event with more rounds than the field can fill has rematches, and
+then as few as each round allows.
 
 ### Continuing a finished tournament
 

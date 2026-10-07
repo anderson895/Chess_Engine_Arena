@@ -520,58 +520,149 @@ class TournamentGame:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SwissPairing:
+    """
+    Pairing top-down by standing: the leader meets the highest-placed
+    player they have not met yet, then the next one down, and so on. When
+    that would leave somebody further down with nobody new to play, the
+    search backs up and tries the next opponent instead, so a rematch only
+    happens when no pairing of the whole round avoids one — and then as few
+    as the round allows.
+
+    Late in a long event, when nearly everyone has met, a top-down search
+    can wander for a long time before it finds the one pairing left. If it
+    has not found one within TOP_DOWN_LIMIT positions, the round is paired
+    most-constrained-first instead — whoever has the fewest new opponents
+    left goes first — which finds such pairings almost at once.
+    """
+
+    # Positions each search may visit in one round. A normal round needs
+    # a few dozen; past SEARCH_LIMIT the round is paired top-down as it
+    # stands.
+    TOP_DOWN_LIMIT = 20_000
+    SEARCH_LIMIT = 200_000
+
     @staticmethod
     def pair(players, round_num, played_pairs):
-        available = list(players)
-        available.sort(key=lambda p: (-p.score, -p.wins, p.name))
-        pairings = []
-        bye_player = None
+        available = sorted(players, key=lambda p: (-p.score, -p.wins, p.name))
+        met = {p.name: set() for p in available}
+        for pair in played_pairs:
+            if len(pair) == 2:
+                a, b = tuple(pair)
+                if a in met and b in met:
+                    met[a].add(b)
+                    met[b].add(a)
 
-        if len(available) % 2 == 1:
-            # available is sorted best-first, so the last of any pool is its
-            # lowest-ranked member — the one a bye normally goes to.
-            #
-            # A bye is worth a full point, and a late entrant is always on
-            # zero and therefore always last, so without the first pool the
-            # newcomer would collect a free win before playing anyone. Fall
-            # through when everyone left is in that position.
-            for pool in ([p for p in available
-                          if p.games_played and 'BYE' not in p.opponents],
-                         [p for p in available if 'BYE' not in p.opponents],
-                         available):
-                if pool:
-                    bye_player = pool[-1]
-                    available.remove(bye_player)
-                    break
+        byes = (SwissPairing._bye_candidates(available)
+                if len(available) % 2 else [None])
+        # Fewest rematches first: none at all, then one, and so on
+        for allowed in range(len(available) // 2 + 1):
+            for constrained_first, limit in (
+                    (False, SwissPairing.TOP_DOWN_LIMIT),
+                    (True, SwissPairing.SEARCH_LIMIT)):
+                budget = [limit]
+                for bye in byes:
+                    order = SwissPairing._search(
+                        [p for p in available if p is not bye], met, allowed,
+                        budget, constrained_first)
+                    if order is not None:
+                        return SwissPairing._with_colors(order), bye
+                    if budget[0] < 0:
+                        break
 
-        paired = SwissPairing._backtrack_pair(available, played_pairs, 0)
-
-        for i in range(0, len(paired), 2):
-            p1, p2 = paired[i], paired[i+1]
-            w, b = SwissPairing._assign_colors(p1, p2)
-            pairings.append((w, b))
-
-        return pairings, bye_player
+        bye = byes[0]
+        order = SwissPairing._top_down(
+            [p for p in available if p is not bye], met)
+        return SwissPairing._with_colors(order), bye
 
     @staticmethod
-    def _backtrack_pair(players, played_pairs, depth):
-        if not players:
+    def _bye_candidates(available):
+        """
+        Who may take the bye in an odd field, the usual choice first.
+
+        *available* is sorted best-first, so a pool's last member is its
+        lowest-ranked — the one a bye normally goes to; the next one up
+        only gets it when that is what it takes to avoid a rematch.
+
+        A bye is worth a full point, and a late entrant is always on zero
+        and therefore always last, so without the first pool the newcomer
+        would collect a free win before playing anyone. Fall through when
+        everyone left is in that position.
+        """
+        for pool in ([p for p in available
+                      if p.games_played and 'BYE' not in p.opponents],
+                     [p for p in available if 'BYE' not in p.opponents],
+                     available):
+            if pool:
+                return pool[::-1]
+        return [None]
+
+    @staticmethod
+    def _search(field, met, allowed, budget, constrained_first=False):
+        """
+        Pair *field* (best first) with at most *allowed* rematches: each
+        player in turn takes the highest-placed opponent that still leaves
+        the rest pairable, new opponents before old ones. The player paired
+        next is the highest-placed one, or with *constrained_first* the one
+        with the fewest new opponents left. Returns the players in pairing
+        order, or None.
+        """
+        if not field:
             return []
-        if len(players) == 2:
-            return players[:]
-        p1 = players[0]
-        rest = players[1:]
-        for i, p2 in enumerate(rest):
-            pair_key = frozenset({p1.name, p2.name})
-            if pair_key not in played_pairs:
-                remaining = rest[:i] + rest[i+1:]
-                sub = SwissPairing._backtrack_pair(remaining, played_pairs, depth+1)
-                if sub is not None:
-                    return [p1, p2] + sub
-        p2 = rest[0]
-        remaining = rest[1:]
-        sub = SwissPairing._backtrack_pair(remaining, played_pairs, depth+1)
-        return [p1, p2] + (sub or [])
+        budget[0] -= 1
+        if budget[0] < 0 or SwissPairing._stranded(field, met, allowed):
+            return None
+        first = field[0]
+        if constrained_first:
+            new_left = [sum(q is not p and q.name not in met[p.name]
+                            for q in field) for p in field]
+            first = field[new_left.index(min(new_left))]
+        rest = [p for p in field if p is not first]
+        seen = met[first.name]
+        for rematch in ((False, True) if allowed else (False,)):
+            for opponent in rest:
+                if (opponent.name in seen) != rematch:
+                    continue
+                order = SwissPairing._search(
+                    [p for p in rest if p is not opponent], met,
+                    allowed - rematch, budget, constrained_first)
+                if order is not None:
+                    return [first, opponent] + order
+                if budget[0] < 0:
+                    return None
+        return None
+
+    @staticmethod
+    def _stranded(field, met, allowed):
+        """
+        Whether more players in *field* have already met everyone else in
+        it than *allowed* rematches can seat — each such player can only be
+        paired by a rematch, and one rematch seats two of them.
+        """
+        stranded = 0
+        for p in field:
+            if all(q is p or q.name in met[p.name] for q in field):
+                stranded += 1
+                if stranded > 2 * allowed:
+                    return True
+        return False
+
+    @staticmethod
+    def _top_down(field, met):
+        """Each player in turn with the next one they have not met, if any."""
+        order, rest = [], list(field)
+        while rest:
+            first = rest.pop(0)
+            opponent = next((q for q in rest if q.name not in met[first.name]),
+                            rest[0])
+            rest.remove(opponent)
+            order += [first, opponent]
+        return order
+
+    @staticmethod
+    def _with_colors(order):
+        """(white, black) for each pair in *order*."""
+        return [SwissPairing._assign_colors(order[i], order[i + 1])
+                for i in range(0, len(order), 2)]
 
     @staticmethod
     def _assign_colors(p1, p2):
