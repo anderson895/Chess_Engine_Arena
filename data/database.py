@@ -2,6 +2,7 @@
 #  database.py — SQLite persistence layer  (FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+import json
 import sqlite3
 from datetime import datetime
 from core.utils import normalize_engine_name, get_db_path, file_sha1
@@ -441,32 +442,48 @@ class Database:
             print(f"[Database] results_for_games error: {e}")
             return {}
 
-    def get_resumable_tournaments(self):
-        """Snapshots of tournaments that have not finished, newest first."""
+    def _tournament_states(self, where="", params=()):
+        """Rows of the tournaments table, newest first."""
         try:
             conn = sqlite3.connect(self.db_path, timeout=30)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT * FROM tournaments WHERE status != 'finished' "
-                "ORDER BY updated_at DESC").fetchall()
+                f"SELECT * FROM tournaments {where} ORDER BY updated_at DESC",
+                params).fetchall()
             conn.close()
             return [dict(r) for r in rows]
         except Exception as e:
-            print(f"[Database] get_resumable_tournaments error: {e}")
+            print(f"[Database] tournament state error: {e}")
             return []
 
-    def delete_tournament_state(self, tournament_id):
-        """Drop a resume snapshot. Played games are left alone."""
+    def get_resumable_tournaments(self):
+        """Snapshots of tournaments that have not finished, newest first."""
+        return self._tournament_states("WHERE status != 'finished'")
+
+    def get_tournament_states(self):
+        """Every saved tournament state, finished ones included."""
+        return self._tournament_states()
+
+    def get_tournament_state(self, tournament_id):
+        """The saved state of one tournament, finished or not, or None."""
+        rows = self._tournament_states("WHERE tournament_id = ?",
+                                       (tournament_id,))
+        return rows[0] if rows else None
+
+    # Folders the user pointed at to find engines by name (EngineFinder)
+    ENGINE_FOLDERS_KEY = "engine_folders"
+
+    def get_engine_folders(self):
         try:
-            conn = sqlite3.connect(self.db_path, timeout=30)
-            conn.execute("DELETE FROM tournaments WHERE tournament_id = ?",
-                         (tournament_id,))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            print(f"[Database] delete_tournament_state error: {e}")
-            return False
+            folders = json.loads(self.get_meta(self.ENGINE_FOLDERS_KEY) or "[]")
+        except ValueError:
+            return []
+        return [f for f in folders if isinstance(f, str)]
+
+    def add_engine_folder(self, folder):
+        folders = self.get_engine_folders()
+        if folder and folder not in folders:
+            self.set_meta(self.ENGINE_FOLDERS_KEY, json.dumps(folders + [folder]))
 
     def rename_engine(self, old_name, new_name):
         """
@@ -774,20 +791,23 @@ class Database:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            query  = 'SELECT * FROM tournament_games'
+            # The time control lives on the games row
+            query  = ('SELECT tg.*, g.time_control AS time_control '
+                      'FROM tournament_games tg '
+                      'LEFT JOIN games g ON g.id = tg.game_id')
             params = []
             conditions = []
 
             if tournament_id:
-                conditions.append('tournament_id = ?')
+                conditions.append('tg.tournament_id = ?')
                 params.append(tournament_id)
             if tournament_name:
-                conditions.append('tournament_name LIKE ?')
+                conditions.append('tg.tournament_name LIKE ?')
                 params.append(f'%{tournament_name}%')
 
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
-            query += ' ORDER BY id ASC'
+            query += ' ORDER BY tg.id ASC'
 
             cursor.execute(query, params)
             rows = [dict(r) for r in cursor.fetchall()]

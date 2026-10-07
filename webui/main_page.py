@@ -33,8 +33,8 @@ app.on_shutdown(session.shutdown)
 #  Native file picker (falls back to a path prompt in browser)
 # ═══════════════════════════════════════════════════════════
 
-def _tk_file_dialog(title, file_types):
-    """Open the standard Windows file dialog via a hidden Tk root."""
+def _tk_file_dialog(title, file_types, folder=False):
+    """Open the standard Windows file (or folder) dialog via a hidden Tk root."""
     import re
     import tkinter as tk
     from tkinter import filedialog
@@ -50,15 +50,19 @@ def _tk_file_dialog(title, file_types):
     root.withdraw()
     root.attributes("-topmost", True)
     try:
-        path = filedialog.askopenfilename(
-            title=title, filetypes=patterns or [("All files", "*.*")])
+        if folder:
+            path = filedialog.askdirectory(title=title, mustexist=True)
+        else:
+            path = filedialog.askopenfilename(
+                title=title, filetypes=patterns or [("All files", "*.*")])
     finally:
         root.destroy()
     return path or None
 
 
-async def pick_file(title, file_types=("All files (*.*)",)):
-    """Open a real file-explorer dialog. Returns the path or None."""
+async def pick_file(title, file_types=("All files (*.*)",), folder=False):
+    """Open a real file-explorer dialog (a folder picker with *folder*).
+    Returns the path or None."""
     # Native window → pywebview's file dialog (async proxy in NiceGUI)
     if app.native.main_window is not None:
         import inspect
@@ -67,11 +71,13 @@ async def pick_file(title, file_types=("All files (*.*)",)):
         # shim is a fresh function object on every access, which cannot
         # be pickled across the process boundary NiceGUI uses.
         dialog_type = getattr(getattr(webview, "FileDialog", None),
-                              "OPEN", None)
+                              "FOLDER" if folder else "OPEN", None)
         if dialog_type is None:
-            dialog_type = webview.OPEN_DIALOG
+            dialog_type = (webview.FOLDER_DIALOG if folder
+                           else webview.OPEN_DIALOG)
         result = app.native.main_window.create_file_dialog(
-            dialog_type, allow_multiple=False, file_types=file_types)
+            dialog_type, allow_multiple=False,
+            file_types=() if folder else file_types)
         if inspect.isawaitable(result):
             result = await result
         if result:
@@ -81,14 +87,16 @@ async def pick_file(title, file_types=("All files (*.*)",)):
     # Browser mode → the app still runs locally, so open the standard
     # Windows file dialog on the server side (same UX as the old Tk UI)
     try:
-        return await run.io_bound(_tk_file_dialog, title, file_types)
+        return await run.io_bound(_tk_file_dialog, title, file_types, folder)
     except Exception as e:
         print(f"[pick_file] tk dialog failed: {e}")
 
     # Last resort: manual path prompt
     with ui.dialog() as dlg, ui.card().classes("arena-panel w-[520px]"):
         ui.label(title).classes("font-bold")
-        path_input = ui.input(placeholder="Full path, e.g. D:\\engines\\x.exe") \
+        path_input = ui.input(
+            placeholder="Full path, e.g. D:\\engines" if folder
+            else "Full path, e.g. D:\\engines\\x.exe") \
             .classes("w-full")
         with ui.row().classes("w-full justify-end gap-2"):
             ui.button("Cancel", on_click=lambda: dlg.submit(None)) \

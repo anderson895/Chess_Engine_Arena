@@ -421,6 +421,10 @@ class TournamentPlayer:
         self.color_history = []
         self.opponents     = []
         self.seed          = 0
+        # Sitting out: kept in the standings with the points already
+        # scored, but no longer paired — an engine whose file could not be
+        # found when a finished event was continued
+        self.withdrawn     = False
 
     def record(self, result, opponent_name, color):
         self.score += result
@@ -662,6 +666,15 @@ class Tournament:
     TEAM_BOARD_ORDER   = "board"
     TEAM_ALL_PLAY_ALL  = "all"
 
+    # Formats whose state the saved games alone cannot restore, and why
+    # (from_db_rows)
+    NOT_FROM_GAMES = {
+        FORMAT_TEAM: "This team event was played before team line-ups "
+                     "were saved, so it cannot be continued.",
+        FORMAT_KNOCKOUT: "A knockout ends with its champion — there is "
+                         "nothing to continue.",
+    }
+
     def __init__(self, name, fmt, players, rounds, movetime_ms=1000,
                 double_rr=False, delay=0.3, analyzer_path=None,
                 opening_book=None, time_control="classic", teams=None,
@@ -715,6 +728,10 @@ class Tournament:
         self._ko_round_games     = {}
         self._ko_active_players  = list(players)
 
+        # Swiss rebuilt from its games (from_db_rows): the players a round
+        # that was cut short never reached, paired by reopen()
+        self._unpaired = []
+
         if fmt == self.FORMAT_ROUNDROBIN:
             self._rr_schedule = RoundRobinPairing.generate_all_rounds(
                 self.player_list, double=double_rr)
@@ -759,20 +776,14 @@ class Tournament:
             # Hold the lock across pairing so a late entrant either makes
             # this round in full or waits for the next one
             with self._lock:
-                pairs, bye = SwissPairing.pair(
-                    self.player_list, self.current_round, self.played_pairs)
-            for w, b in pairs:
-                g = TournamentGame(self.current_round, w, b)
-                self.round_games.append(g)
-                self.all_games.append(g)
-            if bye:
-                bye.record(1.0, 'BYE', 'w')
-                self.bye_history.add(bye.name)
+                self._pair_swiss(self.active_players())
 
         elif self.format == self.FORMAT_ROUNDROBIN:
             idx = self.current_round - 1
             if idx < len(self._rr_schedule):
                 for w, b in self._rr_schedule[idx]:
+                    if w.withdrawn or b.withdrawn:
+                        continue                  # sitting out
                     g = TournamentGame(self.current_round, w, b)
                     self.round_games.append(g)
                     self.all_games.append(g)
@@ -850,6 +861,25 @@ class Tournament:
                     self.round_games.append(g)
                     self.all_games.append(g)
                 self._ko_round_games[self.current_round] = list(self.round_games)
+
+    def _pair_swiss(self, players):
+        """
+        Pair *players* into games of the current round. An odd one out
+        takes the bye, a full point, recorded as it is handed out.
+        """
+        pairs, bye = SwissPairing.pair(players, self.current_round,
+                                       self.played_pairs)
+        for w, b in pairs:
+            g = TournamentGame(self.current_round, w, b)
+            self.round_games.append(g)
+            self.all_games.append(g)
+        if bye:
+            bye.record(1.0, 'BYE', 'w')
+            self.bye_history.add(bye.name)
+
+    def active_players(self):
+        """The players still being paired — everyone not sitting out."""
+        return [p for p in self.player_list if not p.withdrawn]
 
     def _team_game(self, home, away, white, black, board=0):
         """One game of a team match, filed under both squads."""
@@ -1015,6 +1045,99 @@ class Tournament:
         if not self.finished:
             self._finish()
         return self.winner
+
+    # ── Continuing a finished tournament ──────────────────
+
+    def play_left(self):
+        """
+        Whether the schedule still holds games. An event that was stopped
+        early can simply carry on; one that ran its course needs more play
+        added first (set_rounds, add_cycle).
+        """
+        if self._unpaired or any(g.status != "done" for g in self.round_games):
+            return True
+        if self.format == self.FORMAT_KNOCKOUT:
+            return len(self._ko_pending_winners) > 1
+        if self.format == self.FORMAT_TEAM and self.team_knockout:
+            return len(self._team_alive) > 1
+        return self.current_round < self.rounds
+
+    def can_extend(self):
+        """
+        Whether more play can be added once the schedule is done: rounds
+        for a Swiss, another cycle for an all-play-all event. A knockout
+        ends with its champion, so there is nothing to add to one.
+        """
+        if self.format == self.FORMAT_KNOCKOUT:
+            return False
+        if self.format == self.FORMAT_TEAM:
+            return not self.team_knockout and len(self.teams) >= 2
+        return len(self.active_players()) >= 2
+
+    def reopen(self):
+        """
+        Take a finished event back to unfinished, so the runner carries on
+        where it stopped; the winner is decided again when it ends.
+
+        Set who is sitting out first. A game still to play against one of
+        them leaves the schedule — a Swiss pairs the opponent afresh — and
+        a round that was cut short is paired out among the rest.
+        """
+        with self._lock:
+            self.finished = False
+            self.winner = None
+            for g in [g for g in self.round_games if g.status != "done"
+                      and (g.white.withdrawn or g.black.withdrawn)]:
+                self.round_games.remove(g)
+                self.all_games.remove(g)
+                if self.format == self.FORMAT_SWISS:
+                    self._unpaired += [p.name for p in (g.white, g.black)
+                                       if not p.withdrawn]
+            if self._unpaired:
+                waiting = [p for p in self.active_players()
+                           if p.name in self._unpaired]
+                self._unpaired = []
+                self._pair_swiss(waiting)
+            self.status_msg = f"Round {self.current_round} — continuing"
+
+    def add_cycle(self):
+        """
+        Put another all-play-all cycle on the end of the schedule: every
+        pairing again, with the colours — home and away in a team event —
+        reversed from the last time the two were drawn together.
+
+        Returns (ok, message).
+        """
+        def reversed_from(schedule, pairs):
+            last = {}
+            for first, second in schedule:
+                last[frozenset((first.name, second.name))] = first.name
+            return [(b, a) if last.get(frozenset((a.name, b.name))) == a.name
+                    else (a, b) for a, b in pairs]
+
+        if self.format == self.FORMAT_ROUNDROBIN:
+            players = self.active_players()
+            if len(players) < 2:
+                return False, "Another cycle needs at least 2 players."
+            drawn = [pair for rnd in (self._rr_schedule or []) for pair in rnd]
+            cycle = [reversed_from(drawn, rnd) for rnd in
+                     RoundRobinPairing.generate_all_rounds(players)]
+            with self._lock:
+                self._rr_schedule = list(self._rr_schedule or []) + cycle
+                self.rounds = len(self._rr_schedule)
+            return True, f"{len(cycle)} round(s) added."
+
+        if self.format == self.FORMAT_TEAM and not self.team_knockout:
+            matches = [pair for rnd in
+                       RoundRobinPairing.generate_all_rounds(self.teams)
+                       for pair in rnd]
+            cycle = reversed_from(self._team_schedule, matches)
+            with self._lock:
+                self._team_schedule = self._team_schedule + cycle
+                self.rounds = len(self._team_schedule)
+            return True, f"{len(cycle)} team match(es) added."
+
+        return False, "Only round-robin and team events play another cycle."
 
     def round_complete(self):
         return all(g.status == "done" for g in self.round_games)
@@ -1212,6 +1335,7 @@ class Tournament:
                 "score": p.score, "wins": p.wins, "draws": p.draws,
                 "losses": p.losses, "buchholz": p.buchholz,
                 "sonneborn": p.sonneborn, "seed": p.seed,
+                "withdrawn": p.withdrawn,
                 "color_history": list(p.color_history),
                 "opponents": list(p.opponents)}
 
@@ -1306,6 +1430,7 @@ class Tournament:
             p.buchholz = d.get("buchholz", 0.0)
             p.sonneborn = d.get("sonneborn", 0.0)
             p.seed = d.get("seed", 0)
+            p.withdrawn = bool(d.get("withdrawn", False))
             p.color_history = list(d.get("color_history", []))
             p.opponents = list(d.get("opponents", []))
             players.append(p)
@@ -1407,6 +1532,113 @@ class Tournament:
                            in (data.get("team_bracket") or {}).items()}
         t._team_bye = by_team.get(data.get("team_bye") or "")
         return t
+
+    @classmethod
+    def from_db_rows(cls, rows, engine_path=None, **settings):
+        """
+        Rebuild a Swiss or round-robin event from its saved games — for
+        one that finished before tournaments kept their state (to_dict).
+
+        rows        : the event's tournament_games rows
+        engine_path : name → engine file, or '' when it cannot be found
+        settings    : constructor keywords — time_control, movetime_ms,
+                      delay, analyzer_path, opening_book
+
+        The games carry the scores, colours and pairings. Byes were never
+        saved, so they are read off who sat each round out; a final round
+        that was cut short leaves the players it never reached in
+        _unpaired, for reopen() to pair once it is known who can play.
+
+        Raises ValueError for the formats the games alone cannot restore:
+        a team event's line-ups, and a knockout bracket.
+        """
+        if not rows:
+            raise ValueError("This tournament has no saved games.")
+        fmt = rows[0]["format"]
+        if fmt in cls.NOT_FROM_GAMES:
+            raise ValueError(cls.NOT_FROM_GAMES[fmt])
+        locate = engine_path or (lambda name: "")
+        rows = sorted(rows, key=lambda r: (r["round_num"], r["id"]))
+
+        players = {}
+        for r in rows:
+            for name in (r["white_engine"], r["black_engine"]):
+                if name not in players:
+                    players[name] = TournamentPlayer(name, locate(name) or "")
+                    players[name].seed = len(players) - 1
+        last = rows[-1]["round_num"]
+
+        t = cls(rows[0]["tournament_name"], fmt, list(players.values()), last,
+                **settings)
+        t.tournament_id = rows[0]["tournament_id"]
+        t.started = True
+        t.current_round = last
+        try:
+            t.created_at = datetime.strptime(
+                f"{rows[0]['date']} {rows[0]['time']}", "%Y.%m.%d %H:%M:%S")
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        by_round = {}
+        for r in rows:
+            by_round.setdefault(r["round_num"], []).append(r)
+        entered = (cls._swiss_entry_rounds(by_round)
+                   if fmt == cls.FORMAT_SWISS else {})
+
+        for rnd in sorted(by_round):
+            if fmt == cls.FORMAT_SWISS:
+                seated = {n for r in by_round[rnd]
+                          for n in (r["white_engine"], r["black_engine"])}
+                absent = [p for n, p in players.items()
+                          if entered[n] <= rnd and n not in seated]
+                if len(absent) == 1:
+                    absent[0].record(1.0, 'BYE', 'w')
+                    t.bye_history.add(absent[0].name)
+                elif absent and rnd == last:
+                    t._unpaired = [p.name for p in absent]
+            for r in by_round[rnd]:
+                g = TournamentGame(rnd, players[r["white_engine"]],
+                                   players[r["black_engine"]])
+                t.all_games.append(g)
+                t.record_game_result(g, r["result"], r["reason"] or "", [],
+                                     "", r["duration_sec"] or 0,
+                                     opening=r["opening"])
+                g.move_count = r["move_count"] or 0
+                g.db_game_id = r["game_id"]
+
+        t.round_games = [g for g in t.all_games if g.round_num == last]
+        if fmt == cls.FORMAT_ROUNDROBIN:
+            # One entry per round number, gaps included, so current_round
+            # keeps indexing the schedule once a cycle is added to it
+            t._rr_schedule = [[(g.white, g.black) for g in t.all_games
+                               if g.round_num == rnd]
+                              for rnd in range(1, last + 1)]
+            t.rounds = last
+        t._update_buchholz()
+        return t
+
+    @staticmethod
+    def _swiss_entry_rounds(by_round):
+        """
+        {name: the round a Swiss player entered}, from the games by round.
+
+        That is their first game, with one exception: round 1's bye. It
+        goes to the last name alphabetically — the pairing sorts a field
+        on zero by name — and that player's first game is in round 2. A
+        late entrant also starts later, so the name is what tells the two
+        apart.
+        """
+        entered = {}
+        for rnd in sorted(by_round):
+            for r in by_round[rnd]:
+                for name in (r["white_engine"], r["black_engine"]):
+                    entered.setdefault(name, rnd)
+        first = min(by_round)
+        starters = [n for n, rnd in entered.items() if rnd == first]
+        next_in = [n for n, rnd in entered.items() if rnd == first + 1]
+        if next_in and starters and max(next_in) > max(starters):
+            entered[max(next_in)] = first
+        return entered
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1788,6 +2020,7 @@ class TournamentRunner:
         self.on_tournament_end = on_tournament_end
         self.on_status       = on_status
         self._stop_flag      = False
+        self._halt_flag      = False     # stopped by the app closing
         self._pause_flag     = False
         self._adjudicate     = None    # (result, reason) set by the UI
         self._thread         = None
@@ -1804,6 +2037,17 @@ class TournamentRunner:
     def pause(self):  self._pause_flag = True
     def resume(self): self._pause_flag = False
     def stop(self):   self._stop_flag = True; self._pause_flag = False
+
+    def halt(self):
+        """
+        Stop playing without ending the tournament, because the app is
+        closing. The game in flight is dropped rather than recorded, so it
+        is played again from the start when the event resumes, and the
+        engines are let go now instead of after their current search.
+        """
+        self._halt_flag = True
+        self.stop()
+        self._kill(*self.current_engines)
 
     def adjudicate(self, result, reason="Adjudicated by user"):
         """End the game in progress with *result* ('1-0'|'1/2-1/2'|'0-1').
@@ -1890,8 +2134,9 @@ class TournamentRunner:
 
         # Stopping ends the tournament rather than leaving it in limbo:
         # the standings as they stand decide it. Pause is the control for
-        # halting an event you mean to come back to.
-        if self._stop_flag:
+        # halting an event you mean to come back to — and a halt, the app
+        # closing, leaves it exactly where it was.
+        if self._stop_flag and not self._halt_flag:
             self.t.finish_now()
 
         if self.t.finished:
@@ -1917,8 +2162,11 @@ class TournamentRunner:
                 e_black.start()
             self.current_engines = [e for e in (e_white, e_black) if e]
         except Exception as ex:
-            self._abort_game(game, str(ex))
             self._kill(e_white, e_black)
+            if self._halt_flag:
+                game.status = "pending"   # the app closed under it
+            else:
+                self._abort_game(game, str(ex))
             return
 
         try:
@@ -1939,6 +2187,7 @@ class TournamentRunner:
         opening_name = None
         result       = None
         reason       = ""
+        interrupted  = False
 
         book = self.t.opening_book
         book_moves_used = 0
@@ -1961,7 +2210,9 @@ class TournamentRunner:
         inc_ms = int((tc_inc or 0) * 1000)
 
         while True:
-            if self._stop_flag: break
+            if self._stop_flag:
+                interrupted = True
+                break
             while (self._pause_flag and not self._stop_flag
                    and not self._adjudicate):
                 time.sleep(0.1)
@@ -2015,7 +2266,8 @@ class TournamentRunner:
                 if uci is None:
                     if self._adjudicate:
                         continue          # let the loop apply the verdict
-                    break                 # stopped
+                    interrupted = True    # stopped
+                    break
 
             # Guarded rather than left to the branches above: reaching the
             # search path with no engine is what crashed a manual seat
@@ -2118,6 +2370,16 @@ class TournamentRunner:
             # padding it only makes their own move feel slow to land.
             time.sleep(0.02 if player.is_human
                        else max(0.02, self.t.delay - grading_s))
+
+        # Stopped mid-game (a halt also kills the engines, which ends the
+        # loop as a forfeit): nothing was decided, so nothing is recorded.
+        # The game goes back on the schedule and is played from the start
+        # if the event carries on.
+        if (interrupted or self._halt_flag) and not board.game_result()[0]:
+            self._kill(e_white, e_black)
+            game.status = "pending"
+            game.last_review = None
+            return
 
         if not result:
             over, result, reason, winner_color = board.game_result()

@@ -15,9 +15,10 @@ import time
 from collections import deque
 from datetime import datetime
 
-from nicegui import app, ui
+from nicegui import app, run, ui
 
 from core.constants import TIME_CONTROLS
+from core.engine_finder import EngineFinder
 from core.utils import normalize_engine_name, fmt_clock, low_time_warning
 from tournament.manager import (
     Tournament, TournamentPlayer, TournamentRunner, TournamentTeam,
@@ -161,6 +162,9 @@ class TournamentSession:
         self.human_player = None
         self.human_selected = None
 
+        # Being deleted: nothing more is written for it (discard)
+        self.discarded = False
+
     # ── Runner callbacks (worker thread!) ─────────────────
 
     def _cb_human_turn(self, game, board, player):
@@ -284,6 +288,8 @@ class TournamentSession:
                     sound_for_san(san, getattr(game, "last_was_white", True)))
 
     def _cb_game_end(self, game):
+        if self.discarded:
+            return
         if game.pgn:
             game_id, _ = self.db.save_tournament_game(
                 tournament_id=self.t.tournament_id,
@@ -324,19 +330,20 @@ class TournamentSession:
 
     def snapshot(self):
         """
-        Persist the resume point. Runs on the runner thread after every
-        game, so it must never raise: losing a snapshot costs the resume
-        point, not the tournament that is playing.
+        Persist the tournament's state. Runs on the runner thread after
+        every game, so it must never raise: losing a snapshot costs the
+        resume point, not the tournament that is playing.
+
+        A finished event keeps its state as well — the engines, settings
+        and pairings it would need to be continued later. Only unfinished
+        ones are brought back on startup (restore_tournaments).
         """
+        if self.discarded:
+            return
         try:
-            if self.t.finished:
-                # Nothing left to resume; the games themselves stay in
-                # tournament_games, which is what the list reads for
-                # finished events
-                self.db.delete_tournament_state(self.t.tournament_id)
-                return
             self.db.save_tournament_state(
-                self.t.tournament_id, self.t.name, self.t.format, self.state,
+                self.t.tournament_id, self.t.name, self.t.format,
+                "finished" if self.t.finished else self.state,
                 json.dumps(self.t.to_dict(), separators=(",", ":")))
         except Exception as e:
             print(f"[TournamentSession] snapshot failed: {e}")
@@ -395,6 +402,38 @@ class TournamentSession:
             self.t.finish_now()
             self.state = "finished"
             self._cb_tournament_end(self.t)
+        self.snapshot()
+
+    def halt(self):
+        """
+        Stop playing because the app is closing, without ending the event:
+        it comes back paused next time, the interrupted game to be played
+        again. A Stop already asked for is carried out here, since the
+        runner may not get the chance.
+        """
+        if self.runner is not None:
+            self.runner.halt()
+        if self.state == "stopping":
+            self.t.finish_now()
+            self.state = "finished"
+        elif self.state == "running":
+            self.state = "paused"
+        self.snapshot()
+
+    def discard(self):
+        """The event is being deleted: stop playing and write nothing more."""
+        self.discarded = True
+        if self.runner is not None:
+            self.runner.halt()
+
+    def continue_play(self):
+        """The event was reopened (Tournament.reopen): ready to play on."""
+        self.runner = None        # the last one has ended; Start makes another
+        self.state = "paused"
+        self.status_msg = "Continuing — press Resume to play on"
+        with self.lock:
+            self.tables_dirty = True
+            self.board_dirty = True
         self.snapshot()
 
     def adjudicate(self, result):
@@ -552,14 +591,264 @@ def restore_tournaments(session):
 
 
 def stop_all_tournaments():
+    """The app is closing: halt every event — paused, not finished."""
     for tsess in ACTIVE.values():
         try:
-            tsess.stop()
+            tsess.halt()
         except Exception:
             pass
 
 
 app.on_shutdown(stop_all_tournaments)
+
+
+# ═══════════════════════════════════════════════════════════
+#  Continuing a finished tournament
+# ═══════════════════════════════════════════════════════════
+
+def _time_control_key(label):
+    """The TIME_CONTROLS key of a label saved with the games ('Classic'…)."""
+    return next((k for k, v in TIME_CONTROLS.items() if v[0] == label),
+                "classic")
+
+
+def _engine_finder(session):
+    """
+    Every engine file the app knows of, by name: those entered in any
+    saved tournament, the engine folders, the engines picked for a game,
+    and the folders scanned before. Reads the disk, so it runs off the
+    event loop.
+    """
+    from webui.main_page import _discover_engines
+    finder = EngineFinder()
+    for row in session.db.get_tournament_states():
+        try:
+            players = json.loads(row["state"]).get("players", [])
+        except (TypeError, ValueError):
+            continue
+        finder.add_all(p.get("engine_path") for p in players)
+    finder.add_all(_discover_engines())
+    finder.add_all((session.e1_path, session.e2_path))
+    for folder in session.db.get_engine_folders():
+        if os.path.isdir(folder):
+            finder.scan(folder)
+    return finder
+
+
+def _finished_tournament(session, tournament_id, finder):
+    """
+    A finished tournament, ready to be reopened: from its saved state when
+    it has one, otherwise rebuilt from its games. Raises ValueError when
+    it cannot be brought back.
+    """
+    book = (session.opening_book
+            if getattr(session.opening_book, "loaded", False) else None)
+    row = session.db.get_tournament_state(tournament_id)
+    if row:
+        t = Tournament.from_dict(json.loads(row["state"]), opening_book=book)
+        _reconcile_with_db(t, session.db)
+        return t
+    rows = session.db.get_tournament_games(tournament_id=tournament_id)
+    return Tournament.from_db_rows(
+        rows, engine_path=finder.find,
+        time_control=_time_control_key(rows[0].get("time_control")
+                                       if rows else ""),
+        movetime_ms=session.movetime_ms, delay=session.delay_s,
+        analyzer_path=session.analyzer_path, opening_book=book)
+
+
+def why_not_continue(session, tournament_id, fmt):
+    """Why a finished tournament cannot be continued, or None if it can."""
+    if session.db.get_tournament_state(tournament_id) is not None:
+        return None
+    return Tournament.NOT_FROM_GAMES.get(fmt)
+
+
+async def show_continue_tournament(session, tournament_id, on_continued=None):
+    """
+    Continue a finished tournament: play out a schedule that was cut
+    short, or add more play — rounds for a Swiss, another cycle for an
+    all-play-all event — then carry on in the live window.
+
+    on_continued(tsess) runs once it has been reopened; without one, the
+    live window opens.
+    """
+    from webui.main_page import pick_file
+
+    live = ACTIVE.get(tournament_id)
+    if live is not None and not live.t.finished:
+        ui.notify("This tournament is still under way.", type="info")
+        return
+    finder = await widgets.with_loader(
+        lambda: run.io_bound(_engine_finder, session),
+        "Looking for the engines…")
+    try:
+        t = live.t if live else _finished_tournament(session, tournament_id,
+                                                     finder)
+    except ValueError as e:
+        ui.notify(str(e), type="warning", multi_line=True)
+        return
+
+    is_swiss = t.format == Tournament.FORMAT_SWISS
+    cycles = (t.format == Tournament.FORMAT_ROUNDROBIN
+              or (t.format == Tournament.FORMAT_TEAM and not t.team_knockout))
+    is_team = t.format == Tournament.FORMAT_TEAM
+    left = t.play_left()
+    # A Swiss or round-robin plays on without an engine that cannot be
+    # found; a bracket or a team line-up needs every seat filled
+    can_sit_out = t.format in (Tournament.FORMAT_SWISS,
+                               Tournament.FORMAT_ROUNDROBIN)
+    engines = [p for p in t.player_list if not p.is_human]
+
+    def missing():
+        """Players whose engine file cannot be found, filling in the rest."""
+        out = []
+        for p in engines:
+            if not (p.engine_path and os.path.isfile(p.engine_path)):
+                p.engine_path = finder.find(p.name) or p.engine_path
+                if not (p.engine_path and os.path.isfile(p.engine_path)):
+                    out.append(p)
+        return out
+
+    with ui.dialog() as dialog, ui.card().classes(
+            "arena-panel w-[560px] max-w-full gap-3"):
+        widgets.heading("ic_play", "CONTINUE TOURNAMENT")
+        ui.label(f"{t.name}  ·  {t.format}  ·  round {t.current_round}  ·  "
+                 f"{len(t.get_all_completed_games())} games played") \
+            .classes("text-sm text-gray-400")
+
+        rounds_in = add_cycle = None
+        floor = t.current_round + (0 if left else 1)
+        if is_swiss:
+            rounds_in = ui.number(
+                label="Rounds in total", min=floor, max=99, step=1,
+                value=max(t.rounds, floor) if left else t.current_round + 3,
+                on_change=lambda e: sync()) \
+                .props("dense").classes("w-40")
+            widgets.hint("The pairing carries on from the standings; the "
+                         "rounds already played stay as they are.")
+        elif cycles:
+            if left:
+                ui.label(f"{t.rounds - t.current_round} round(s) of the "
+                         f"schedule are still to play.").classes("text-sm")
+            add_cycle = ui.checkbox(
+                "Add another cycle — every match again, home and away "
+                "reversed" if is_team else
+                "Add another cycle — every pairing again, colours reversed",
+                value=not left, on_change=lambda e: sync())
+            if not left:
+                add_cycle.disable()        # nothing else to play
+        elif left:
+            ui.label(f"The bracket carries on from round "
+                     f"{t.current_round}.").classes("text-sm")
+        else:
+            ui.label("This bracket already has its champion — a knockout "
+                     "cannot be extended.") \
+                .classes("text-sm").style(f"color: {COLOR_ORANGE}")
+
+        ui.separator()
+        ui.label("ENGINES").classes("arena-heading")
+
+        @ui.refreshable
+        def engines_ui():
+            lost = missing()
+            if not lost:
+                ui.label(f"All {len(engines)} engines found.") \
+                    .classes("text-sm").style(f"color: {COLOR_GREEN}")
+                return
+            ui.label(f"{len(engines) - len(lost)} of {len(engines)} engines "
+                     f"found — {len(lost)} missing.") \
+                .classes("text-sm").style(f"color: {COLOR_ORANGE}")
+            find_how = ("Scan folder looks for them by name in a folder you "
+                        "choose, and the … button picks one engine file.")
+            widgets.hint(
+                f"{find_how} Engines still missing sit out the new rounds "
+                f"and keep their points." if can_sit_out else
+                f"A knockout or team event needs every engine. {find_how}")
+            with ui.column().classes("w-full gap-0 max-h-48 overflow-auto"):
+                for p in lost:
+                    with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                        ui.label(p.name).classes("text-sm flex-grow ellipsis")
+                        ui.button("…", on_click=lambda p=p: browse(p)) \
+                            .props("dense color=secondary") \
+                            .tooltip(f"Find the engine for {p.name}")
+
+        engines_ui()
+
+        async def scan_folder():
+            folder = await pick_file("Folder with your engines", folder=True)
+            if not folder:
+                return
+            found = await widgets.with_loader(
+                lambda: run.io_bound(finder.scan, folder),
+                "Scanning for engines…")
+            # Remembered, so the next continue finds them by itself
+            session.db.add_engine_folder(folder)
+            ui.notify(f"{found} engine file(s) in {folder}", type="info")
+            engines_ui.refresh()
+            sync()
+
+        async def browse(player):
+            path = await pick_file(f"Engine for {player.name}",
+                                   ("Executables (*.exe;*.bin)",
+                                    "All files (*.*)"))
+            if path:
+                player.engine_path = path
+                engines_ui.refresh()
+                sync()
+
+        widgets.icon_button("Scan folder…", "ic_search", on_click=scan_folder,
+                            secondary=True, dense=True)
+
+        def problem():
+            """Why it cannot carry on as set, or None."""
+            lost = missing()
+            if lost and not can_sit_out:
+                return "Find every engine first."
+            playing = [p for p in t.player_list if p not in lost]
+            if not is_team and len(playing) < 2:
+                return "At least 2 engines are needed to play on."
+            if is_swiss and int(rounds_in.value or 0) < floor:
+                return f"Set at least {floor} rounds."
+            if cycles and not (left or add_cycle.value):
+                return "Add another cycle to play on."
+            if not (is_swiss or cycles or left):
+                return "There is nothing left to play."
+            return None
+
+        def do_continue():
+            reason = problem()
+            if reason:
+                ui.notify(reason, type="warning")
+                return
+            lost = missing()
+            for p in t.player_list:
+                p.withdrawn = p in lost
+            t.reopen()
+            if is_swiss:
+                t.set_rounds(int(rounds_in.value))
+            elif cycles and add_cycle.value:
+                t.add_cycle()
+            tsess = live or TournamentSession(t, session.db)
+            ACTIVE[t.tournament_id] = tsess
+            tsess.continue_play()
+            dialog.close()
+            if on_continued:
+                on_continued(tsess)
+            else:
+                show_tournament_window(session, tsess)
+
+        with ui.row().classes("w-full justify-end gap-2 mt-2 dlg-foot"):
+            ui.button("Cancel", on_click=dialog.close) \
+                .props("flat color=grey no-caps")
+            go_btn = widgets.icon_button("Continue", "ic_play",
+                                         on_click=do_continue)
+
+        def sync():
+            go_btn.set_enabled(problem() is None)
+
+        sync()
+    dialog.open()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -674,7 +963,7 @@ def show_tournament_list(session):
             live = ACTIVE.pop(tid, None)
             if live is not None:
                 try:
-                    live.stop()
+                    live.discard()
                 except Exception:
                     pass
             count, ok = session.db.delete_tournament(tid)
@@ -1358,6 +1647,12 @@ def show_tournament_window(session, tsess: TournamentSession):
                 with ui.row().classes("items-center gap-2 no-wrap"):
                     widgets.icon("ic_play", 15)
                     start_lbl = ui.label("Start").classes("text-sm font-medium")
+            continue_btn = widgets.icon_button(
+                "Continue", "ic_play",
+                on_click=lambda: show_continue_tournament(
+                    session, t.tournament_id, on_continued=_continued)) \
+                .tooltip("Play on: finish the schedule, or add rounds or "
+                         "another cycle")
             pause_btn = widgets.icon_button(
                 "Pause", "ic_pause", secondary=True,
                 on_click=lambda: (tsess.pause(), _sync_controls()))
@@ -1492,6 +1787,16 @@ def show_tournament_window(session, tsess: TournamentSession):
             swiss_live = t.format == Tournament.FORMAT_SWISS and not over
             add_btn.set_visibility(swiss_live)
             rounds_in.set_visibility(swiss_live)
+            continue_btn.set_visibility(
+                state == "finished" and (t.play_left() or t.can_extend()))
+
+        def _continued(_tsess):
+            """Reopened from here: the same window plays on."""
+            winner_row.clear()
+            winner_row.set_visibility(False)
+            rounds_in.set_value(t.rounds)
+            _sync_controls()
+            _refresh_tables()
 
         # Adjudication dialog: stop the current game, user picks the result
         with ui.dialog() as decide_dlg, ui.card().classes(
@@ -1982,8 +2287,11 @@ def _fill_standings(table, t, session=None, query=""):
     editable = not t.started
     rows = []
     for i, p in enumerate(t.get_standings(), 1):
-        elo_txt, elo_col = (session.rank_line(p.name, t.time_control)
-                            if session else ("", COLOR_MUTED))
+        if p.withdrawn:
+            elo_txt, elo_col = "Sitting out — engine not found", COLOR_ORANGE
+        else:
+            elo_txt, elo_col = (session.rank_line(p.name, t.time_control)
+                                if session else ("", COLOR_MUTED))
         rows.append({
             "rank": i, "player": p.name, "score": p.score,
             "elo": elo_txt, "elo_color": elo_col,
@@ -2173,7 +2481,19 @@ def show_tournament_history(session, tournament_id, name):
             safe = "".join(c if c.isalnum() else "_" for c in name)[:40]
             ui.download.content("\n\n".join(pgns), f"{safe}.pgn")
 
-        with ui.row().classes("w-full justify-end gap-2 dlg-foot"):
+        async def continue_it():
+            dialog.close()
+            await show_continue_tournament(session, tournament_id)
+
+        with ui.row().classes("w-full items-center justify-end gap-2 dlg-foot"):
+            blocked = why_not_continue(session, tournament_id, fmt)
+            if blocked:
+                widgets.hint(blocked)
+            else:
+                widgets.icon_button("Continue", "ic_play",
+                                    on_click=continue_it) \
+                    .tooltip("Play on: finish the schedule, or add rounds "
+                             "or another cycle")
             widgets.icon_button("Export all PGN", "ic_export",
                                 on_click=export_all, secondary=True)
             ui.button("Close", on_click=dialog.close) \

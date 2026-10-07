@@ -8,6 +8,7 @@ native desktop window (pywebview/WebView2) or in the browser.
 - [Features](#features)
 - [Getting Started](#getting-started)
 - [The Main Screen](#the-main-screen)
+- [Tournaments](#tournaments)
 - [Adding Engines and Files](#adding-engines-and-files)
 - [Game Review](#game-review)
 - [Masters Database](#masters-database)
@@ -38,8 +39,9 @@ To run from source instead, see [Getting Started](#getting-started).
 - **Drag and drop** — move a piece by dragging it to its square, or by
   clicking it and then the square; its legal moves show while it is held
 - **Tournaments** — Swiss (Buchholz tiebreaks), Round Robin (single/double),
-  and Knockout brackets, with a live board, standings, schedule and
-  per-game review; every game is saved to the database
+  Knockout brackets and team events, with a live board, standings, schedule
+  and per-game review; every game is saved to the database, and a finished
+  event can be continued or extended ([details](#tournaments))
 - **Game Review** — a chess.com-style review of any game: accuracy for
   both players, how many Brilliant / Great / Book / Best / Excellent /
   Good / Inaccuracy / Mistake / Miss / Blunder moves each made, an
@@ -120,6 +122,36 @@ two players it takes back the last move. Moves already graded keep their
 grades, and the clocks go back to where they stood. The moves of a chosen
 starting opening are never taken back, and Undo is unavailable while the
 engine is thinking. Games with takebacks are saved and rated as usual.
+
+## Tournaments
+
+**Tournaments** in the sidebar lists every event, and **New Tournament**
+sets one up: Swiss, Round Robin, Knockout or a team event. Its window shows
+the live board, the standings and the schedule. **Pause** halts an event to
+pick up later, and so does closing the app — the game that was in progress
+is played again from the start when the event resumes. **Stop** ends the
+event where it stands and declares a winner.
+
+### Continuing a finished tournament
+
+**Continue** — in the window of a finished event, or at the bottom of its
+page in the list — plays on:
+
+- an event that was stopped early finishes its schedule;
+- a Swiss gets more rounds, paired from the standings as they are;
+- a round robin or team event plays another cycle: every pairing again,
+  with the colours (home and away) reversed.
+
+A knockout ends with its champion, so there is nothing to add to one.
+
+A finished event keeps everything it needs to be continued. Events that
+finished in older versions kept only their games, so Swiss and round-robin
+events are rebuilt from those, byes included; a team event's line-ups and
+a knockout's bracket were never saved, so those cannot be continued. Their
+engines are found again by name: **Scan folder…** points the app at the
+folder your engines are in, and it remembers it; **…** picks a single
+engine file. An engine that is still missing sits out the new rounds and
+keeps the points it has.
 
 ## Adding Engines and Files
 
@@ -336,6 +368,7 @@ Chess_Engine_Arena/
 │   ├── constants.py           #   app-wide constants, colours, tiers
 │   ├── elo.py                 #   Elo rating computation
 │   ├── engine.py              #   UCI engine wrapper & analyzer (MultiPV)
+│   ├── engine_finder.py       #   finding engine files again by name
 │   ├── opening_book.py        #   openings by position + disk cache
 │   ├── pgn.py                 #   reading PGN: tags, movetext, SAN → UCI
 │   ├── review.py              #   move classification, accuracy, GameAnalyst
