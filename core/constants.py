@@ -43,16 +43,30 @@ LOG_BG   = "#0D0D1A"
 INFO_BG  = "#0A0A18"
 
 # ── Move quality colours ──────────────────────────────────
+# In the order a game review lists them, which is also the order every
+# summary sorts by. "Forced" (the only legal move) comes last: it is shown
+# on the move but left out of the review table, as chess.com does.
 QUALITY_COLORS = {
-    "Book":       "#00BFFF",
-    "Brilliant":  "#1BECA0",
-    "Best":       "#5BC0EB",
-    "Excellent":  "#7FFF00",
-    "Great":      "#A8D8A8",
-    "Good":       "#FFDD57",
-    "Inaccuracy": "#E8C547",
-    "Mistake":    "#FFA500",
-    "Blunder":    "#FF4444",
+    "Brilliant":  "#26C2A3",
+    "Great":      "#749BBF",
+    "Book":       "#D5A47D",
+    "Best":       "#81B64C",
+    "Excellent":  "#81B64C",
+    "Good":       "#95B776",
+    "Inaccuracy": "#F7C631",
+    "Mistake":    "#FFA459",
+    "Miss":       "#FF7769",
+    "Blunder":    "#FA412D",
+    "Forced":     "#97A3A8",
+}
+
+# Annotation glyphs for the classes that have one (PGN-style)
+QUALITY_SYMBOLS = {
+    "Brilliant":  "!!",
+    "Great":      "!",
+    "Inaccuracy": "?!",
+    "Mistake":    "?",
+    "Blunder":    "??",
 }
 
 # ── Rank tiers ────────────────────────────────────────────

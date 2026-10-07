@@ -80,7 +80,7 @@ _ACTIONS_SLOT = """
 <q-td :props="props" class="text-center no-wrap">
   <q-btn dense flat size="sm" icon="play_arrow" color="secondary"
          @click="$parent.$emit('replay', props.row)">
-    <q-tooltip>Replay game</q-tooltip>
+    <q-tooltip>Review game</q-tooltip>
   </q-btn>
   <q-btn dense flat size="sm" icon="download" color="secondary"
          @click="$parent.$emit('pgn', props.row)">
@@ -307,7 +307,7 @@ def show_masters_db(session):
                                 on_click=lambda: reset())
 
         with ui.row().classes("w-full items-center"):
-            widgets.hint("Double-click a row to replay · click a name, result "
+            widgets.hint("Double-click a row to review · click a name, result "
                          "or opening to filter by it")
             ui.space()
             count_lbl = ui.label("").classes("text-xs text-gray-500")
@@ -549,7 +549,7 @@ def show_masters_db(session):
                 lambda: show_pgn_viewer(session, game_id,
                                         [(g["id"],) for g in rows_cache],
                                         pgn_loader=db.get_pgn),
-                "Loading game replay…")
+                "Loading game review…")
 
         def set_filter(control, value):
             """Set one filter without the double query set_value would cause."""

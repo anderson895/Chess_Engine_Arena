@@ -11,74 +11,11 @@ import os
 import re
 import sqlite3
 
+from core.pgn import split_pgn_games, strip_movetext
 from core.utils import get_base_path, get_db_path, get_masters_db_path
 
 
-# ── PGN parsing ────────────────────────────────────────────────
-
-_TAG_RE = re.compile(r'^\[([A-Za-z0-9_]+)\s+"(.*)"\]\s*$')
-
-# Everything that is not an actual move: move numbers, results, NAGs.
-_NUMBER_RE = re.compile(r'\d+\.(\.\.)?')
-_NAG_RE = re.compile(r'\$\d+')
-_RESULTS = {"1-0", "0-1", "1/2-1/2", "*"}
-
 TITLES = ("GM", "IM", "FM", "CM", "WGM", "WIM", "WFM", "WCM", "NM", "LM")
-
-
-def split_pgn_games(text):
-    """
-    Split a multi-game PGN into (tags: dict, movetext: str) pairs.
-
-    Robust against the quirks of real-world exports: CRLF, BOM, missing
-    blank line between header and movetext, and games that run straight
-    into the next [Event "..."] with no separator.
-    """
-    text = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")
-    games = []
-    tags = {}
-    moves = []
-    seen_moves = False
-
-    def flush():
-        if tags or moves:
-            games.append((dict(tags), " ".join(moves).strip()))
-
-    for raw in text.split("\n"):
-        line = raw.strip()
-        m = _TAG_RE.match(line)
-        if m:
-            # A tag after movetext means the previous game ended.
-            if seen_moves:
-                flush()
-                tags, moves, seen_moves = {}, [], False
-            tags[m.group(1)] = m.group(2)
-        elif line:
-            moves.append(line)
-            seen_moves = True
-    flush()
-    return [(t, mv) for t, mv in games if t or mv]
-
-
-def strip_movetext(movetext):
-    """Reduce movetext to bare SAN tokens: no comments, variations or NAGs."""
-    s = movetext
-    # Comments {...} — may nest in practice only via braces, so loop.
-    while True:
-        new = re.sub(r'\{[^{}]*\}', ' ', s)
-        if new == s:
-            break
-        s = new
-    # Recursive annotation variations (...)
-    while True:
-        new = re.sub(r'\([^()]*\)', ' ', s)
-        if new == s:
-            break
-        s = new
-    s = _NAG_RE.sub(' ', s)
-    s = _NUMBER_RE.sub(' ', s)
-    s = s.replace('...', ' ')
-    return [t for t in s.split() if t not in _RESULTS and t not in ('.', '')]
 
 
 def count_plies(movetext):

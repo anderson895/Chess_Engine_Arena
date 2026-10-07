@@ -8,6 +8,30 @@ from core.constants import (
 )
 from core.utils import valid
 
+# Exchange values. The king is priced so it always recaptures last.
+SEE_VALUES = {'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9, 'k': 100}
+
+
+def parse_uci(uci):
+    """
+    (from_row, from_col, to_row, to_col, promo) of a UCI move such as
+    'e7e8q' — rows count from rank 8 down, as on Board.board. Raises
+    ValueError for text that is not shaped like a move.
+    """
+    if not uci or len(uci) < 4:
+        raise ValueError(f"Bad UCI: {uci!r}")
+    try:
+        return (8 - int(uci[1]), ord(uci[0]) - ord('a'),
+                8 - int(uci[3]), ord(uci[2]) - ord('a'),
+                uci[4].lower() if len(uci) > 4 else None)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Bad UCI: {uci!r}") from e
+
+
+def format_uci(fr, fc, tr, tc, promo=None):
+    """The UCI text of a move given in board coordinates."""
+    return f"{chr(ord('a') + fc)}{8 - fr}{chr(ord('a') + tc)}{8 - tr}{promo or ''}"
+
 
 class Board:
     """
@@ -85,6 +109,78 @@ class Board:
         parts = self.to_fen().split()
         return ' '.join(parts[:4])
 
+    def epd(self):
+        """
+        Position identity for looking positions up: placement, side to move,
+        castling rights, and the en-passant square *only when an en-passant
+        capture is actually legal*.
+
+        The board records an en-passant square after every double pawn push,
+        whether or not any pawn could take. Keeping it would split one
+        position into two depending on the move order that reached it —
+        1.e4 c5 2.Nf3 and 1.Nf3 c5 2.e4 must be the same Sicilian.
+        """
+        placement, turn, castling, ep = self.to_fen().split()[:4]
+        if ep != '-' and not self._ep_capture_legal():
+            ep = '-'
+        return f"{placement} {turn} {castling} {ep}"
+
+    def _ep_capture_legal(self):
+        """True if the side to move has a legal en-passant capture."""
+        if self.ep == '-':
+            return False
+        ec = ord(self.ep[0]) - ord('a')
+        er = 8 - int(self.ep[1])
+        pawn = 'P' if self.turn == 'w' else 'p'
+        pr = er + 1 if self.turn == 'w' else er - 1
+        for pc in (ec - 1, ec + 1):
+            if valid(pr, pc) and self.board[pr][pc] == pawn:
+                if not self._apply_raw(pr, pc, er, ec, None).in_check(self.turn):
+                    return True
+        return False
+
+    @classmethod
+    def from_fen(cls, fen):
+        """A board set up from *fen*, with no move history."""
+        b = cls()
+        b._load_fen(fen)
+        return b
+
+    def copy(self):
+        """A copy of the position without move history."""
+        b = Board.__new__(Board)
+        b.board        = [row[:] for row in self.board]
+        b.turn         = self.turn
+        b.castling     = self.castling
+        b.ep           = self.ep
+        b.halfmove     = self.halfmove
+        b.fullmove     = self.fullmove
+        b.move_history = []
+        b.pos_history  = {}
+        b.cap_white    = []
+        b.cap_black    = []
+        b._material_cache = None
+        return b
+
+    def play_raw(self, uci):
+        """
+        A new board with *uci* played — unchecked and without history, for
+        replaying moves already known to be legal (opening lines, stored
+        games). Hundreds of times faster than apply_uci.
+        """
+        return self._apply_raw(*parse_uci(uci))
+
+    def with_turn(self, side):
+        """
+        A copy with *side* to move — for asking what that side could do
+        if it were its turn ("what does the opponent threaten here?"). The
+        en-passant square is dropped: it belonged to the real side to move.
+        """
+        b = self.copy()
+        b.turn = side
+        b.ep = '-'
+        return b
+
     # ── Piece helpers ─────────────────────────────────────
 
     def get(self, r, c):
@@ -155,6 +251,102 @@ class Board:
             return False
         opp = 'b' if t == 'w' else 'w'
         return self.is_attacked(k[0], k[1], opp)
+
+    # ── Attacker lists and static exchange ────────────────
+
+    @staticmethod
+    def _attackers_on(grid, r, c, by):
+        """Squares of *by*'s pieces attacking (r, c) on an 8×8 *grid*."""
+        def has(p):
+            return p != '.' and (p.isupper() if by == 'w' else p.islower())
+
+        out = []
+        for dr, dc in KNIGHT_D:
+            nr, nc = r + dr, c + dc
+            if valid(nr, nc) and grid[nr][nc].lower() == 'n' and has(grid[nr][nc]):
+                out.append((nr, nc))
+        for dirs, chars in ((ROOK_D, 'qr'), (BISHOP_D, 'qb')):
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                while valid(nr, nc):
+                    p = grid[nr][nc]
+                    if p != '.':
+                        if p.lower() in chars and has(p):
+                            out.append((nr, nc))
+                        break
+                    nr += dr; nc += dc
+        for dr, dc in KING_D:
+            nr, nc = r + dr, c + dc
+            if valid(nr, nc) and grid[nr][nc].lower() == 'k' and has(grid[nr][nc]):
+                out.append((nr, nc))
+        # A white pawn attacks upwards (towards row 0), so it sits one row below
+        pr = r + 1 if by == 'w' else r - 1
+        for pc in (c - 1, c + 1):
+            if valid(pr, pc) and grid[pr][pc].lower() == 'p' and has(grid[pr][pc]):
+                out.append((pr, pc))
+        return out
+
+    def attackers(self, r, c, by):
+        """
+        Squares of *by*'s pieces that attack (r, c) right now. Pseudo-legal:
+        a pinned piece still counts as an attacker.
+        """
+        return self._attackers_on(self.board, r, c, by)
+
+    def see(self, r, c, side, first=None):
+        """
+        Static exchange evaluation on (r, c): the material *side* nets by
+        capturing there, both sides then recapturing with their least
+        valuable attacker and each free to stop once going on would lose.
+
+        *first* is the square of the piece that makes the opening capture
+        (the caller passes a legal one, so pins and checks are respected);
+        by default it is *side*'s least valuable attacker. Later recaptures
+        are pseudo-legal. Pieces behind a capturer join in as it leaves
+        (x-rays), a king only captures onto an undefended square, and a pawn
+        capturing onto the last rank is counted as promoting.
+
+        Returns the gain in pawns, never negative — *side* may decline.
+        """
+        if self.board[r][c] == '.':
+            return 0
+        grid = [row[:] for row in self.board]
+        last_rank = {'w': 0, 'b': 7}
+
+        def pick(by):
+            sqs = self._attackers_on(grid, r, c, by)
+            if not sqs:
+                return None
+            sq = min(sqs, key=lambda s: SEE_VALUES[grid[s[0]][s[1]].lower()])
+            if grid[sq[0]][sq[1]].lower() == 'k':
+                foe = 'b' if by == 'w' else 'w'
+                if self._attackers_on(grid, r, c, foe):
+                    return None          # the king cannot walk into a defended square
+            return sq
+
+        gains = []
+        on_square = SEE_VALUES[grid[r][c].lower()]
+        mover = side
+        sq = first or pick(mover)
+        while sq is not None:
+            piece = grid[sq[0]][sq[1]]
+            value = SEE_VALUES[piece.lower()]
+            gain = on_square
+            if piece.lower() == 'p' and r == last_rank[mover]:
+                gain += SEE_VALUES['q'] - SEE_VALUES['p']
+                value = SEE_VALUES['q']
+            gains.append(gain - (gains[-1] if gains else 0))
+            grid[r][c] = piece
+            grid[sq[0]][sq[1]] = '.'
+            on_square = value
+            mover = 'b' if mover == 'w' else 'w'
+            sq = pick(mover)
+        if not gains:
+            return 0
+        # Each side may stop instead of recapturing: fold back from the end
+        for i in range(len(gains) - 1, 0, -1):
+            gains[i - 1] = -max(-gains[i - 1], gains[i])
+        return max(0, gains[0])
 
     # ── Pseudo-legal move generation ──────────────────────
 
@@ -346,11 +538,7 @@ class Board:
         -------
         (san, captured_piece)
         """
-        if len(uci) < 4:
-            raise ValueError(f"Bad UCI: {uci!r}")
-        fc = ord(uci[0]) - ord('a'); fr = 8 - int(uci[1])
-        tc = ord(uci[2]) - ord('a'); tr = 8 - int(uci[3])
-        promo = uci[4].lower() if len(uci) > 4 else None
+        fr, fc, tr, tc, promo = parse_uci(uci)
 
         legal = self.legal_moves()
         if (fr, fc, tr, tc, promo) not in legal:
@@ -400,6 +588,74 @@ class Board:
         pos = self._pos_key()
         self.pos_history[pos] = self.pos_history.get(pos, 0) + 1
         return san, cap
+
+    # ── SAN parser ────────────────────────────────────────
+
+    def san_to_uci(self, san):
+        """
+        Translate a SAN token (``Nbd7``, ``exd8=Q+``, ``O-O``…) into a UCI
+        move for the current position, or None if it is not a legal move.
+
+        Only pieces of the named kind that can reach the named square are
+        tried, so a game parses in milliseconds — building the SAN of every
+        legal move for every token, as matching on SAN text does, is what
+        made long PGNs slow to open.
+        """
+        s = (san or '').strip().rstrip('+#!?').replace('x', '').replace(':', '')
+        if s.endswith('e.p.'):
+            s = s[:-4]
+        if not s or s in ('--', 'Z0'):
+            return None
+        kr = 7 if self.turn == 'w' else 0
+        if s in ('O-O', '0-0', 'O-O-O', '0-0-0'):
+            if self.board[kr][4] != ('K' if self.turn == 'w' else 'k'):
+                return None
+            tc = 6 if s in ('O-O', '0-0') else 2
+            cand = [mv for mv in self._pseudo(kr, 4) if mv[3] == tc and mv[2] == kr]
+            kind, promo = 'k', None
+        else:
+            promo = None
+            if '=' in s:
+                s, promo = s.split('=', 1)
+                promo = promo[:1].lower() or None
+            elif len(s) >= 3 and s[-1] in 'QRBN' and s[-2].isdigit() and s[0].islower():
+                s, promo = s[:-1], s[-1].lower()     # "e8Q" without the "="
+            kind = s[0].lower() if s[0] in 'KQRBN' else 'p'
+            body = s[1:] if kind != 'p' else s
+            if len(body) < 2 or body[-2] not in 'abcdefgh' or not body[-1].isdigit():
+                return None
+            tc = ord(body[-2]) - ord('a')
+            tr = 8 - int(body[-1])
+            if not valid(tr, tc):
+                return None
+            hint = body[:-2]
+            hint_file = next((ord(ch) - ord('a') for ch in hint if ch in 'abcdefgh'), None)
+            hint_rank = next((8 - int(ch) for ch in hint if ch.isdigit()), None)
+            cand = []
+            for r in range(8):
+                for c in range(8):
+                    p = self.board[r][c]
+                    if p == '.' or p.lower() != kind:
+                        continue
+                    if (self.turn == 'w') != p.isupper():
+                        continue
+                    if hint_file is not None and c != hint_file:
+                        continue
+                    if hint_rank is not None and r != hint_rank:
+                        continue
+                    for mv in self._pseudo(r, c):
+                        if mv[2] == tr and mv[3] == tc:
+                            cand.append(mv)
+        for fr, fc, tr2, tc2, pp in cand:
+            if pp is None:
+                if promo is not None:
+                    continue
+            elif pp != (promo or 'q'):
+                continue
+            if self._apply_raw(fr, fc, tr2, tc2, pp).in_check(self.turn):
+                continue
+            return format_uci(fr, fc, tr2, tc2, pp)
+        return None
 
     # ── SAN builder ───────────────────────────────────────
 

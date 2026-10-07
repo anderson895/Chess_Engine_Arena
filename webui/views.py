@@ -1,21 +1,16 @@
 # ═══════════════════════════════════════════════════════════
 #  webui/views.py — Rankings, Statistics, Opening stats,
-#  Game History and PGN replay viewer
+#  Game History, and opening a stored game's review
 # ═══════════════════════════════════════════════════════════
 
-import asyncio
-import re
+from nicegui import ui
 
-from nicegui import ui, run
-
-from core.board import Board
-from core.constants import RANK_TIERS, QUALITY_COLORS, TIME_CONTROLS
+from core.constants import RANK_TIERS, TIME_CONTROLS
 from core.scale import SCALE_NOTE
 from core.elo import fit_elo_history, tc_bucket, MIN_RATED_GAMES
-from core.utils import normalize_engine_name, get_tier, classify_move_quality
-from webui import widgets
+from core.utils import normalize_engine_name, get_tier
+from webui import review, widgets
 from webui.session import EMPTY_BUCKET
-from webui.board import BoardView, EvalBar
 from webui.theme import COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_RED
 
 _TIER_CELL_SLOT = """
@@ -512,7 +507,7 @@ def show_game_history(session, filter_engine=None):
                  lambda e: widgets.with_loader(
                      lambda: show_pgn_viewer(session, e.args[1]["id"],
                                              games_cache),
-                     "Loading game replay…"))
+                     "Loading game review…"))
 
         def on_delete(e):
             row = e.args
@@ -545,7 +540,7 @@ def show_game_history(session, filter_engine=None):
         table.on("del", on_delete)
 
         with ui.row().classes("w-full items-center"):
-            widgets.hint("Double-click a row to replay the game · "
+            widgets.hint("Double-click a row to review the game · "
                          "[T] = tournament game")
             ui.space()
             count_lbl = ui.label("").classes("text-xs text-gray-500")
@@ -559,228 +554,41 @@ def show_game_history(session, filter_engine=None):
 
 
 # ═══════════════════════════════════════════════════════════
-#  PGN replay viewer
+#  Game Review of a stored game
 # ═══════════════════════════════════════════════════════════
-
-def parse_pgn_moves(pgn):
-    """Extract UCI moves from a PGN text using the Board SAN builder."""
-    body_lines = [l.strip() for l in pgn.split("\n")
-                  if l.strip() and not l.strip().startswith("[")]
-    text = " ".join(body_lines)
-    for tok in ["1-0", "0-1", "1/2-1/2", "*"]:
-        text = text.replace(tok, "")
-    text = re.sub(r"\d+\.", "", text)
-
-    board = Board()
-    uci_moves = []
-    for san in text.split():
-        try:
-            legal = board.legal_moves()
-            for fr, fc, tr, tc, promo in legal:
-                test = board._build_san(fr, fc, tr, tc, promo, legal)
-                if (test.replace("+", "").replace("#", "")
-                        == san.replace("+", "").replace("#", "")):
-                    uci = f"{chr(ord('a') + fc)}{8 - fr}{chr(ord('a') + tc)}{8 - tr}"
-                    if promo:
-                        uci += promo
-                    uci_moves.append(uci)
-                    board.apply_uci(uci)
-                    break
-        except Exception as e:
-            print(f"[parse_pgn_moves] error on {san}: {e}")
-    return uci_moves
-
 
 def show_pgn_viewer(session, game_id, all_games=None, pgn_loader=None):
     """
-    Replay a stored game.
+    Open the Game Review of a stored game.
 
-    *pgn_loader* overrides where the PGN comes from, so the same viewer
-    serves engine games and the human masters database.
+    *pgn_loader* overrides where the PGN comes from, so the same screen
+    serves engine games and the human masters database. *all_games* — rows
+    whose first column is the game id — gives the previous/next buttons.
     """
     pgn = (pgn_loader or session.db.get_game_pgn)(game_id)
     if not pgn:
         ui.notify("Could not load PGN.", type="negative")
         return
 
-    all_games = all_games or []
-    ids = [g[0] for g in all_games]
-    idx = ids.index(game_id) if game_id in ids else None
+    ratings = None
+    if pgn_loader is None:
+        # An engine game: rate the players for the control it was played at
+        meta = session.db.get_game_meta(game_id) or {}
+        tc = meta.get("time_control") or None
+        ratings = (review.engine_rating(session, meta.get("white", ""), tc),
+                   review.engine_rating(session, meta.get("black", ""), tc))
+    source = review.ReviewSource.from_pgn(pgn, title=f"Game #{game_id}",
+                                          ratings=ratings)
 
-    moves = parse_pgn_moves(pgn)
-    replay = Board()
-    pos = {"i": 0}
+    ids = [g[0] for g in (all_games or [])]
+    nav = {}
+    if game_id in ids:
+        idx = ids.index(game_id)
 
-    def state():
-        last = moves[pos["i"] - 1] if pos["i"] > 0 else None
-        return {"board": replay, "last_move": last,
-                "selected": None, "legal_dests": set(), "check_sq": None}
+        def opener(i):
+            if not 0 <= i < len(ids):
+                return None
+            return lambda: show_pgn_viewer(session, ids[i], all_games, pgn_loader)
 
-    def goto(i):
-        i = max(0, min(len(moves), i))
-        replay.reset()
-        for m in moves[:i]:
-            try:
-                replay.apply_uci(m)
-            except Exception:
-                break
-        pos["i"] = i
-        board_view.refresh()
-        update_label()
-        asyncio.create_task(analyze_current())
-
-    with ui.dialog() as dialog, ui.card().classes(
-            "arena-panel w-[1000px] max-w-full h-[720px] flex flex-col"):
-        header = re.search(r'\[White\s+"([^"]+)"\]', pgn)
-        white = header.group(1) if header else "?"
-        header = re.search(r'\[Black\s+"([^"]+)"\]', pgn)
-        black = header.group(1) if header else "?"
-        header = re.search(r'\[Result\s+"([^"]+)"\]', pgn)
-        result = header.group(1) if header else "*"
-
-        async def _nav_game(delta):
-            dialog.close()
-            await widgets.with_loader(
-                lambda: show_pgn_viewer(session, ids[idx + delta], all_games,
-                                        pgn_loader),
-                "Loading game replay…")
-
-        with ui.row().classes("w-full items-center justify-between"):
-            prev_btn = widgets.icon_button(
-                "Prev game", "ic_play_rev", secondary=True, dense=True,
-                on_click=lambda: _nav_game(-1))
-            if idx is None or idx <= 0:
-                prev_btn.disable()
-            ui.label(f"Game #{game_id}   ·   {white} vs {black}   ·   {result}") \
-                .classes("font-bold text-primary")
-            next_btn = widgets.icon_button(
-                "Next game", "ic_play", secondary=True, dense=True,
-                on_click=lambda: _nav_game(1))
-            if idx is None or idx >= len(ids) - 1:
-                next_btn.disable()
-
-        # items-stretch/min-h-0: nicegui-row aligns children to flex-start, so
-        # the columns would grow to their content height instead of being
-        # bounded by the card.
-        with ui.row().classes(
-                "w-full flex-grow no-wrap gap-4 min-h-0 items-stretch"):
-            with ui.column().classes("w-1/2 items-center min-h-0"):
-                with ui.row().classes("w-full no-wrap gap-2 justify-center "
-                                      "items-stretch"):
-                    with ui.column().classes("gap-0 py-1 self-stretch"):
-                        eval_bar = EvalBar()
-                    with ui.element("div").classes("flex-grow min-w-0"):
-                        board_view = BoardView(state)
-                move_label = ui.label("Start position") \
-                    .classes("font-bold text-primary")
-                with ui.row().classes("items-center gap-3"):
-                    eval_lbl = ui.label("").classes("mono text-sm")
-                    quality_lbl = ui.label("").classes("font-bold")
-                opening_lbl = ui.label("").classes("text-xs italic") \
-                    .style(f"color: {COLOR_BLUE}")
-                with ui.row().classes("gap-1"):
-                    for icon, action, tip in [
-                        ("first_page",    lambda: goto(0),            "Start"),
-                        ("chevron_left",  lambda: goto(pos["i"] - 1), "Previous move"),
-                        ("chevron_right", lambda: goto(pos["i"] + 1), "Next move"),
-                        ("last_page",     lambda: goto(len(moves)),   "End"),
-                    ]:
-                        ui.button(icon=icon, on_click=action) \
-                            .props("dense").tooltip(tip)
-                widgets.hint("Keys: ← → move · Home/End start/end")
-            with ui.column().classes("w-1/2 h-full min-h-0"):
-                ui.label("PGN").classes("arena-heading")
-                # No autogrow: it sizes the field to the whole PGN, which
-                # overflows the card and leaves a scrollbar that flickers on
-                # and off as the analyzer fills in the labels below the board.
-                ui.textarea(value=pgn).props("readonly") \
-                    .classes("w-full flex-grow min-h-0 arena-log mono text-xs "
-                             "pgn-box")
-                with ui.row().classes("gap-2"):
-                    widgets.icon_button("Copy PGN", "ic_export", secondary=True,
-                                        dense=True, on_click=lambda: (
-                                            ui.clipboard.write(pgn),
-                                            ui.notify("PGN copied",
-                                                      type="positive")))
-                    widgets.icon_button("Download PGN", "ic_download",
-                                        secondary=True, dense=True,
-                                        on_click=lambda: ui.download.content(
-                                            pgn, f"game_{game_id}.pgn"))
-
-        def update_label():
-            i, total = pos["i"], len(moves)
-            if i == 0:
-                move_label.set_text("Start position")
-            elif i <= total:
-                side = "White" if i % 2 == 1 else "Black"
-                move_label.set_text(f"Move {(i + 1) // 2}: {side} — {moves[i - 1]}")
-            if session.opening_book.loaded:
-                eco, name = session.opening_book.lookup(replay.uci_moves_list())
-                opening_lbl.set_text(
-                    (f"{eco} · {name}" if eco else name) if name else "")
-
-        # ── Analyzer: eval bar + move quality while navigating ─
-        evals = {}              # ply index → cp (White POV), cached
-        anal_token = {"n": 0}   # drops stale results on fast navigation
-
-        async def analyze_current():
-            if not (session.analyzer and session.analyzer.alive):
-                eval_lbl.set_text("No analyzer loaded")
-                return
-            i = pos["i"]
-            anal_token["n"] += 1
-            tok = anal_token["n"]
-            eval_lbl.set_text("Analyzing…")
-
-            # Evaluate previous + current position (quality needs both)
-            for j in (i - 1, i):
-                if j >= 0 and j not in evals:
-                    moves_str = " ".join(moves[:j])
-                    async with session._analyzer_alock:
-                        res = await run.io_bound(
-                            session.analyzer.eval_position, moves_str, 200)
-                    if res and res[0] is not None:
-                        evals[j] = res[0]
-            if tok != anal_token["n"]:
-                return          # user already navigated elsewhere
-
-            cp = evals.get(i)
-            if cp is None:
-                eval_lbl.set_text("—")
-                return
-            eval_bar.set_cp(cp)
-            eval_lbl.set_text(f"Eval: {cp / 100:+.2f}")
-
-            if i == 0:
-                quality_lbl.set_text("")
-            elif (session.opening_book.loaded and
-                    session.opening_book.in_book(replay.uci_moves_list())):
-                quality_lbl.set_text("Book")
-                quality_lbl.style(f"color: {QUALITY_COLORS.get('Book', '#EAEAEA')}")
-            elif (i - 1) in evals:
-                was_white = (i % 2 == 1)
-                q = classify_move_quality(evals[i - 1], cp, was_white)
-                quality_lbl.set_text(q or "")
-                quality_lbl.style(
-                    f"color: {QUALITY_COLORS.get(q, '#EAEAEA')}")
-            else:
-                quality_lbl.set_text("")
-
-        def on_key(e):
-            if not e.action.keydown:
-                return
-            if e.key.arrow_left:
-                goto(pos["i"] - 1)
-            elif e.key.arrow_right:
-                goto(pos["i"] + 1)
-            elif e.key.name == "Home":
-                goto(0)
-            elif e.key.name == "End":
-                goto(len(moves))
-        ui.keyboard(on_key=on_key)
-
-        ui.button("Close", on_click=dialog.close) \
-            .props("flat color=grey no-caps").classes("self-end dlg-foot")
-        update_label()
-        asyncio.create_task(analyze_current())
-    dialog.open()
+        nav = {"prev": opener(idx - 1), "next": opener(idx + 1)}
+    review.show_game_review(session, source, nav)

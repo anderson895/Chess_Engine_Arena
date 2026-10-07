@@ -20,10 +20,18 @@ from core.opening_book import OpeningBook
 from core.elo import (
     compute_elo_by_tc, tally_by_tc, tc_bucket, MIN_RATED_GAMES,
 )
+from core.review import GameAnalyst
 from core.utils import (
-    normalize_engine_name, get_tier, classify_move_quality, build_pgn,
+    normalize_engine_name, get_tier, build_pgn,
 )
 from data.database import Database
+
+# Search time per position for grading moves while a game is played. The
+# review screen analyses again, deeper; this keeps up with fast games.
+LIVE_ANALYSIS_MS = 250
+
+# A review engine nobody has used for this long is shut down
+REVIEW_ENGINE_IDLE_S = 60
 
 
 # Re-exported for the UI modules that import it from here
@@ -88,7 +96,8 @@ class GameSession:
       engine_log(text, tag)                — engine output line ('W'/'B'/'E')
       eval(side, ev_str, depth_str)        — per-engine eval display ('w'/'b')
       eval_bar(cp)                         — eval bar centipawns (White POV)
-      quality(label)                       — move quality label ('Book', 'Best', …)
+      move_review(review)                  — core.review.MoveReview of the last
+                                             graded move, or None to clear
       opening(text)                        — opening display line
       game_over(result, reason, winner)    — game finished
       clock()                              — clock values changed (clock mode)
@@ -102,6 +111,7 @@ class GameSession:
 
     MODE_EVE = "engine_vs_engine"
     MODE_HVE = "human_vs_engine"
+    MODE_HVH = "human_vs_human"     # two players at one board, no engine
 
     def __init__(self, db: Database | None = None):
         self.db = db or Database()
@@ -123,6 +133,8 @@ class GameSession:
         self.e2_name      = "Engine 2 (White)"
         self.player_name  = "Player"
         self.player_color = "white"
+        self.white_player = "White"      # the two names in 2-player mode
+        self.black_player = "Black"
         self.movetime_ms  = 1000   # analyzer/tournament fallback only
         self.delay_s      = 0.5
         # Selected TIME_CONTROLS preset; base/inc are derived at start_game.
@@ -157,12 +169,19 @@ class GameSession:
         self.btime_ms = (self.base_min or 0) * 60000
         self._think_start = None   # time.time() when current search began
 
-        # Analysis state
+        # Analysis state. The analyst follows the game being played: it
+        # names the opening as positions arrive and grades each move.
         self._analyzer_alock = asyncio.Lock()
-        self._eval_chain = None        # (uci_after_str, cp_after)
-        self.move_qualities: list[tuple[int, str, str]] = []
-        self.last_quality: str | None = None
+        self.analyst = GameAnalyst(self.opening_book, self._analyse_live)
         self.eval_bar_cp = 0
+        # The game that just ended, kept for "Game Review" after the colours
+        # have been swapped for the rematch
+        self.last_game = None
+
+        # Dedicated engine for the review screen, started on demand
+        self._review_engine: AnalyzerEngine | None = None
+        self._review_users = 0
+        self._review_idle: asyncio.TimerHandle | None = None
 
         # Elo / head-to-head caches
         self._elo_cache = None
@@ -203,9 +222,17 @@ class GameSession:
             for i in range(0, len(sans), 2)
         ]
 
+    def human_to_move(self):
+        """True when a person, not an engine, plays the side to move."""
+        if self.play_mode == self.MODE_HVH:
+            return True
+        if self.play_mode == self.MODE_HVE:
+            return (self.player_color == "white") == (self.board.turn == "w")
+        return False
+
     def legal_destinations(self):
-        """Squares the selected piece can move to (HvE mode only)."""
-        if self.play_mode != self.MODE_HVE or not self.selected_square:
+        """Squares the selected piece can move to (a person's turn only)."""
+        if not self.human_to_move() or not self.selected_square:
             return set()
         sr, sc = self.selected_square
         return {(m[2], m[3]) for m in self.board.legal_moves()
@@ -219,6 +246,9 @@ class GameSession:
 
     def player_names(self):
         """(white_name, black_name) for the current mode/colors."""
+        if self.play_mode == self.MODE_HVH:
+            return ((self.white_player or "White").strip() or "White",
+                    (self.black_player or "Black").strip() or "Black")
         if self.play_mode == self.MODE_HVE:
             human = (self.player_name or "Player").strip() or "Player"
             if self.player_color == "white":
@@ -408,10 +438,27 @@ class GameSession:
         if not book or not book.loaded:
             self._emit("error", f"No valid openings found in:\n{path}")
             return False
-        self.opening_book = book
-        self.opening_csv_path = path
+        self.set_opening_book(book, path)
         self._refresh_opening_display(reset=True)
         return True
+
+    def set_opening_book(self, book, path):
+        """Use *book* from now on — including for the game on the board."""
+        self.opening_book = book
+        self.opening_csv_path = path
+        self._restart_analyst()
+
+    def _restart_analyst(self):
+        """A fresh analyst for the game on the board, its moves replayed."""
+        self.analyst = GameAnalyst(self.opening_book, self._analyse_live)
+        for uci in self.board.uci_moves_list():
+            self.analyst.record(uci)
+
+    def _analyse_live(self, moves_str):
+        """Analysis of one position for live grading (worker thread)."""
+        if not self.analyzer or not self.analyzer.alive:
+            return None
+        return self.analyzer.analyse(moves_str, LIVE_ANALYSIS_MS, 2)
 
     async def load_analyzer(self, path):
         if self.analyzer:
@@ -432,21 +479,80 @@ class GameSession:
             self._emit("error", f"Could not start analyzer:\n{e}")
             return False
 
+    # ── Review engine ─────────────────────────────────────
+
+    def cpu_busy(self):
+        """True while a game or tournament is being played on this machine."""
+        from tournament.manager import TournamentRunner
+        return self.game_running or TournamentRunner.active > 0
+
+    async def acquire_review_engine(self):
+        """
+        The engine that analyses games for the review screen, or None if
+        no analyzer is set up.
+
+        A second Stockfish, apart from the live analyzer, so reviewing an
+        old game never holds up the game being played. It runs below
+        normal priority and on one thread while a game or tournament is on,
+        so engines at play keep their CPU; otherwise on half the cores.
+        Release it with release_review_engine() when done.
+        """
+        self._review_users += 1
+        if self._review_idle is not None:
+            self._review_idle.cancel()
+            self._review_idle = None
+        eng = self._review_engine
+        if eng is None or not eng.alive:
+            if not self.analyzer_path or not os.path.isfile(self.analyzer_path):
+                self._review_users -= 1
+                return None
+            eng = AnalyzerEngine(self.analyzer_path, "Reviewer",
+                                 low_priority=True)
+            try:
+                await run.io_bound(eng.start)
+            except Exception as e:
+                self._review_users -= 1
+                self._emit("error", f"Could not start the review engine:\n{e}")
+                return None
+            self._review_engine = eng
+        threads = 1 if self.cpu_busy() else max(1, (os.cpu_count() or 2) // 2)
+        await run.io_bound(eng.configure, threads, 128)
+        return eng
+
+    def release_review_engine(self):
+        """Done with the review engine; it shuts down once left idle."""
+        self._review_users = max(0, self._review_users - 1)
+        if self._review_users or self._review_engine is None:
+            return
+        loop = asyncio.get_running_loop()
+        self._review_idle = loop.call_later(
+            REVIEW_ENGINE_IDLE_S,
+            lambda: asyncio.ensure_future(self._stop_review_engine()))
+
+    async def _stop_review_engine(self):
+        self._review_idle = None
+        if self._review_users:
+            return
+        eng, self._review_engine = self._review_engine, None
+        if eng:
+            await run.io_bound(eng.stop)
+
     def _refresh_opening_display(self, reset=False):
+        """
+        Show the opening the game is in. The analyst names it by position,
+        so a transposition into another opening is shown as it happens.
+        """
         if reset:
             self.current_opening_name = None
             if self.opening_book.loaded:
-                self._emit("opening",
-                           f"{len(self.opening_book._entries)} openings ready")
+                self._emit("opening", f"{len(self.opening_book)} openings ready")
             else:
                 self._emit("opening", "No openings CSV loaded")
             return
-        if not self.opening_book.loaded:
-            return
-        eco, name = self.opening_book.lookup(self.board.uci_moves_list())
+        _, name = self.analyst.opening
         if name:
             self.current_opening_name = name
-            self._emit("opening", f"{eco}  ·  {name}" if eco else name)
+            self._emit("opening", self.analyst.opening_label)
         elif self.current_opening_name:
             self._emit("opening", self.current_opening_name)
 
@@ -460,7 +566,9 @@ class GameSession:
             return
 
         # Validate config
-        if self.play_mode == self.MODE_HVE:
+        if self.play_mode == self.MODE_HVH:
+            paths = []                    # two people, no engine to load
+        elif self.play_mode == self.MODE_HVE:
             if not (self.player_name or "").strip():
                 self._emit("error", "Please enter your name.")
                 return
@@ -480,9 +588,6 @@ class GameSession:
         self.last_move = None
         self.selected_square = None
         self.game_result = "*"
-        self.move_qualities = []
-        self.last_quality = None
-        self._eval_chain = None
         self.eval_bar_cp = 0
         self._engine_thinking = False
         self._elo_cache = None           # tournaments may have added games
@@ -508,13 +613,16 @@ class GameSession:
                     break
             if self.board.move_history:
                 self.last_move = self.board.move_history[-1][0]
-        if self.current_opening_name:
+        self._restart_analyst()           # preset moves included
+        if self.analyst.opening[1]:
+            self._refresh_opening_display()
+        elif self.current_opening_name:
             self._emit("opening", self.current_opening_name)
         else:
             self._refresh_opening_display(reset=True)
 
         self._emit("eval_bar", 0)
-        self._emit("quality", None)
+        self._emit("move_review", None)
         self._emit("board_changed")
         self.game_date = datetime.now().strftime("%Y.%m.%d")
         self._start_time = time.time()
@@ -528,9 +636,12 @@ class GameSession:
         self.game_running = True
         self.game_paused = False
         self._emit("banners")
+        self._emit("board_changed")       # the player's pieces can move now
         self._emit("sound", "game_start")
 
-        if self.play_mode == self.MODE_HVE:
+        if self.play_mode == self.MODE_HVH:
+            self._emit("status", self._turn_prompt())
+        elif self.play_mode == self.MODE_HVE:
             base = self.e2_name.split("(")[0].strip()
             color_label = "Black" if self.player_color == "white" else "White"
             self.e2_name = f"{base} ({color_label})"
@@ -546,6 +657,8 @@ class GameSession:
 
     async def _load_engines(self):
         """Start the engine subprocess(es). Returns True on success."""
+        if self.play_mode == self.MODE_HVH:
+            return True
         wanted = ([(2, self.e2_path, self.e2_name)]
                   if self.play_mode == self.MODE_HVE
                   else [(1, self.e1_path, self.e1_name),
@@ -592,6 +705,7 @@ class GameSession:
             self._emit("status", "Game aborted — no result recorded")
         else:
             self.game_result = result
+            self._remember_game(result)
             white, black = self.player_names()
             winner = (white if result == "1-0"
                       else (black if result == "0-1" else None))
@@ -613,13 +727,11 @@ class GameSession:
         self.last_move = None
         self.selected_square = None
         self.game_result = ""
-        self.move_qualities = []
-        self.last_quality = None
-        self._eval_chain = None
         self.eval_bar_cp = 0
+        self._restart_analyst()
         self._refresh_opening_display(reset=True)
         self._emit("eval_bar", 0)
-        self._emit("quality", None)
+        self._emit("move_review", None)
         self._emit("board_changed")
         self._emit("status", "New game — load engines and press START")
 
@@ -630,6 +742,14 @@ class GameSession:
         """
         if self.game_running:
             return False
+        if self.play_mode == self.MODE_HVH:
+            self.white_player, self.black_player = (self.black_player,
+                                                    self.white_player)
+            self._emit("engine_log",
+                       f"⇄ Colors swapped — {self.white_player} now plays "
+                       f"White", "E")
+            self._emit("banners")
+            return True
         if self.play_mode == self.MODE_HVE:
             self.player_color = ("black" if self.player_color == "white"
                                  else "white")
@@ -662,12 +782,14 @@ class GameSession:
         """Full teardown at app exit."""
         self.game_running = False
         await self.kill_engines()
-        if self.analyzer:
-            try:
-                await run.io_bound(self.analyzer.stop)
-            except Exception:
-                pass
-            self.analyzer = None
+        for attr in ("analyzer", "_review_engine"):
+            eng = getattr(self, attr)
+            if eng:
+                try:
+                    await run.io_bound(eng.stop)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
 
     def export_pgn_text(self):
         """Current game as PGN, or None when no moves exist."""
@@ -807,18 +929,38 @@ class GameSession:
     #  Game flow — human vs engine
     # ═══════════════════════════════════════════════════════
 
+    def can_move_now(self):
+        """True while a person is to move and the game is taking moves."""
+        return (self.game_running and not self._engine_thinking
+                and not self.game_paused and self.human_to_move())
+
+    def movable_squares(self):
+        """Squares of the pieces the person to move can pick up and play."""
+        if not self.can_move_now():
+            return set()
+        return {(m[0], m[1]) for m in self.board.legal_moves()}
+
+    def pick_up(self, br, bc):
+        """A piece on (br, bc) is being dragged: select it, if it may move."""
+        if (br, bc) in self.movable_squares() and self.selected_square != (br, bc):
+            self.selected_square = (br, bc)
+            self._emit("board_changed")
+
+    async def drop_piece(self, fr, fc, br, bc):
+        """The piece dragged from (fr, fc) was let go on (br, bc)."""
+        self.pick_up(fr, fc)            # in case the drag start went unheard
+        if self.selected_square == (fr, fc):
+            await self.click_square(br, bc)
+
     async def click_square(self, br, bc):
         """Handle a click on board square (row, col) in board coordinates."""
-        if (self.play_mode != self.MODE_HVE or not self.game_running
-                or self._engine_thinking):
+        if not self.can_move_now():
             return
-        human_white = (self.player_color == "white")
-        if human_white != (self.board.turn == "w"):
-            return
+        mover_white = (self.board.turn == "w")
 
         piece = self.board.get(br, bc)
         is_own = (piece and piece != "." and
-                  (piece.isupper() if human_white else piece.islower()))
+                  (piece.isupper() if mover_white else piece.islower()))
 
         if self.selected_square is None:
             if is_own:
@@ -847,7 +989,7 @@ class GameSession:
             promo = "q"
             if self.ask_promotion:
                 promo = (await self.ask_promotion(
-                    "w" if human_white else "b")) or "q"
+                    "w" if mover_white else "b")) or "q"
             uci = (f"{chr(ord('a') + fc)}{8 - fr}"
                    f"{chr(ord('a') + bc)}{8 - br}{promo}")
         else:
@@ -870,7 +1012,18 @@ class GameSession:
         if over:
             await self._finish(result, reason, winner_color)
             return
-        self._game_task = asyncio.create_task(self._engine_turn())
+        if self.play_mode == self.MODE_HVH:
+            self._emit("status", self._turn_prompt())
+        else:
+            self._game_task = asyncio.create_task(self._engine_turn())
+
+    def _turn_prompt(self):
+        """Status line for whoever is to move in 2-player mode."""
+        white, black = self.player_names()
+        side, name = (("White", white) if self.board.turn == "w"
+                      else ("Black", black))
+        check = " — in CHECK!" if self.board.in_check() else ""
+        return f"{name} to move ({side}){check}"
 
     async def _engine_turn(self):
         """The engine's reply in human-vs-engine mode."""
@@ -897,6 +1050,8 @@ class GameSession:
             pass
         finally:
             self._engine_thinking = False
+            if self.game_running:
+                self._emit("board_changed")   # the player's pieces can move now
 
     # ═══════════════════════════════════════════════════════
     #  Shared post-move / end-game plumbing
@@ -911,13 +1066,12 @@ class GameSession:
         return sound_for_san(san, near_side)
 
     def _after_move(self, moves_before, was_white, san):
+        # The analyst first: the board's listeners read it (move list grades)
+        self.analyst.record(self.board.move_history[-1][0])
         self._emit("sound", self._sound_for_san(san, was_white))
         self._emit("board_changed")
         self._refresh_opening_display()
-        ply = len(self.board.move_history)
-        asyncio.create_task(
-            self._analyze_quality(moves_before, self.board.uci_moves_str(),
-                                  was_white, san, ply))
+        asyncio.create_task(self._grade_move(self.analyst, self.analyst.ply))
 
     def _show_engine_eval(self, engine, side):
         info = engine.last_info if engine else {}
@@ -952,6 +1106,7 @@ class GameSession:
                   else (black if winner_color == "black" else None))
 
         await self._save_game(result, reason)
+        self._remember_game(result)
 
         msg = (f"{normalize_engine_name(winner)} wins by {reason}"
                if winner else f"{result} — {reason}")
@@ -962,6 +1117,11 @@ class GameSession:
         self._emit("game_over", result, reason, winner)
 
     async def _save_game(self, result, reason):
+        # A game between two people at one board says nothing about any
+        # engine's strength, and saving it would put both names into the
+        # rankings — it is reviewed and exported, not recorded
+        if self.play_mode == self.MODE_HVH:
+            return
         duration = int(time.time() - self._start_time) if self._start_time else 0
         white, black = self.player_names()
         pgn = build_pgn(
@@ -975,39 +1135,40 @@ class GameSession:
             self.current_opening_name or '')
         self.invalidate_stats_caches()
 
+    def _remember_game(self, result):
+        """
+        Keep what the review screen needs about the game that just ended.
+        Taken before the colours are swapped for the rematch, which would
+        otherwise put the names on the wrong sides.
+        """
+        white, black = self.player_names()
+        self.last_game = {
+            "moves": self.board.uci_moves_list(),
+            "white": white, "black": black, "result": result,
+            "tc": getattr(self, "_game_tc_label", ""),
+            "pgn": self.export_pgn_text(),
+        }
+
     # ═══════════════════════════════════════════════════════
-    #  Move-quality analysis
+    #  Move grading
     # ═══════════════════════════════════════════════════════
 
-    async def _analyze_quality(self, uci_before, uci_after, was_white, san, ply):
-        # Opening theory → label as Book, skip engine analysis
-        if (self.opening_book.loaded and
-                self.opening_book.in_book(uci_after.split())):
-            self.last_quality = "Book"
-            self.move_qualities.append((ply, san, "Book"))
-            self._emit("quality", "Book")
-            return
-
-        if not self.analyzer or not self.analyzer.alive:
-            return
+    async def _grade_move(self, analyst, ply):
+        """
+        Grade the move that reached *ply* with the same analyst the review
+        screen uses, so a move is classed the same live as in review. The
+        analyzer's work runs off the event loop, one position at a time.
+        """
         async with self._analyzer_alock:
-            chain = self._eval_chain
-            if chain and chain[0] == uci_before and chain[1] is not None:
-                cp_before = chain[1]
-            else:
-                # io_bound returns None (not a tuple) when the app shuts down
-                res = await run.io_bound(
-                    self.analyzer.eval_position, uci_before, 200)
-                cp_before = res[0] if res else None
-            res = await run.io_bound(
-                self.analyzer.eval_position, uci_after, 200)
-            cp_after = res[0] if res else None
-            self._eval_chain = (uci_after, cp_after)
-        if cp_before is None or cp_after is None:
-            return
-        quality = classify_move_quality(cp_before, cp_after, was_white)
-        self.last_quality = quality
-        self.move_qualities.append((ply, san, quality))
-        self.eval_bar_cp = cp_after
-        self._emit("eval_bar", cp_after)
-        self._emit("quality", quality)
+            # A new game, or a game that has run two moves ahead (bullet),
+            # leaves this move ungraded rather than queueing up behind it
+            if analyst is not self.analyst or analyst.ply - ply >= 2:
+                return
+            review = await run.io_bound(analyst.grade, ply)
+        if review is None or analyst is not self.analyst:
+            return                        # app shutting down / new game
+        self._emit("move_review", review)
+
+    def game_summary(self):
+        """core.review.GameReview of the game on the board, as graded so far."""
+        return self.analyst.summary()

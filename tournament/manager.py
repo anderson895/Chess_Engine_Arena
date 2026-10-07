@@ -24,6 +24,7 @@ from core.utils import normalize_engine_name, build_pgn, get_tier
 from core.board import Board
 from core.engine import UCIEngine, AnalyzerEngine
 from core.elo import compute_elo_ratings
+from core.review import GameAnalyst
 from data.database import Database
 
 
@@ -1762,6 +1763,15 @@ class MiniBoardWidget(tk.Frame):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentRunner:
+    # Search per position when grading tournament moves. Taken out of the
+    # pacing delay, so a tournament runs no slower than before.
+    ANALYSIS_MS = 200
+
+    # How many tournaments are being played right now — background analysis
+    # (the review screen) holds back while any are
+    active = 0
+    _active_lock = threading.Lock()
+
     def __init__(self, tournament: Tournament, on_game_start,
                 on_board_update, on_game_end, on_round_end,
                 on_tournament_end, on_status, on_human_turn=None):
@@ -1805,6 +1815,21 @@ class TournamentRunner:
         self._pause_flag = False   # release a paused loop so it can apply
 
     def _run(self):
+        with TournamentRunner._active_lock:
+            TournamentRunner.active += 1
+        try:
+            self._run_events()
+        finally:
+            with TournamentRunner._active_lock:
+                TournamentRunner.active -= 1
+
+    def _analyse_position(self, moves_str):
+        """Analysis of one position for grading moves (runner thread)."""
+        if not self._analyzer or not self._analyzer.alive:
+            return None
+        return self._analyzer.analyse(moves_str, self.ANALYSIS_MS, 2)
+
+    def _run_events(self):
         analyzer_ref = self.t.analyzer_path
         if analyzer_ref is not None and AnalyzerEngine is not None:
             analyzer_path = None
@@ -1874,34 +1899,6 @@ class TournamentRunner:
         else:
             self.on_status("Tournament paused.")
 
-    def _lookup_opening(self, book, board):
-        if book is None:
-            return None
-        if hasattr(book, 'lookup'):
-            try:
-                uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
-                played  = uci_str.split() if uci_str else []
-                result  = book.lookup(played)
-                if isinstance(result, (list, tuple)) and len(result) == 2:
-                    eco, name = result
-                    if name:
-                        return str(name)
-                elif isinstance(result, str) and result:
-                    return result
-            except Exception as e:
-                print(f"[OpeningBook.lookup] error: {e}")
-            return None
-        if hasattr(book, 'get_opening_name'):
-            try:
-                uci_str = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
-                name = book.get_opening_name(uci_str)
-                if name:
-                    return str(name)
-            except Exception as e:
-                print(f"[book.get_opening_name] error: {e}")
-            return None
-        return None
-
     def _play_game(self, game: TournamentGame):
         game.status = "running"
         self._adjudicate = None      # drop a stale request from a past game
@@ -1946,6 +1943,12 @@ class TournamentRunner:
         book = self.t.opening_book
         book_moves_used = 0
         MAX_BOOK_MOVES  = 20
+
+        # Names the opening by position (so transpositions are followed) and
+        # grades every move — the same analyst the live game and the review
+        # screen use, so a move is classed alike wherever it was played
+        analyst = GameAnalyst(book, self._analyse_position)
+        game.last_review = None
 
         # Time control: clocked presets give each side a real chess clock;
         # "Classic" (base None) falls back to fixed movetime per move.
@@ -2084,66 +2087,26 @@ class TournamentRunner:
             game.last_san = san
             game.last_was_white = is_white_turn
 
-            if book is not None:
-                found_name = self._lookup_opening(book, board)
-                if found_name:
-                    opening_name = found_name
-
-            cp_val   = None
-            mate_val = None
-            quality  = None
-            if self._analyzer:
-                try:
-                    mvs_for_eval = board.uci_moves_str() if hasattr(board, 'uci_moves_str') else ""
-                    if hasattr(self._analyzer, 'eval_position'):
-                        cp_val, score_type = self._analyzer.eval_position(
-                            mvs_for_eval, movetime_ms=150)
-                        if cp_val is not None:
-                            if score_type == 'mate':
-                                mate_val = cp_val // 30000 if cp_val != 0 else 0
-                            eval_history.append(cp_val)
-                            # Classify move quality based on eval change
-                            if len(eval_history) >= 2:
-                                cp_before = eval_history[-2]
-                                cp_after  = eval_history[-1]
-                                is_white  = not is_white_turn  # Previous move was opposite color
-                                try:
-                                    from core.utils import classify_move_quality
-                                    quality = classify_move_quality(cp_before, cp_after, is_white)
-                                except ImportError:
-                                    pass
-                            move_qualities.append(quality)
-                    elif hasattr(self._analyzer, 'get_eval'):
-                        cp_val = self._analyzer.get_eval(mvs_for_eval, movetime_ms=150)
-                        if cp_val is not None:
-                            eval_history.append(cp_val)
-                            # Classify move quality based on eval change
-                            if len(eval_history) >= 2:
-                                cp_before = eval_history[-2]
-                                cp_after  = eval_history[-1]
-                                is_white  = not is_white_turn
-                                try:
-                                    from core.utils import classify_move_quality
-                                    quality = classify_move_quality(cp_before, cp_after, is_white)
-                                except ImportError:
-                                    pass
-                            move_qualities.append(quality)
-                except Exception:
-                    pass
-
-            # Opening-book moves are theory — grade them as "Book"
-            if (book is not None and getattr(book, 'loaded', False)
-                    and hasattr(book, 'in_book')
-                    and book.in_book(board.uci_moves_list())):
-                quality = "Book"
-                if len(move_qualities) >= len(board.move_history) and move_qualities:
-                    move_qualities[-1] = "Book"
-                else:
-                    move_qualities.append("Book")
-
-            # If no analyzer or no quality computed, add None placeholder
-            if quality is None and len(move_qualities) < len(board.move_history):
-                move_qualities.append(None)
+            graded_at = time.time()
+            try:
+                review = analyst.push(uci)
+            except Exception as ex:
+                print(f"[Tournament] grading failed: {ex}")
+                review = None
+            game.last_review = review
+            if analyst.opening[1]:
+                opening_name = analyst.opening[1]
+            cp_val = mate_val = None
+            if review is not None:
+                cp_val, mate_val = review.eval_cp, review.eval_mate
+                if mate_val is not None:
+                    # Mates travel as ±30000 in the eval history and bar
+                    winning = mate_val > 0 or (mate_val == 0 and (cp_val or 0) > 0)
+                    cp_val = 30000 if winning else -30000
+            if cp_val is not None:
+                eval_history.append(cp_val)
+            move_qualities.append(review.cls if review else None)
+            grading_s = time.time() - graded_at
 
             # Snapshot the clock on the game so UI callbacks can display it
             game.use_clock = use_clock
@@ -2154,7 +2117,7 @@ class TournamentRunner:
             # move somebody just made by hand took as long as it took, and
             # padding it only makes their own move feel slow to land.
             time.sleep(0.02 if player.is_human
-                       else max(0.02, self.t.delay))
+                       else max(0.02, self.t.delay - grading_s))
 
         if not result:
             over, result, reason, winner_color = board.game_result()
@@ -2623,8 +2586,7 @@ class TournamentSetupDialog:
             return f"✓  {os.path.basename(b.filename)}"
         if hasattr(b, '_path'):
             return f"✓  {os.path.basename(b._path)}"
-        n = getattr(b, '_entries', None)
-        count = f" ({len(n)} openings)" if n is not None else ""
+        count = f" ({len(b)} openings)" if hasattr(b, '__len__') else ""
         return f"✓  Opening book loaded{count}"
 
     def _build(self):

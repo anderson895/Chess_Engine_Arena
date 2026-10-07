@@ -24,6 +24,7 @@ from tournament.manager import (
 )
 from webui import widgets
 from webui.board import BoardView, EvalBar
+from webui.quality import MoveVerdict
 from webui.session import sound_for_san
 from webui.theme import (
     COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN, COLOR_ORANGE,
@@ -210,6 +211,28 @@ class TournamentSession:
             self.human_selected = (r, c) if mine else None
         return True
 
+    def human_movable(self):
+        """Squares of the pieces the human seat can pick up and play."""
+        with self.lock:
+            board = self.human_board
+        if board is None:
+            return set()
+        return {(fr, fc) for fr, fc, _tr, _tc, _p in board.legal_moves()}
+
+    def human_pick(self, r, c):
+        """A piece on (r, c) is being dragged: pick it up if it can move."""
+        if (r, c) not in self.human_movable():
+            return False
+        with self.lock:
+            self.human_selected = (r, c)
+        return True
+
+    def human_drop(self, fr, fc, tr, tc):
+        """The piece dragged from (fr, fc) was let go on (tr, tc)."""
+        if not self.human_pick(fr, fc):
+            return False
+        return self.human_click(tr, tc)
+
     def human_dests(self):
         """Squares the picked-up piece may legally reach."""
         with self.lock:
@@ -235,6 +258,7 @@ class TournamentSession:
             self.last_move = None
             self.cp = None
             self.opening = ""
+            self.last_review = None
             self.board_dirty = True
             self.tables_dirty = True
 
@@ -244,6 +268,8 @@ class TournamentSession:
             self.last_move = last_move
             self.cp = cp
             self.opening = opening or ""
+            # The runner grades each move as it lands (core.review)
+            self.last_review = getattr(game, "last_review", None)
             self.use_clock = getattr(game, "use_clock", self.use_clock)
             self.wtime_ms = getattr(game, "wtime_ms", self.wtime_ms)
             self.btime_ms = getattr(game, "btime_ms", self.btime_ms)
@@ -1191,9 +1217,10 @@ def show_tournament_setup(session):
         _apply_format()
         movetime_in.set_visibility(tc_sel.value == "classic")
 
-        analyzer_note = ("Analyzer attached — move quality will be recorded"
+        analyzer_note = ("Analyzer attached — every move is graded as it is "
+                         "played"
                          if session.analyzer and session.analyzer.alive
-                         else "No analyzer — eval data will not be recorded")
+                         else "No analyzer — moves will not be graded")
         ui.label(analyzer_note).classes("text-xs") \
             .style(f"color: {COLOR_GREEN if session.analyzer else COLOR_ORANGE}")
 
@@ -1361,6 +1388,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                     .classes("font-bold text-center w-full")
                 opening_lbl = ui.label("").classes("text-xs italic") \
                     .style(f"color: {COLOR_BLUE}")
+                verdict = MoveVerdict(20)
 
                 black_banner, black_name_lbl, black_rank_lbl, \
                     black_clock_lbl, black_h2h_lbl = widgets.banner(COLOR_SILVER)
@@ -1375,6 +1403,14 @@ def show_tournament_window(session, tsess: TournamentSession):
                             if tsess.human_click(br, bc):
                                 board_view.refresh()
 
+                        def _human_pick(br, bc):
+                            if tsess.human_pick(br, bc):
+                                board_view.refresh()
+
+                        async def _human_drop(fr, fc, br, bc):
+                            if tsess.human_drop(fr, fc, br, bc):
+                                board_view.refresh()
+
                         def _board_state():
                             # While it is a human's turn the runner is
                             # blocked, so the live board is safe to read
@@ -1386,10 +1422,14 @@ def show_tournament_window(session, tsess: TournamentSession):
                                 "selected": tsess.human_selected,
                                 "legal_dests": tsess.human_dests(),
                                 "check_sq": None,
+                                "movable": tsess.human_movable(),
                             }
 
+                        # A human seat moves by click-click or drag and drop
                         board_view = BoardView(_board_state,
-                                               on_click=_human_click)
+                                               on_click=_human_click,
+                                               on_drag_start=_human_pick,
+                                               on_drop=_human_drop)
 
                 white_banner, white_name_lbl, white_rank_lbl, \
                     white_clock_lbl, white_h2h_lbl = widgets.banner(COLOR_GOLD)
@@ -1712,6 +1752,7 @@ def show_tournament_window(session, tsess: TournamentSession):
                 status = tsess.status_msg
                 cp = tsess.cp
                 opening = tsess.opening
+                last_review = tsess.last_review
                 game_label = tsess.game_label
                 sounds = list(tsess.sounds)
                 tsess.sounds.clear()
@@ -1729,7 +1770,10 @@ def show_tournament_window(session, tsess: TournamentSession):
                 board_view.refresh()
                 game_lbl.set_text(game_label)
                 opening_lbl.set_text(opening or "")
-                if cp is not None:
+                verdict.show(last_review)
+                if last_review is not None and last_review.evaluation:
+                    eval_bar.set_eval(*last_review.evaluation)
+                elif cp is not None:
                     eval_bar.set_cp(cp)
             if tables_dirty:
                 _refresh_tables()
@@ -1843,7 +1887,7 @@ def _show_player_card(session, t, name):
             tbl.add_slot("body-cell-outcome", _OUTCOME_SLOT)
             tbl.on("rowDblclick",
                    lambda e: _open_game_pgn(session, e.args[1], rows))
-            widgets.hint("Double-click a game to replay it")
+            widgets.hint("Double-click a game to review it")
 
         with ui.row().classes("w-full justify-end dlg-foot"):
             ui.button("Close", on_click=dlg.close) \
@@ -1859,7 +1903,7 @@ async def _open_game_pgn(session, row, siblings=None):
         played = [(r["db_id"],) for r in (siblings or []) if r.get("db_id")]
         await widgets.with_loader(
             lambda: show_pgn_viewer(session, gid, played),
-            "Loading game replay…")
+            "Loading game review…")
     else:
         ui.notify("Game not finished yet.", type="info")
 
@@ -2095,7 +2139,7 @@ def show_tournament_history(session, tournament_id, name):
                 st.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
 
             with ui.column().classes("flex-grow min-w-0 min-h-0 overflow-auto"):
-                ui.label("GAMES — double-click to replay") \
+                ui.label("GAMES — double-click to review") \
                     .classes("arena-heading")
                 game_cols = [
                     {"name": "round",  "label": "Rd",     "field": "round",
@@ -2126,7 +2170,7 @@ def show_tournament_history(session, tournament_id, name):
                                     if r["game_id"]]
                         await widgets.with_loader(
                             lambda: show_pgn_viewer(session, gid, siblings),
-                            "Loading game replay…")
+                            "Loading game review…")
                 gt.on("rowDblclick", open_pgn)
 
         def export_all():

@@ -8,6 +8,7 @@ from core.constants import (
     BG, PANEL_BG, ACCENT, TEXT, BTN_BG, LOG_BG, INFO_BG,
     LIGHT_SQ, DARK_SQ, LAST_FROM, LAST_TO, CHECK_SQ,
 )
+from webui.quality import icon_css, tint_css
 
 # Semantic aliases used across the web UI
 COLOR_MUTED   = "#8a8aa0"
@@ -110,6 +111,7 @@ body {{
 
 /* ── Board ────────────────────────────────────────────── */
 .board-grid {{
+    position: relative;
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
@@ -172,6 +174,27 @@ body {{
     pointer-events: none;
     filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.45));
 }}
+/* Dragging pieces: a grab cursor on the ones that may move, and the
+   dragged copy following the pointer above everything */
+.board-grid.draggable {{ touch-action: none; }}
+.board-grid.draggable .board-sq.can-drag {{ cursor: grab; }}
+.board-sq.drag-over {{ box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.7); }}
+img.drag-ghost {{
+    position: fixed;
+    z-index: 9000;
+    pointer-events: none;
+    object-fit: contain;
+    cursor: grabbing;
+    filter: drop-shadow(2px 6px 6px rgba(0,0,0,0.55));
+}}
+/* Badges and arrows sit on one layer over the whole board */
+.board-overlay {{
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+}}
+{tint_css()}
 
 /* ── Header nav cards ─────────────────────────────────── */
 img.nav-card {{
@@ -221,6 +244,10 @@ img.btn-ic {{
     font-size: 9px;
     font-weight: 700;
     z-index: 2;
+}}
+.eval-bar.flipped .white-part {{
+    bottom: auto;
+    top: 0;
 }}
 
 /* ── Player banners ───────────────────────────────────── */
@@ -338,6 +365,182 @@ img.btn-ic {{
     background: var(--log);
     border-bottom: 1px solid #333;
 }}
+
+/* ── Move-class badges ────────────────────────────────── */
+.qi {{
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    flex: none;
+    background-size: contain;
+    background-repeat: no-repeat;
+}}
+{icon_css()}
+
+/* Main-page move list: every move clickable to preview its position */
+.move-list .pair {{ display: inline-block; white-space: nowrap; margin-right: 6px; }}
+.move-list .n {{ color: #555; }}
+.move-list .mv {{
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 3px;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+}}
+.move-list .mv.w {{ color: {COLOR_GOLD}; }}
+.move-list .mv.b {{ color: #CCCCCC; }}
+.move-list .mv.chk {{ color: {COLOR_ORANGE}; }}
+.move-list .mv:hover {{ background: #22304A; }}
+.move-list .mv.cur {{ background: #2B3D5C; box-shadow: inset 0 -2px 0 {COLOR_BLUE}; }}
+.move-list .qi {{ width: 13px; height: 13px; }}
+
+/* The big green call to action (Game Review / Start Review / Next).
+   These buttons are made with color=None: a Quasar colour class would
+   win over any rule here, since Quasar's !important rules sit in a
+   cascade layer. */
+.review-cta {{
+    background: #81B64C !important;
+    color: #FFF !important;
+    font-weight: 800 !important;
+    font-size: 1.25rem !important;
+    border-radius: 10px !important;
+    box-shadow: 0 5px 0 #45753C !important;
+    padding: 8px 0 !important;
+}}
+.review-cta:hover {{ background: #A3D160 !important; }}
+
+/* ── Game Review screen (chess.com-style greys) ───────── */
+.review-root {{
+    background: #312E2B !important;
+    color: #FFF;
+}}
+.review-root .board-grid {{
+    max-width: min(calc(100vh - 150px), 100%);
+    border: none;
+    border-radius: 3px;
+}}
+.review-root .eval-bar {{
+    width: 26px;
+    border: none;
+    border-radius: 3px;
+    background: #403D39;
+}}
+.review-root .eval-bar .val {{ font-size: 10px; }}
+.review-panel {{
+    background: #262522;
+    border-radius: 8px;
+    overflow: hidden;
+}}
+.review-head {{ background: #21201D; padding: 10px 12px; }}
+.review-title {{
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #FFF;
+    white-space: nowrap;
+}}
+.review-head .q-btn {{ color: #BDBAB7; }}
+.review-speed {{ width: 92px; font-size: 0.8rem; }}
+.review-player {{ color: #FFF; min-height: 44px; }}
+.review-avatar {{
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 4px;
+    background: #E8E6E3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}}
+.review-avatar img {{ width: 34px; height: 34px; }}
+.review-avatar.winner {{ outline: 3px solid #81B64C; }}
+.review-name {{ font-weight: 700; font-size: 1rem; }}
+.review-rating, .review-material {{ color: #989795; font-size: 0.85rem; }}
+.review-coach {{
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px 4px;
+}}
+.review-coach > img {{ width: 44px; height: 44px; border-radius: 6px; flex: none; }}
+.review-bubble {{
+    position: relative;
+    flex: 1;
+    background: #FFF;
+    color: #312E2B;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.92rem;
+    line-height: 1.35;
+    min-height: 44px;
+}}
+.review-bubble::before {{
+    content: '';
+    position: absolute;
+    left: -7px;
+    top: 15px;
+    border: 7px solid transparent;
+    border-left: 0;
+    border-right-color: #FFF;
+}}
+.review-bubble .title {{ display: flex; align-items: center; gap: 6px; font-weight: 800; }}
+.review-bubble .line {{ color: #6B6966; font-size: 0.82rem; margin-top: 2px; }}
+.review-chip {{
+    margin-left: auto;
+    border-radius: 4px;
+    padding: 0 6px;
+    font-family: Consolas, monospace;
+    font-size: 0.8rem;
+    background: #312E2B;
+    color: #FFF;
+}}
+.review-chip.white {{ background: #FFF; color: #312E2B; border: 1px solid #CCC; }}
+.review-graph {{ margin: 6px 14px; border-radius: 4px; overflow: hidden; }}
+.review-progress {{ padding: 4px 14px; color: #989795; font-size: 0.82rem; }}
+.review-grid {{
+    display: grid;
+    grid-template-columns: 1fr 76px 44px 76px;
+    align-items: center;
+    row-gap: 8px;
+    padding: 6px 18px 10px;
+}}
+.review-grid .lbl {{ font-weight: 700; font-size: 1rem; }}
+.review-grid .num {{ text-align: center; font-weight: 800; font-size: 1.15rem; }}
+.review-grid .mid {{ display: flex; justify-content: center; }}
+.review-grid .sep {{ grid-column: 1 / -1; height: 1px; background: #3C3A37; }}
+.review-acc {{
+    text-align: center;
+    border-radius: 6px;
+    padding: 4px 0;
+    font-weight: 800;
+    font-size: 1.35rem;
+}}
+.review-acc.w {{ background: #FFF; color: #312E2B; }}
+.review-acc.b {{ background: #403D39; color: #FFF; }}
+.review-moves {{
+    display: grid;
+    grid-template-columns: 40px 1fr 1fr;
+    row-gap: 2px;
+    padding: 6px 14px;
+    font-size: 0.95rem;
+}}
+.review-moves .n {{ color: #989795; padding-top: 1px; }}
+.review-moves .mv {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #FFF;
+    justify-self: start;
+}}
+.review-moves .mv:hover {{ background: #3C3A37; }}
+.review-moves .mv.cur {{ background: #4B4847; }}
+.review-opening {{ color: #989795; font-size: 0.8rem; padding: 0 14px; }}
+.review-foot {{ padding: 10px 14px 14px; background: #262522; }}
+.review-nav .q-btn:not(.review-cta) {{ background: #3C3A37; color: #FFF; }}
 """
 
 

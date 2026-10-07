@@ -3,16 +3,20 @@
 # ═══════════════════════════════════════════════════════════
 
 import os
+from html import escape
 
 from nicegui import app, ui, run
 
-from core.constants import QUALITY_COLORS
 from core.opening_book import OpeningBook
+from core.review import move_number
 from core.utils import (
-    get_base_path, get_resource_path, fmt_clock, low_time_warning,
+    get_base_path, get_db_path, get_resource_path, fmt_clock,
+    low_time_warning,
 )
-from webui import dialogs, masters, tournament, views, widgets
+from data.database import retag_openings_once
+from webui import dialogs, masters, review, tournament, views, widgets
 from webui.board import BoardView, EvalBar
+from webui.quality import MoveVerdict
 from webui.session import GameSession, parse_opening_book, TIME_CONTROLS
 from webui.theme import (
     apply_theme, COLOR_GOLD, COLOR_SILVER, COLOR_BLUE, COLOR_GREEN,
@@ -158,7 +162,7 @@ _assets_ready = False
 def refresh_asset_labels(book_lbl, analyzer_lbl, opening_lbl):
     """Sync the config-panel labels with the session's asset state."""
     if session.opening_book.loaded:
-        n = len(session.opening_book._entries)
+        n = len(session.opening_book)
         name = os.path.basename(session.opening_csv_path or "")
         book_lbl.set_text(f"{n} openings ({name})")
         book_lbl.style(f"color: {COLOR_BLUE}")
@@ -181,20 +185,39 @@ async def load_startup_assets(book_lbl, analyzer_lbl, opening_lbl,
     notify = status_cb or (lambda msg: None)
 
     notify("Loading opening book…")
-    path = next((p for p in _book_candidates() if os.path.isfile(p)), None)
-    if path:
-        book = await parse_opening_book(path)
+    csv_path = next((p for p in _book_candidates() if os.path.isfile(p)), None)
+    if csv_path:
+        book = await parse_opening_book(csv_path)
         if book and book.loaded:
-            session.opening_book = book
-            session.opening_csv_path = path
+            session.set_opening_book(book, csv_path)
+            ui.timer(1.0, lambda: _retag_stored_openings(csv_path), once=True)
 
     notify("Starting analyzer engine…")
-    path = next((p for p in _analyzer_candidates() if os.path.isfile(p)), None)
-    if path:
-        await session.load_analyzer(path)
+    engine_path = next((p for p in _analyzer_candidates() if os.path.isfile(p)),
+                       None)
+    if engine_path:
+        await session.load_analyzer(engine_path)
 
     refresh_asset_labels(book_lbl, analyzer_lbl, opening_lbl)
     _assets_ready = True
+
+
+async def _retag_stored_openings(csv_path):
+    """
+    Once per opening book: re-name the openings of the games already saved,
+    which were named by move order before names followed positions. Runs
+    in a worker process after a backup; does nothing on later starts.
+    """
+    try:
+        changed = await run.cpu_bound(retag_openings_once, get_db_path(),
+                                      csv_path)
+    except Exception as e:
+        print(f"[openings] re-tag failed: {e}")
+        return
+    if changed:
+        session.invalidate_stats_caches()
+        ui.notify(f"Opening names updated for {changed} saved games "
+                  "(transpositions now recognised)", type="positive")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -418,7 +441,8 @@ def main_page():
                 ui.label("CONFIGURATION").classes("arena-heading")
                 mode = ui.radio(
                     {GameSession.MODE_EVE: "Engine vs Engine",
-                     GameSession.MODE_HVE: "Play vs Engine"},
+                     GameSession.MODE_HVE: "Play vs Engine",
+                     GameSession.MODE_HVH: "2 Players"},
                     value=session.play_mode).props("dense")
 
                 config_area = ui.column().classes("w-full gap-1")
@@ -449,6 +473,8 @@ def main_page():
                                 .tooltip("Swap the colors of the two engines"))
                         _engine_config("WHITE", "e2", COLOR_GOLD, "wK",
                                        name_input=False)
+                    elif session.play_mode == GameSession.MODE_HVH:
+                        _two_player_config()
                     else:
                         with ui.row().classes("items-center gap-1 no-wrap"):
                             widgets.icon("ic_user", 14)
@@ -476,6 +502,32 @@ def main_page():
                         _engine_config("OPPONENT", "e2", COLOR_GOLD, "wK")
                     for w in locked:
                         w.set_enabled(not session.game_running)
+
+                def _two_player_config():
+                    """Two names, one board: both sides are played by hand."""
+                    with ui.row().classes("items-center gap-1 no-wrap"):
+                        widgets.icon("ic_user", 14)
+                        ui.label("2 PLAYERS").classes(
+                            "text-xs font-bold").style("color:#00FF00")
+                    for attr, label, piece_code in (
+                            ("white_player", "White", "wK"),
+                            ("black_player", "Black", "bK")):
+                        with ui.row().classes("w-full items-center gap-1 no-wrap"):
+                            widgets.piece(piece_code, 16)
+                            locked.append(
+                                ui.input(label=f"{label} player",
+                                         value=getattr(session, attr),
+                                         on_change=lambda e, attr=attr: (
+                                             setattr(session, attr, e.value or ""),
+                                             refresh_banners()))
+                                .props("dense").classes("flex-grow"))
+                    with ui.row().classes("w-full justify-center"):
+                        locked.append(
+                            ui.button("⇄ SWITCH COLORS", on_click=_swap_colors)
+                            .props("dense flat size=sm").classes("text-xs")
+                            .tooltip("Swap which player has White"))
+                    widgets.hint("Every move is graded as you play. These "
+                                 "games are not saved to the rankings.")
 
                 def _engine_config(title, prefix, color, piece_code=None,
                                    name_input=True):
@@ -605,6 +657,7 @@ def main_page():
                 _action_btn(None,         "FLIP BOARD",
                             lambda: board_view.flip())
                 _action_btn("ic_export",  "EXPORT PGN",     _export_pgn)
+                _action_btn("ic_search",  "GAME REVIEW",    _open_review)
 
             with ui.card().classes("arena-panel w-full gap-1 p-3"):
                 widgets.heading("ic_flag", "STARTING OPENING", size=15, text_cls="arena-heading")
@@ -620,7 +673,7 @@ def main_page():
                     p = await pick_file("Select openings CSV",
                                         ("CSV files (*.csv)", "All files (*.*)"))
                     if p and await session.load_opening_csv(p):
-                        n = len(session.opening_book._entries)
+                        n = len(session.opening_book)
                         book_lbl.set_text(f"{n} openings ({os.path.basename(p)})")
                         book_lbl.style(f"color: {COLOR_BLUE}")
                         ui.notify(f"{n} openings loaded", type="positive")
@@ -665,24 +718,46 @@ def main_page():
                     ui.element("img").props('src="/assets/pieces/wK.png"') \
                         .style("height: 18px; width: auto;")
                 with ui.element("div").classes("flex-grow min-w-0"):
-                    board_view = BoardView(_board_state, on_click=_square_clicked)
+                    # overlay: the grade badge of a move being previewed.
+                    # Pieces move by click-click or by drag and drop.
+                    board_view = BoardView(_board_state, on_click=_square_clicked,
+                                           overlay=True,
+                                           on_drag_start=_piece_picked,
+                                           on_drop=_piece_dropped)
 
             white_banner, white_name_lbl, white_rank_lbl, white_clock_lbl, \
                 white_h2h_lbl = widgets.banner(COLOR_GOLD)
 
             check_lbl = ui.label("").classes("text-center font-bold w-full") \
                 .style("color: #FF4444")
-            quality_lbl = ui.label("").classes(
-                "text-center text-lg font-bold w-full")
+            verdict = MoveVerdict(22)
             info_lbl = ui.label("").classes("text-center text-xs text-gray-500 w-full")
 
         # ══ Right: logs ══
         with ui.column().classes("w-[300px] shrink-0 gap-2"):
             with ui.card().classes("arena-panel w-full p-3 gap-1 h-[46%]"):
-                ui.label("MOVES (SAN)").classes("arena-heading")
+                with ui.row().classes("w-full items-center no-wrap gap-1"):
+                    ui.label("MOVES (SAN)").classes("arena-heading")
+                    ui.space()
+                    # Shown while the board previews an earlier move
+                    preview_bar = ui.button("Back to game", on_click=preview.leave) \
+                        .props("dense size=sm no-caps").classes("px-2") \
+                        .tooltip("Show the position as it stands in the game")
+                preview_lbl = ui.label("").classes("text-xs font-bold") \
+                    .style(f"color: {COLOR_BLUE}")
+                preview_bar.set_visibility(False)
+                preview_lbl.set_visibility(False)
                 moves_area = ui.scroll_area().classes("w-full flex-grow arena-log p-2")
                 with moves_area:
-                    moves_html = ui.html("").classes("mono text-sm leading-6")
+                    # Our own markup; SAN comes from the board and is escaped
+                    moves_html = ui.html("", sanitize=False) \
+                        .classes("move-list mono text-sm leading-6")
+                    # A click on a move previews the position after it
+                    moves_html.on(
+                        "click", lambda e: preview.show(e.args),
+                        js_handler="(e) => { const t = e.target.closest("
+                                   "'[data-ply]'); if (t) emit(Number("
+                                   "t.dataset.ply)); }")
             with ui.card().classes("arena-panel w-full p-3 gap-1 flex-grow"):
                 ui.label("ENGINE OUTPUT").classes("arena-heading")
                 eng_log = ui.log(max_lines=300).classes(
@@ -693,21 +768,61 @@ def main_page():
     # ═══════════════════════════════════════════════════════
 
     def render_moves():
+        """The move list: each move with its grade badge, clickable to preview."""
+        reviews = session.analyst.reviews
+        current = preview.shown_ply
         parts = []
         for num, w_san, b_san in session.san_pairs():
-            w_cls = "color:#FF8800" if ("+" in w_san or "#" in w_san) \
-                else f"color:{COLOR_GOLD}"
-            part = (f'<span style="color:#555">{num}.</span> '
-                    f'<span style="{w_cls}">{w_san}</span>')
-            if b_san:
-                b_cls = "color:#FF8800" if ("+" in b_san or "#" in b_san) \
-                    else "color:#CCCCCC"
-                part += f' <span style="{b_cls}">{b_san}</span>'
-            parts.append(part)
+            # One unbreakable "12. Nf3 Nc6" unit, so a line never ends
+            # between a move number and its move
+            part = f'<span class="pair"><span class="n">{num}.</span>'
+            for ply, san in ((2 * num - 1, w_san), (2 * num, b_san)):
+                if not san:
+                    continue
+                rv = reviews[ply - 1] if ply <= len(reviews) else None
+                badge = (f"<i class='qi qi-{rv.cls.lower()}'></i>"
+                         if rv and rv.cls else "")
+                kind = "w" if ply % 2 else "b"
+                if "+" in san or "#" in san:
+                    kind += " chk"
+                if ply == current:
+                    kind += " cur"
+                part += (f' <span class="mv {kind}" data-ply="{ply}">'
+                         f'{badge}{escape(san)}</span>')
+            parts.append(part + "</span>")
         if session.game_result and session.game_result not in ("", "*"):
             parts.append(f'<br><b style="color:#E94560">{session.game_result}</b>')
-        moves_html.set_content("&nbsp; ".join(parts))
-        moves_area.scroll_to(percent=1.0)
+        moves_html.set_content(" ".join(parts))
+        if not preview.active:
+            moves_area.scroll_to(percent=1.0)
+
+    def show_shown_move():
+        """Grade, eval and preview bar for the move the board shows."""
+        verdict.show(preview.review())
+        analyst = session.analyst
+        ply = preview.shown_ply
+        evaluation = analyst.eval_after(ply)
+        if evaluation == (None, None) and not preview.active:
+            # The latest position is still being analysed: until it is,
+            # the bar shows the game's last known evaluation
+            evaluation = next((r.evaluation for r in reversed(analyst.reviews)
+                               if r and r.evaluation), (None, None))
+        if evaluation != (None, None):
+            eval_bar.set_eval(*evaluation)
+        preview_bar.set_visibility(preview.active)
+        preview_lbl.set_visibility(preview.active)
+        if preview.active:
+            preview_lbl.set_text(
+                f"Viewing {move_number(ply)} {analyst.sans[ply - 1]}" if ply
+                else "Viewing the start position")
+
+    def on_preview_change():
+        board_view.refresh()
+        render_moves()
+        show_shown_move()
+
+    preview.on_change = on_preview_change
+    preview.ply = None                  # a fresh page shows the game itself
 
     # Driven off both "banners" and "status". "banners" catches the start
     # immediately, but new_game clears game_running without emitting it, so
@@ -749,6 +864,10 @@ def main_page():
             black_banner.classes(remove="active")
 
     def on_board_changed():
+        if preview.active and preview.ply >= session.analyst.ply:
+            # The game was reset under the preview (new game, new start)
+            preview.ply = None
+            show_shown_move()
         board_view.refresh()
         render_moves()
         material_lbl.set_text(session.material_text())
@@ -785,13 +904,18 @@ def main_page():
                 # "clock" handler, on the game loop, with no slot context
                 client.run_javascript("window.arenaPlaySound('low_time')")
 
-    def on_quality(quality):
-        if not quality:
-            quality_lbl.set_text("")
-            return
-        color = QUALITY_COLORS.get(quality, "#EAEAEA")
-        quality_lbl.set_text(quality)
-        quality_lbl.style(f"color: {color}")
+    def on_move_review(rv):
+        """Badge and name of the last graded move, plus the analyzer's eval."""
+        render_moves()                  # its badge joins the move list
+        if preview.active:
+            return                      # the board shows an earlier move
+        verdict.show(rv)
+        if rv is not None and rv.evaluation:
+            eval_bar.set_eval(*rv.evaluation)
+
+    def on_eval_bar(cp):
+        if not preview.active:
+            eval_bar.set_cp(cp)
 
     # ── Wire session events ───────────────────────────────
     # Session events fire from the background game-loop task, which has no
@@ -808,7 +932,8 @@ def main_page():
                 on_new_game=lambda: ui.timer(
                     0.05, session.new_game, once=True),
                 on_rankings=lambda: views.show_rankings(session),
-                on_export=_export_pgn)
+                on_export=_export_pgn,
+                on_review=_open_review)
 
     def _on_error(msg):
         with client:
@@ -818,8 +943,8 @@ def main_page():
     session.on("status", status_lbl.set_text)
     session.on("opening", opening_lbl.set_text)
     session.on("engine_log", lambda text, tag: eng_log.push(text))
-    session.on("eval_bar", eval_bar.set_cp)
-    session.on("quality", on_quality)
+    session.on("eval_bar", on_eval_bar)
+    session.on("move_review", on_move_review)
     session.on("banners", refresh_banners)
     session.on("banners", _sync_config_lock)
     session.on("status", lambda _msg: _sync_config_lock())
@@ -871,18 +996,91 @@ def main_page():
 #  Header / button handlers
 # ═══════════════════════════════════════════════════════════
 
+class BoardPreview:
+    """
+    Which position the main board shows: the game as it stands, or — once
+    a move in the move list is clicked — the position after that move, with
+    its grade. A preview holds while the game goes on, until the player
+    goes back to the game (the latest move, a click on the board, or the
+    "Back to game" bar). Positions and grades come from the session's
+    analyst, which follows every move played.
+    """
+
+    def __init__(self):
+        self.ply = None                  # None: the game as it stands
+        self.on_change = lambda: None    # the page redraws through this
+
+    @property
+    def active(self):
+        return self.ply is not None
+
+    @property
+    def shown_ply(self):
+        """The ply whose position the board shows."""
+        return session.analyst.ply if self.ply is None else self.ply
+
+    def show(self, ply):
+        """Preview the position after *ply* plies; the latest one is the game."""
+        ply = max(0, int(ply))
+        ply = None if ply >= session.analyst.ply else ply
+        if ply != self.ply:
+            self.ply = ply
+            self.on_change()
+
+    def leave(self):
+        self.show(session.analyst.ply)
+
+    def review(self):
+        """core.review.MoveReview of the move shown, or None."""
+        ply = self.shown_ply
+        return session.analyst.reviews[ply - 1] if ply else None
+
+    def state(self):
+        """BoardView state for the position shown."""
+        if self.ply is None:
+            return {
+                "board": session.board,
+                "last_move": session.last_move,
+                "selected": session.selected_square,
+                "legal_dests": session.legal_destinations(),
+                "check_sq": session.check_square(),
+                "movable": session.movable_squares(),
+            }
+        analyst = session.analyst
+        board = analyst.boards[self.ply]
+        rv = self.review()
+        return {
+            "board": board,
+            "last_move": analyst.moves[self.ply - 1] if self.ply else None,
+            "selected": None,
+            "legal_dests": set(),
+            "check_sq": board.find_king(board.turn) if board.in_check() else None,
+            "move_class": rv.cls if rv else None,
+        }
+
+
+preview = BoardPreview()
+
+
 def _board_state():
-    return {
-        "board": session.board,
-        "last_move": session.last_move,
-        "selected": session.selected_square,
-        "legal_dests": session.legal_destinations(),
-        "check_sq": session.check_square(),
-    }
+    return preview.state()
 
 
 async def _square_clicked(br, bc):
+    if preview.active:
+        preview.leave()             # a click on the board brings the game back
+        return
     await session.click_square(br, bc)
+
+
+def _piece_picked(br, bc):
+    if not preview.active:          # a preview shows no movable pieces anyway
+        session.pick_up(br, bc)
+
+
+async def _piece_dropped(fr, fc, br, bc):
+    if not preview.active:
+        await session.drop_piece(fr, fc, br, bc)
 
 
 def _action_btn(icon, text, on_click, primary=False):
@@ -942,6 +1140,16 @@ async def _stop_game():
         session.game_paused = was_paused
         return
     await session.stop_game(result, reason)
+
+
+def _open_review():
+    """Game Review of the game on the board, or of the one just finished."""
+    source = review.ReviewSource.from_session(session)
+    if source is None:
+        ui.notify("Play some moves first — there is nothing to review yet.",
+                  type="info")
+        return
+    review.show_game_review(session, source)
 
 
 def _export_pgn():

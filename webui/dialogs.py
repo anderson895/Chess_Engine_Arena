@@ -7,9 +7,10 @@ import random
 
 from nicegui import ui
 
+from core.review import TABLE_ORDER
 from core.utils import normalize_engine_name, get_tier
-from core.constants import QUALITY_COLORS
 from webui import widgets
+from webui.quality import icon_svg
 from webui.theme import COLOR_BLUE, piece_src
 
 
@@ -120,14 +121,16 @@ async def ask_opening_choice(opening_book):
       ([], None)   — explicit normal start
       (None, None) — cancelled
     """
-    all_entries = []
-    seen = set()
-    for seq, eco, name in opening_book._entries:
+    # One row per opening: where several lines carry the same name, the
+    # shortest is the one that defines it
+    shortest = {}
+    for seq, eco, name in opening_book.lines:
         key = (eco, name)
-        if key not in seen:
-            seen.add(key)
-            all_entries.append((eco, name, list(seq)))
-    all_entries.sort(key=lambda x: x[1])
+        if key not in shortest or len(seq) < len(shortest[key]):
+            shortest[key] = seq
+    all_entries = sorted(((eco, name, list(seq))
+                          for (eco, name), seq in shortest.items()),
+                         key=lambda x: x[1])
 
     state = {"eco": None, "query": ""}
 
@@ -250,8 +253,26 @@ async def ask_opening_choice(opening_book):
 #  Game-over dialog
 # ═══════════════════════════════════════════════════════════
 
+def _class_counts_row(summary):
+    """Badge and count of each notable class, White's · Black's."""
+    shown = [cls for cls in TABLE_ORDER
+             if cls not in ("Book", "Best", "Excellent", "Good")
+             and (summary.counts['w'][cls] or summary.counts['b'][cls])]
+    if not shown:
+        return
+    with ui.row().classes("gap-3 justify-center items-center"):
+        for cls in shown:
+            with ui.row().classes("items-center gap-1 no-wrap").tooltip(
+                    f"{cls}: White {summary.counts['w'][cls]} · "
+                    f"Black {summary.counts['b'][cls]}"):
+                ui.html(icon_svg(cls, 18), sanitize=False)
+                ui.label(f"{summary.counts['w'][cls]}·{summary.counts['b'][cls]}") \
+                    .classes("text-xs mono")
+
+
 def show_game_over(session, result, reason, winner_name,
-                   on_new_game=None, on_rankings=None, on_export=None):
+                   on_new_game=None, on_rankings=None, on_export=None,
+                   on_review=None):
     """Non-blocking game-over dialog with summary and quick actions."""
     is_draw = result == "1/2-1/2"
     if not winner_name or is_draw:
@@ -286,22 +307,17 @@ def show_game_over(session, result, reason, winner_name,
             ui.label(session.current_opening_name) \
                 .classes("text-xs italic").style(f"color: {COLOR_BLUE}")
 
-        # Move-quality summary (skip Book/Good noise)
-        counts = {}
-        for _, _, q in session.move_qualities:
-            counts[q] = counts.get(q, 0) + 1
-        order = list(QUALITY_COLORS.keys())
-        summary = "  ".join(
-            f"{q}: {n}" for q, n in sorted(
-                counts.items(),
-                key=lambda x: order.index(x[0]) if x[0] in order else 99)
-            if q not in ("Good", "Book"))
-        if summary:
-            ui.label(f"Move quality: {summary}").classes("text-xs text-gray-400")
+        # The moves graded while the game ran (Book … Good left out)
+        _class_counts_row(session.game_summary())
 
         ui.label("⇄ Colors swapped for the next game") \
             .classes("text-xs italic").style(f"color: {COLOR_BLUE}")
 
+        if on_review:
+            # No Quasar colour: the green comes from .review-cta
+            ui.button("Game Review", color=None,
+                      on_click=lambda: (dialog.close(), on_review())) \
+                .props("no-caps unelevated").classes("review-cta w-full mt-2")
         with ui.row().classes("w-full justify-center gap-2 mt-2"):
             if on_new_game:
                 ui.button("New Game",

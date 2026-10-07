@@ -4,7 +4,10 @@
 
 import sqlite3
 from datetime import datetime
-from core.utils import normalize_engine_name, get_db_path
+from core.utils import normalize_engine_name, get_db_path, file_sha1
+
+# meta key recording which opening book named the stored games
+OPENING_NAMES_KEY = "opening_names"
 
 
 class Database:
@@ -115,8 +118,123 @@ class Database:
               AND instr(pgn, '[Opening "') > 0
         ''')
 
+        # One-off maintenance markers (e.g. which opening book named the
+        # stored games), so a migration runs once per database
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+
         conn.commit()
         conn.close()
+
+    # ── Meta / maintenance ────────────────────────────────
+
+    def get_meta(self, key, default=None):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            row = conn.execute("SELECT value FROM meta WHERE key = ?",
+                               (key,)).fetchone()
+            conn.close()
+            return row[0] if row else default
+        except Exception as e:
+            print(f"[Database] get_meta error: {e}")
+            return default
+
+    def set_meta(self, key, value):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                         (key, value))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[Database] set_meta error: {e}")
+
+    def backup(self, label):
+        """
+        Copy the whole database to ``<db>.bak-<label>-<timestamp>`` beside it,
+        through SQLite's backup API so a running app cannot tear the copy.
+        Returns the backup's path.
+        """
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = f"{self.db_path}.bak-{label}-{stamp}"
+        src = sqlite3.connect(self.db_path)
+        dst = sqlite3.connect(path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        return path
+
+    def retag_openings(self, book, dry_run=False, progress=None):
+        """
+        Re-name the opening of every stored game from its moves.
+
+        Names used to come from matching the move order against book
+        lines, so a transposed game kept the name of whatever it started
+        as. This replays each game's opening against *book* (an
+        OpeningBook, which names positions) and rewrites both the
+        ``opening`` column and the PGN's [Opening] tag — the opening
+        statistics read the tag. A game whose moves reach no named
+        position is left as it is.
+
+        Returns {'checked', 'changed', 'renames': {(old, new): count}}.
+        """
+        from core.pgn import read_game, set_tag
+
+        report = {'checked': 0, 'changed': 0, 'renames': {}}
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            for table in ("games", "tournament_games"):
+                rows = conn.execute(
+                    f"SELECT id, COALESCE(opening, ''), pgn FROM {table}"
+                ).fetchall()
+                updates = []
+                for i, (gid, old, pgn) in enumerate(rows):
+                    _, moves = read_game(pgn, limit=book.scan_limit)
+                    _, name = book.lookup(moves)
+                    report['checked'] += 1
+                    if name and name != old:
+                        updates.append((name, set_tag(pgn, "Opening", name), gid))
+                        key = (old, name)
+                        report['renames'][key] = report['renames'].get(key, 0) + 1
+                    if progress and i % 200 == 0:
+                        progress(table, i, len(rows))
+                report['changed'] += len(updates)
+                if updates and not dry_run:
+                    conn.executemany(
+                        f"UPDATE {table} SET opening = ?, pgn = ? WHERE id = ?",
+                        updates)
+            if not dry_run:
+                conn.commit()
+        finally:
+            conn.close()
+        return report
+
+    def get_game_meta(self, game_id):
+        """
+        White, black, result, reason, date, time_control, opening and source
+        of a stored game as a dict, or None.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT white_engine AS white, black_engine AS black, result, "
+                "reason, date, COALESCE(time_control, '') AS time_control, "
+                "COALESCE(opening, '') AS opening, "
+                "COALESCE(source, 'regular') AS source "
+                "FROM games WHERE id = ?", (game_id,)).fetchone()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"[Database] get_game_meta error: {e}")
+            return None
 
     # ── Write ─────────────────────────────────────────────
 
@@ -883,3 +1001,30 @@ class Database:
         except Exception as e:
             print(f"[Database] get_tournament_list error: {e}")
             return []
+
+
+def retag_openings_once(db_path, csv_path):
+    """
+    Startup job: re-name the stored games' openings once per opening book.
+
+    Runs when the database was last named by a different book (or never
+    was), backing it up first. Takes paths rather than objects so it can
+    run in a worker process. Returns the number of games renamed, or None
+    when nothing was due.
+    """
+    from core.opening_book import OpeningBook
+
+    signature = file_sha1(csv_path)
+    db = Database(db_path)
+    if not signature or db.get_meta(OPENING_NAMES_KEY) == signature:
+        return None
+    book = OpeningBook(csv_path)
+    if not book.loaded:
+        return None
+    if db.count_games():
+        db.backup("openings")
+        changed = db.retag_openings(book)["changed"]
+    else:
+        changed = 0
+    db.set_meta(OPENING_NAMES_KEY, signature)
+    return changed

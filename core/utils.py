@@ -4,7 +4,7 @@
 
 import os
 import sys
-from core.constants import RANK_TIERS, QUALITY_COLORS
+from core.constants import RANK_TIERS
 
 
 def get_base_path():
@@ -83,6 +83,29 @@ def get_masters_db_path():
     return os.path.join(_db_dir(), "masters.db")
 
 
+def get_reviews_db_path():
+    """
+    Return the path to the game-review analysis cache.
+
+    A cache, not a record: every row can be recomputed by analysing the
+    game again, so like masters.db it stays out of the published snapshot.
+    """
+    return os.path.join(_db_dir(), "reviews.db")
+
+
+def file_sha1(path):
+    """Hex SHA-1 of a file's contents, or '' if it cannot be read."""
+    import hashlib
+    h = hashlib.sha1()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 16), b""):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
 # Below this the clock shows tenths and the warning sounds. Ten seconds is
 # where a chess clock stops being a number you glance at and starts being
 # the thing you are playing against, and it is what every online board uses.
@@ -128,49 +151,6 @@ def get_tier(rating):
                 return label, color
     # No rating is not the bottom tier: it means too few games to say
     return "Provisional", "#777"
-
-
-def classify_move_quality(cp_before, cp_after, is_white_moving):
-    """
-    Classify a move's quality based on centipawn evaluation before/after.
-
-    Parameters
-    ----------
-    cp_before : int | None
-        Evaluation (from White's perspective) before the move.
-    cp_after : int | None
-        Evaluation (from White's perspective) after the move.
-    is_white_moving : bool
-        True if White just moved.
-
-    Returns
-    -------
-    str | None  — quality label, or None if data unavailable.
-    """
-    if cp_before is None or cp_after is None:
-        return None
-
-    # Clamp mate scores (±30000) so "already winning → still winning"
-    # doesn't register as a huge swing.
-    cp_before = max(-1000, min(1000, cp_before))
-    cp_after  = max(-1000, min(1000, cp_after))
-
-    if is_white_moving:
-        loss = cp_before - cp_after
-    else:
-        loss = cp_after - cp_before
-
-    # Thresholds roughly follow the cp-loss scale used by popular sites
-    # (inaccuracy ≈ 50–100, mistake ≈ 100–300, blunder ≈ 300+). Short
-    # analysis searches carry noise, so small swings must stay "good".
-    if   loss <= -30:  return "Brilliant"
-    elif loss <=   5:  return "Best"
-    elif loss <=  20:  return "Excellent"
-    elif loss <=  40:  return "Great"
-    elif loss <=  90:  return "Good"
-    elif loss <= 150:  return "Inaccuracy"
-    elif loss <= 300:  return "Mistake"
-    else:              return "Blunder"
 
 
 def build_pgn(white, black, moves, result, date, opening_name=None):

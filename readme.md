@@ -8,6 +8,7 @@ native desktop window (pywebview/WebView2) or in the browser.
 - [Features](#features)
 - [Getting Started](#getting-started)
 - [Adding Engines and Files](#adding-engines-and-files)
+- [Game Review](#game-review)
 - [Masters Database](#masters-database)
 - [Project Structure](#project-structure)
 - [Building a Standalone .exe](#building-a-standalone-exe)
@@ -29,15 +30,26 @@ To run from source instead, see [Getting Started](#getting-started).
 
 - **Engine vs Engine** — pit two UCI engines against each other
 - **Human vs Engine** — play as White or Black against any UCI engine
+- **2 Players** — two people at one board; every move is graded as it is
+  played (these games are not saved to the rankings)
+- **Drag and drop** — move a piece by dragging it to its square, or by
+  clicking it and then the square; its legal moves show while it is held
 - **Tournaments** — Swiss (Buchholz tiebreaks), Round Robin (single/double),
   and Knockout brackets, with a live board, standings, schedule and
-  per-game replay; every game is saved to the database
-- **Move Quality Analysis** — a Stockfish analyzer rates every move
-  (Book / Brilliant / Best / Excellent / Great / Good / Inaccuracy /
-  Mistake / Blunder); opening-book moves are labeled "Book"
-- **Eval Bar** — real-time centipawn evaluation display
-- **Opening Book** — ECO openings CSV, auto-detected and disk-cached;
-  pick any opening as a forced starting position
+  per-game review; every game is saved to the database
+- **Game Review** — a chess.com-style review of any game: accuracy for
+  both players, how many Brilliant / Great / Book / Best / Excellent /
+  Good / Inaccuracy / Mistake / Miss / Blunder moves each made, an
+  evaluation graph, and a move-by-move walkthrough with the engine's best
+  move ([details](#game-review))
+- **Live move grading** — every move of a regular or tournament game is
+  graded as it is played, by the same rules as the review; click a move in
+  the move list to look at the position after it
+- **Eval Bar** — real-time evaluation display
+- **Opening Book** — ECO openings named by position, so a game that
+  transposes into another opening is named after the one it reaches;
+  auto-detected and disk-cached; pick any opening as a forced starting
+  position
 - **Elo Ratings** — automatic rating tracking with interactive history charts
 - **Rankings / Statistics / Game History** — searchable tables with
   medals for the top 3 and per-engine opening statistics
@@ -45,8 +57,6 @@ To run from source instead, see [Getting Started](#getting-started).
   imported from Lichess broadcasts, Chess.com, TWIC and PGN Mentor, with
   filters for player, colour, opponent, event, ECO, rating and year
   ([details](#masters-database))
-- **PGN Viewer** — interactive replay with keyboard navigation, copy and
-  download
 - **Sprite-based UI** — all pieces, nav cards, medals, badges and icons
   come from `assets/Chess_packs.png` (no emoji dependence)
 
@@ -102,6 +112,74 @@ Place any of these in `openings/` (both filenames are auto-detected):
 
 Delete the `.cache.json` next to it to force a re-parse (it also
 invalidates automatically when the CSV changes).
+
+The bundled book is generated from the
+[Lichess opening dataset](https://github.com/lichess-org/chess-openings)
+(CC0, public domain); `python -m tools.build_openings` regenerates it.
+
+## Game Review
+
+Open a review with **GAME REVIEW** on the main screen (the game on the
+board, or the one that just ended), with the **Game Review** button when a
+game finishes, or by double-clicking a game in Game History, a tournament
+or the Masters database.
+
+The screen follows chess.com's Game Review. On the left is the board
+between the two player bars. On the right are the coach, the evaluation
+graph, both players' accuracy and how many moves of each class they
+played, with a grade for the opening, middlegame and endgame. **Start
+Review** walks through the game a move at a time: the move's badge on the
+board, a line from the coach, and the engine's best move as a green arrow
+whenever the move played was not the best. Click a move, the graph, or use
+← → Home End to jump around; the header has flip, copy/download PGN and
+previous/next game.
+
+A dedicated Stockfish process analyses every position, apart from the
+analyzer that grades live games, so a review never holds up a game being
+played. It runs below normal priority, on one thread while a game or
+tournament is running. **Fast / Balanced / Deep** sets the time per
+position (0.2 / 0.5 / 1.5 s). Analyses are cached in
+`~/.chess_arena/reviews.db`, so reopening a game is instant; like
+`masters.db`, the cache is never published with the engine database.
+
+### How moves are classified
+
+Each move is graded by how much of the mover's winning chances it gives
+away, from the engine's evaluation (Lichess's win-chance curve): **Best**
+is the engine's top move or as good, then **Excellent** (up to 2% lost),
+**Good** (5%), **Inaccuracy** (10%), **Mistake** (20%) and **Blunder**
+(more). On top of that:
+
+| Class     | When                                                          |
+|-----------|---------------------------------------------------------------|
+| Brilliant | A good piece sacrifice: the best move (or nearly) leaves a piece that can be taken for clearly more than the move took — not a pawn, not a trade or recapture. The player is not worse after it and was not winning anyway. |
+| Great     | The only good move: every alternative throws the result away. |
+| Miss      | The opponent just made a mistake and the move hands the chance back, or a forced mate is missed. |
+| Book      | The position is opening theory.                               |
+| Forced    | The only legal move (shown on the move, not counted).          |
+
+Accuracy uses Lichess's published formula: each move scores by the change
+in winning chances, and a player's accuracy blends a volatility-weighted
+mean with a harmonic mean, so one blunder costs more than many small
+slips.
+
+The same rules grade regular games (under the board, as moves are
+played), tournaments (in the live tournament window) and the review. The
+review searches longer, so its verdicts are the surest of the three.
+
+### Openings and transpositions
+
+Opening names belong to positions, not move orders. A game that starts
+1.e4 Nc6 is a Nimzowitsch Defense, and becomes a Ruy Lopez once 2.Nf3 e5
+3.Bb5 reaches that position. The live game, tournaments, game history and
+the review all name openings this way.
+
+When the bundled opening book changes, the next launch re-names the
+openings of the games already saved, so game history and the opening
+statistics use the new names. The database is backed up first, to
+`chess_arena.db.bak-openings-<date>` beside it. This runs once per opening
+book; `python -m tools.retag_openings` does the same by hand (a dry run
+unless given `--apply`).
 
 ## Masters Database
 
@@ -203,11 +281,11 @@ Chess_Engine_Arena/
 ├── engines/                   # ← Your UCI chess engines go here
 │   └── gfruit.exe             #     default opponent for "Play vs Engine"
 │
-├── analyzer/                  # ← Stockfish for move-quality analysis
+├── analyzer/                  # ← Stockfish for move grading and reviews
 │   ├── stockfish_18_x86-64.exe#     (auto-detected on startup)
 │   └── nn-*.nnue              #     NNUE network files (required by SF)
 │
-├── openings/                  # ← ECO opening book CSV
+├── openings/                  # ← ECO opening book CSV (Lichess, CC0)
 │   ├── openings_sheet.csv     #     (auto-detected on startup)
 │   └── openings_sheet.csv.cache.json   # auto-generated parse cache
 │
@@ -217,21 +295,26 @@ Chess_Engine_Arena/
 │   └── ui/                    #   nav cards, medals, badges, icons
 │
 ├── core/                      # Game logic & engine communication
-│   ├── board.py               #   full chess rules engine
+│   ├── board.py               #   full chess rules engine, SAN parser, SEE
 │   ├── constants.py           #   app-wide constants, colours, tiers
 │   ├── elo.py                 #   Elo rating computation
-│   ├── engine.py              #   UCI engine wrapper & analyzer
-│   ├── opening_book.py        #   ECO CSV loader + lookup + disk cache
-│   └── utils.py               #   shared utilities (PGN, move quality…)
+│   ├── engine.py              #   UCI engine wrapper & analyzer (MultiPV)
+│   ├── opening_book.py        #   openings by position + disk cache
+│   ├── pgn.py                 #   reading PGN: tags, movetext, SAN → UCI
+│   ├── review.py              #   move classification, accuracy, GameAnalyst
+│   └── utils.py               #   shared utilities (paths, PGN building…)
 │
 ├── data/
-│   └── database.py            #   SQLite games/tournaments database
+│   ├── database.py            #   SQLite games/tournaments database
+│   └── reviews.py             #   cache of Game Review analyses
 │
 ├── webui/                     # User interface (NiceGUI)
 │   ├── session.py             #   GameSession — UI-agnostic game controller
 │   ├── main_page.py           #   main layout, config panel, startup loading
 │   ├── board.py               #   board component + eval bar (diffed updates)
-│   ├── views.py               #   rankings, stats, history, PGN viewer
+│   ├── review.py              #   Game Review screen
+│   ├── quality.py             #   move-class badges (SVG) and labels
+│   ├── views.py               #   rankings, stats, history
 │   ├── dialogs.py             #   promotion, stop-game, opening picker…
 │   ├── tournament.py          #   tournament list/setup/live/history UI
 │   ├── widgets.py             #   sprite-icon helpers, loader overlay
@@ -241,7 +324,8 @@ Chess_Engine_Arena/
 │   └── manager.py             #   tournament logic: formats, pairing, runner
 │
 ├── art_src/                   # Source art sheets (not bundled at runtime)
-├── tools/                     # Dev utilities: sprite slicing, sound probes
+├── tools/                     # Dev utilities: sprite slicing, sound probes,
+│                              #   opening book build, opening re-tag
 │
 ├── requirements.txt
 └── readme.md
