@@ -31,7 +31,7 @@ To run from source instead, see [Getting Started](#getting-started).
 - **Engine vs Engine** — pit two UCI engines against each other
 - **Human vs Engine** — play as White or Black against any UCI engine
 - **2 Players** — two people at one board; every move is graded as it is
-  played (these games are not saved to the rankings)
+  played, and finished games are saved and rated under the players' names
 - **Drag and drop** — move a piece by dragging it to its square, or by
   clicking it and then the square; its legal moves show while it is held
 - **Tournaments** — Swiss (Buchholz tiebreaks), Round Robin (single/double),

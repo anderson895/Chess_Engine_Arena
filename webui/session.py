@@ -567,6 +567,12 @@ class GameSession:
 
         # Validate config
         if self.play_mode == self.MODE_HVH:
+            white, black = self.player_names()
+            if normalize_engine_name(white) == normalize_engine_name(black):
+                # The game is saved under both names, and a "game" between
+                # one name and itself is refused as self-play
+                self._emit("error", "The two players need different names.")
+                return
             paths = []                    # two people, no engine to load
         elif self.play_mode == self.MODE_HVE:
             if not (self.player_name or "").strip():
@@ -1117,11 +1123,8 @@ class GameSession:
         self._emit("game_over", result, reason, winner)
 
     async def _save_game(self, result, reason):
-        # A game between two people at one board says nothing about any
-        # engine's strength, and saving it would put both names into the
-        # rankings — it is reviewed and exported, not recorded
-        if self.play_mode == self.MODE_HVH:
-            return
+        # Every mode is recorded under its players' names — in 2-player mode
+        # both are people, who get a rating like any engine
         duration = int(time.time() - self._start_time) if self._start_time else 0
         white, black = self.player_names()
         pgn = build_pgn(

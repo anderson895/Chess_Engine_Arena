@@ -526,8 +526,8 @@ def main_page():
                             ui.button("⇄ SWITCH COLORS", on_click=_swap_colors)
                             .props("dense flat size=sm").classes("text-xs")
                             .tooltip("Swap which player has White"))
-                    widgets.hint("Every move is graded as you play. These "
-                                 "games are not saved to the rankings.")
+                    widgets.hint("Every move is graded as you play. Finished "
+                                 "games are saved and rated under these names.")
 
                 def _engine_config(title, prefix, color, piece_code=None,
                                    name_input=True):
