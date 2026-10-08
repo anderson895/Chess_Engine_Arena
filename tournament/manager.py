@@ -406,6 +406,10 @@ def _batch_tree_insert(widget: tk.Widget,
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TournamentPlayer:
+    # Why a player plays no more games, as the standings show it
+    WITHDRAWN      = "Withdrawn"
+    ENGINE_MISSING = "Sitting out — engine not found"
+
     def __init__(self, name, engine_path, is_human=False):
         self.name          = normalize_engine_name(name)
         self.engine_path   = engine_path
@@ -421,10 +425,11 @@ class TournamentPlayer:
         self.color_history = []
         self.opponents     = []
         self.seed          = 0
-        # Sitting out: kept in the standings with the points already
-        # scored, but no longer paired — an engine whose file could not be
-        # found when a finished event was continued
-        self.withdrawn     = False
+        # Why they are out, or "" while they play: kept in the standings
+        # with the points already scored, but never paired again — taken
+        # out of an event under way (WITHDRAWN), or an engine whose file
+        # was not found when a finished event was continued
+        self.withdrawn     = ""
 
     def record(self, result, opponent_name, color):
         self.score += result
@@ -952,6 +957,11 @@ class Tournament:
                     self.round_games.append(g)
                     self.all_games.append(g)
                 self._ko_round_games[self.current_round] = list(self.round_games)
+                # An odd one out — a withdrawal left the field short — goes
+                # through without playing
+                paired = {p.name for pair in pairs for p in pair}
+                self._ko_pending_winners += [p for p in prev_winners
+                                             if p.name not in paired]
 
     def _pair_swiss(self, players):
         """
@@ -974,6 +984,8 @@ class Tournament:
 
     def _team_game(self, home, away, white, black, board=0):
         """One game of a team match, filed under both squads."""
+        if white.withdrawn or black.withdrawn:
+            return None                   # a board whose player is out goes unplayed
         g = TournamentGame(self.current_round, white, black)
         g.home_team, g.away_team = home.name, away.name
         g.board = board
@@ -1078,11 +1090,16 @@ class Tournament:
             player = self.players.get(normalize_engine_name(name))
             if player is None:
                 return False, f"{name} is not in this tournament."
-            if len(self.player_list) <= 2:
+            squad = self.team_of(player.name)
+            if squad is not None and len(squad.players) <= 1:
+                return False, f"{squad.name} needs at least one engine."
+            if squad is None and len(self.player_list) <= 2:
                 return False, "A tournament needs at least 2 players."
 
             del self.players[player.name]
             self.player_list.remove(player)
+            if squad is not None:
+                squad.players.remove(player)
             for i, p in enumerate(self.player_list):
                 p.seed = i
 
@@ -1177,19 +1194,79 @@ class Tournament:
         with self._lock:
             self.finished = False
             self.winner = None
-            for g in [g for g in self.round_games if g.status != "done"
-                      and (g.white.withdrawn or g.black.withdrawn)]:
-                self.round_games.remove(g)
-                self.all_games.remove(g)
-                if self.format == self.FORMAT_SWISS:
-                    self._unpaired += [p.name for p in (g.white, g.black)
-                                       if not p.withdrawn]
-            if self._unpaired:
-                waiting = [p for p in self.active_players()
-                           if p.name in self._unpaired]
-                self._unpaired = []
-                self._pair_swiss(waiting)
+            self._clear_withdrawn()
             self.status_msg = f"Round {self.current_round} — continuing"
+
+    def removable(self, player):
+        """
+        Whether *player* can still be taken out: off the roster before the
+        first round (remove_player), withdrawn after it (withdraw).
+        """
+        if self.finished or player.withdrawn:
+            return False
+        return not self.started or player not in self._ko_eliminated
+
+    def withdraw(self, name):
+        """
+        Take a player out of a tournament under way — an engine that keeps
+        failing, or the wrong one entered. It is never paired again and the
+        games it played stand. Its games still to play this round leave the
+        schedule (see _clear_withdrawn).
+
+        Returns (ok, message, game) — *game* being the one it is playing
+        right now, for the runner to stop, or None.
+        """
+        with self._lock:
+            player = self.players.get(normalize_engine_name(name))
+            if player is None:
+                return False, f"{name} is not in this tournament.", None
+            if self.finished:
+                return False, "This tournament has already finished.", None
+            if player.withdrawn:
+                return False, f"{player.name} is already out.", None
+            if player in self._ko_eliminated:
+                return False, f"{player.name} is already out of the bracket.", None
+            if (self.format != self.FORMAT_TEAM
+                    and len(self.active_players()) <= 2):
+                return False, "A tournament needs at least 2 players.", None
+            playing = next((g for g in self.round_games
+                            if g.status == "running"
+                            and player in (g.white, g.black)), None)
+            player.withdrawn = TournamentPlayer.WITHDRAWN
+            self._clear_withdrawn()
+        return True, f"{player.name} withdrawn — it plays no more games.", playing
+
+    def _clear_withdrawn(self):
+        """
+        Games still to play against someone now out of the event leave the
+        schedule. A Swiss pairs their opponent afresh, a knockout lets the
+        opponent through, and a round-robin or team match simply goes
+        without that game. A round left with players waiting — cut short,
+        or emptied this way — is then paired out among them.
+        """
+        for g in [g for g in self.round_games if g.status != "done"
+                  and (g.white.withdrawn or g.black.withdrawn)]:
+            self.round_games.remove(g)
+            self.all_games.remove(g)
+            staying = [p for p in (g.white, g.black) if not p.withdrawn]
+            if self.format == self.FORMAT_SWISS:
+                self._unpaired += [p.name for p in staying]
+            elif self.format == self.FORMAT_KNOCKOUT:
+                self._ko_pending_winners += staying
+                bracket = self._ko_round_games.get(g.round_num, [])
+                if g in bracket:
+                    bracket.remove(g)
+        if self.format == self.FORMAT_KNOCKOUT:
+            for p in [p for p in self.player_list if p.withdrawn]:
+                if p in self._ko_pending_winners:
+                    self._ko_pending_winners.remove(p)
+                if p not in self._ko_eliminated:
+                    self._ko_eliminated.append(p)
+        if self._unpaired:
+            waiting = [p for p in self.active_players()
+                       if p.name in self._unpaired]
+            self._unpaired = []
+            self._pair_swiss(waiting)
 
     def add_cycle(self):
         """
@@ -1521,7 +1598,9 @@ class Tournament:
             p.buchholz = d.get("buchholz", 0.0)
             p.sonneborn = d.get("sonneborn", 0.0)
             p.seed = d.get("seed", 0)
-            p.withdrawn = bool(d.get("withdrawn", False))
+            out = d.get("withdrawn") or ""
+            # v1.18 kept only a flag, set for an engine that was not found
+            p.withdrawn = TournamentPlayer.ENGINE_MISSING if out is True else str(out)
             p.color_history = list(d.get("color_history", []))
             p.opponents = list(d.get("opponents", []))
             players.append(p)
@@ -2114,7 +2193,9 @@ class TournamentRunner:
         self._halt_flag      = False     # stopped by the app closing
         self._pause_flag     = False
         self._adjudicate     = None    # (result, reason) set by the UI
+        self._drop           = None    # a game to stop and not record
         self._thread         = None
+        self.current_game    = None
         self.current_engines = []
         self._analyzer       = None
         self._analyzer_is_external = False
@@ -2139,6 +2220,16 @@ class TournamentRunner:
         self._halt_flag = True
         self.stop()
         self._kill(*self.current_engines)
+
+    def drop_game(self, game):
+        """
+        Stop *game* and leave it unrecorded — one of its players has been
+        withdrawn (Tournament.withdraw), which has already taken it off the
+        schedule. Play moves on to the next pairing; a pause holds.
+        """
+        self._drop = game
+        if self.current_game is game:
+            self._kill(*self.current_engines)
 
     def adjudicate(self, result, reason="Adjudicated by user"):
         """End the game in progress with *result* ('1-0'|'1/2-1/2'|'0-1').
@@ -2215,7 +2306,11 @@ class TournamentRunner:
                     time.sleep(0.1)
                 continue
 
-            self._play_game(game)
+            self.current_game = game
+            try:
+                self._play_game(game)
+            finally:
+                self.current_game = None
             if self._stop_flag:
                 break
 
@@ -2236,6 +2331,8 @@ class TournamentRunner:
             self.on_status("Tournament paused.")
 
     def _play_game(self, game: TournamentGame):
+        if game not in self.t.round_games:
+            return                   # taken off the schedule meanwhile (withdraw)
         game.status = "running"
         self._adjudicate = None      # drop a stale request from a past game
         self.on_game_start(game)
@@ -2254,8 +2351,8 @@ class TournamentRunner:
             self.current_engines = [e for e in (e_white, e_black) if e]
         except Exception as ex:
             self._kill(e_white, e_black)
-            if self._halt_flag:
-                game.status = "pending"   # the app closed under it
+            if self._halt_flag or self._drop is game:
+                game.status = "pending"   # the app closed, or a player went
             else:
                 self._abort_game(game, str(ex))
             return
@@ -2301,11 +2398,11 @@ class TournamentRunner:
         inc_ms = int((tc_inc or 0) * 1000)
 
         while True:
-            if self._stop_flag:
+            if self._stop_flag or self._drop is game:
                 interrupted = True
                 break
             while (self._pause_flag and not self._stop_flag
-                   and not self._adjudicate):
+                   and not self._adjudicate and self._drop is not game):
                 time.sleep(0.1)
             if self._adjudicate:
                 result, reason = self._adjudicate
@@ -2462,14 +2559,18 @@ class TournamentRunner:
             time.sleep(0.02 if player.is_human
                        else max(0.02, self.t.delay - grading_s))
 
-        # Stopped mid-game (a halt also kills the engines, which ends the
-        # loop as a forfeit): nothing was decided, so nothing is recorded.
-        # The game goes back on the schedule and is played from the start
-        # if the event carries on.
-        if (interrupted or self._halt_flag) and not board.game_result()[0]:
+        # Stopped mid-game — a stop, a halt, or a player withdrawn (the last
+        # two also kill the engines, which ends the loop as a forfeit):
+        # nothing was decided, so nothing is recorded. A stopped or halted
+        # game goes back on the schedule, to be played from the start if
+        # the event carries on; a withdrawal has taken it off already.
+        if ((interrupted or self._halt_flag or self._drop is game)
+                and not board.game_result()[0]):
             self._kill(e_white, e_black)
             game.status = "pending"
             game.last_review = None
+            if self._drop is game:
+                self._drop = None
             return
 
         if not result:
@@ -2511,7 +2612,7 @@ class TournamentRunner:
         self.on_human_turn(game, board, player)
         try:
             while True:
-                if self._stop_flag or self._adjudicate:
+                if self._stop_flag or self._adjudicate or self._drop is game:
                     return None
                 # Short poll: this is the gap between the click landing and
                 # the move appearing on the board, and it is felt

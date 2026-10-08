@@ -139,6 +139,18 @@ repeats a pairing while some other way of pairing the round avoids it.
 Only an event with more rounds than the field can fill has rematches, and
 then as few as each round allows.
 
+### Removing a player
+
+The **✕** beside a player in the standings takes them out — for an engine
+entered by mistake, or one that keeps failing. Before the first round it
+simply leaves the field (in a team event, its squad). Once the event is
+under way the player withdraws: it is never paired again, the games it has
+played stand, and it stays in the standings marked "Withdrawn". A game it
+is playing at that moment is stopped and not counted. In a Swiss its
+opponent for the round is paired again (or gets the bye), in a knockout
+its opponent goes through, and in a round robin or team event its
+remaining games are not played.
+
 ### Continuing a finished tournament
 
 **Continue** — in the window of a finished event, or at the bottom of its

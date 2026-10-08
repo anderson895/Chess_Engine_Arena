@@ -392,8 +392,16 @@ class TournamentSession:
         return ok, msg
 
     def remove_player(self, name):
-        """Drop a player from a tournament that has not started yet."""
-        ok, msg = self.t.remove_player(name)
+        """
+        Take a player out: off the roster before the first round; after it,
+        withdrawn — never paired again, and its game in progress stopped.
+        """
+        if not self.t.started:
+            ok, msg = self.t.remove_player(name)
+        else:
+            ok, msg, playing = self.t.withdraw(name)
+            if ok and playing is not None and self.runner:
+                self.runner.drop_game(playing)
         if ok:
             with self.lock:
                 self.tables_dirty = True
@@ -761,7 +769,8 @@ async def show_continue_tournament(session, tournament_id, on_continued=None):
                 return
             lost = missing()
             for p in t.player_list:
-                p.withdrawn = p in lost
+                p.withdrawn = (TournamentPlayer.ENGINE_MISSING
+                               if p in lost else "")
             t.reopen()
             if is_swiss:
                 t.set_rounds(int(rounds_in.value))
@@ -1828,6 +1837,19 @@ def show_tournament_window(session, tsess: TournamentSession):
                 add_dlg.close()
                 _refresh_tables()
 
+        # Taking a player out once games are under way cannot be undone,
+        # so say what it does first
+        with ui.dialog() as remove_dlg, ui.card().classes(
+                "arena-panel items-center gap-3 p-6 w-[440px]"):
+            remove_head = ui.label("").classes("arena-heading")
+            remove_name = ui.label("").classes("text-sm text-center font-bold")
+            remove_note = ui.label("").classes("text-xs text-gray-500 text-center")
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("Cancel", on_click=remove_dlg.close) \
+                    .props("flat color=grey no-caps")
+                remove_btn = ui.button("Remove", on_click=lambda: _do_remove()) \
+                    .props("no-caps color=negative")
+
         def _drop_player(payload):
             # A one-argument $emit arrives as the row itself; more than one
             # arrives as a list. Accept either rather than guess.
@@ -1837,6 +1859,16 @@ def show_tournament_window(session, tsess: TournamentSession):
                 else payload
             if not name:
                 return
+            remove_head.set_text("WITHDRAW FROM THE TOURNAMENT?" if t.started
+                                 else "REMOVE FROM THE TOURNAMENT?")
+            remove_btn.set_text("Withdraw" if t.started else "Remove")
+            remove_name.set_text(name)
+            remove_note.set_text(_removal_note(t, name))
+            remove_dlg.open()
+
+        def _do_remove():
+            name = remove_name.text
+            remove_dlg.close()
             ok, msg = tsess.remove_player(name)
             ui.notify(msg, type="positive" if ok else "warning")
             if ok:
@@ -2186,7 +2218,8 @@ def _fill_teams(table, t):
             "rank": i, "team": team.name, "score": f"{team.score:g}",
             "wdl": f"{team.wins}/{team.draws}/{team.losses}",
             "matches": "   ".join(played.get(team.name, [])) or "—",
-            "squad": ", ".join(p.name for p in team.players),
+            "squad": ", ".join(p.name + (" (out)" if p.withdrawn else "")
+                               for p in team.players),
         })
     table.rows = rows
     table.update()
@@ -2205,7 +2238,7 @@ def _standings_table(t):
     if swiss:
         columns.append({"name": "buch", "label": "Buchholz", "field": "buch",
                         "align": "center"})
-    # Drop column, only ever populated before the first round
+    # Remove column: anyone still playing can be taken out
     columns.append({"name": "drop", "label": "", "field": "drop",
                     "align": "center", "style": "width: 44px"})
     table = ui.table(columns=columns, rows=[], row_key="player",
@@ -2216,19 +2249,34 @@ def _standings_table(t):
     return table
 
 
+def _removal_note(t, name):
+    """What taking *name* out of tournament *t* does, in a sentence or two."""
+    if not t.started:
+        return "It leaves the field before the first round is paired."
+    note = "It plays no more games here; the games it has played stand."
+    if any(g.status == "running" and name in (g.white.name, g.black.name)
+           for g in t.round_games):
+        note += " Its game in progress is stopped and not counted."
+    return note + {
+        Tournament.FORMAT_SWISS: " If it still has a game this round, its "
+                                 "opponent is paired again.",
+        Tournament.FORMAT_KNOCKOUT: " If it still has a game to play, its "
+                                    "opponent goes through.",
+    }.get(t.format, " Its remaining games are not played.")
+
+
 def _fill_standings(table, t, session=None, query=""):
     """
     Fill the standings.
 
-    Before the first round the table doubles as the roster: it carries each
-    engine's live rating from the games database and a drop button, so the
-    field can be trimmed without leaving the tournament window.
+    The table doubles as the roster: it carries each engine's live rating
+    from the games database and a remove button, so a wrong or failing
+    engine can be taken out without leaving the tournament window.
     """
-    editable = not t.started
     rows = []
     for i, p in enumerate(t.get_standings(), 1):
         if p.withdrawn:
-            elo_txt, elo_col = "Sitting out — engine not found", COLOR_ORANGE
+            elo_txt, elo_col = p.withdrawn, COLOR_ORANGE      # why they are out
         else:
             elo_txt, elo_col = (session.rank_line(p.name, t.time_control)
                                 if session else ("", COLOR_MUTED))
@@ -2237,7 +2285,7 @@ def _fill_standings(table, t, session=None, query=""):
             "elo": elo_txt, "elo_color": elo_col,
             "wdl": f"{p.wins}/{p.draws}/{p.losses}",
             "buch": f"{p.buchholz:.1f}",
-            "can_drop": editable,
+            "can_drop": t.removable(p),
         })
     # Filtering after ranking keeps the # column showing real positions
     table.rows = [r for r in rows
