@@ -1039,6 +1039,10 @@ class Tournament:
         seeds a fixed bracket, so neither can absorb an extra player
         without invalidating what it already produced.
 
+        A player who withdrew — matched by name, or by engine file — comes
+        back instead, with the points it had and the engine file given now
+        (the fixed or the right one), paired again from the next round.
+
         Returns (ok, message).
         """
         if self.format != self.FORMAT_SWISS:
@@ -1055,15 +1059,28 @@ class Tournament:
 
         with self._lock:
             # Same two rules the create dialog enforces: one entry per name
-            # and one per engine file, so a rename cannot smuggle in a clone
-            if name in self.players:
+            # and one per engine file, so a rename cannot smuggle in a clone.
+            # Only players still in the event count — one that withdrew is
+            # brought back rather than turned away.
+            path = os.path.normcase(player.engine_path)
+            returning = self.players.get(name) or next(
+                (p for p in self.player_list if p.withdrawn and not p.is_human
+                 and os.path.normcase(p.engine_path) == path), None)
+            if returning is not None and not returning.withdrawn:
                 return False, f"{name} is already in this tournament."
             twin = next(
-                (p for p in self.player_list
-                 if os.path.normcase(p.engine_path)
-                 == os.path.normcase(player.engine_path)), None)
+                (p for p in self.active_players()
+                 if not player.is_human
+                 and os.path.normcase(p.engine_path) == path), None)
             if twin is not None:
                 return False, f"That engine is already playing as {twin.name}."
+
+            if returning is not None:
+                returning.withdrawn = ""
+                if not player.is_human:
+                    returning.engine_path = player.engine_path
+                return True, (f"{returning.name} is back in, paired again "
+                              f"from round {self.current_round + 1}.")
 
             player.name = name
             player.seed = len(self.player_list)

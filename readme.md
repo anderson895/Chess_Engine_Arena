@@ -151,6 +151,11 @@ opponent for the round is paired again (or gets the bye), in a knockout
 its opponent goes through, and in a round robin or team event its
 remaining games are not played.
 
+In a Swiss, **Add Player** brings a withdrawn engine back: pick it from the
+list (it is marked "withdrawn — bring back") or browse to the right file
+for it. It keeps the points it had and is paired again from the next
+round.
+
 ### Continuing a finished tournament
 
 **Continue** — in the window of a finished event, or at the bottom of its

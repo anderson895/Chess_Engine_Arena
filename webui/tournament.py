@@ -1797,7 +1797,9 @@ def show_tournament_window(session, tsess: TournamentSession):
                 "arena-panel gap-3 p-6 w-[460px]"):
             ui.label("ADD PLAYER").classes("arena-heading")
             ui.label("The engine starts on zero and is paired from the next "
-                     "round. Games already scheduled are left alone.") \
+                     "round. One that withdrew comes back with the points it "
+                     "had — pick its engine, or the right file for it. Games "
+                     "already scheduled are left alone.") \
                 .classes("text-xs text-gray-500")
             with ui.row().classes("w-full items-center gap-1 no-wrap"):
                 add_sel = ui.select({}, label="Engine", with_input=True) \
@@ -1819,10 +1821,16 @@ def show_tournament_window(session, tsess: TournamentSession):
                     .props("no-caps")
 
         def _open_add():
-            entered = {p.engine_path for p in t.player_list}
-            options = {k: v for k, v in _discover_engines().items()
-                       if os.path.normcase(k) not in
-                       {os.path.normcase(e) for e in entered}}
+            playing = {os.path.normcase(p.engine_path)
+                       for p in t.active_players()}
+            # Those who withdrew first, so bringing one back is one pick
+            options = {p.engine_path: f"{p.name}  (withdrawn — bring back)"
+                       for p in t.player_list
+                       if p.withdrawn and p.engine_path
+                       and os.path.isfile(p.engine_path)}
+            options.update({k: v for k, v in _discover_engines().items()
+                            if os.path.normcase(k) not in playing
+                            and k not in options})
             add_sel.set_options(options or {"": "— all engines entered —"})
             add_sel.set_value(None)
             add_dlg.open()
