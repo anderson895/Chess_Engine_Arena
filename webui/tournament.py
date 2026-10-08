@@ -19,6 +19,7 @@ from nicegui import app, run, ui
 
 from core.constants import TIME_CONTROLS
 from core.engine_finder import EngineFinder
+from core.move_input import MoveInput
 from core.utils import normalize_engine_name, fmt_clock, low_time_warning
 from tournament.manager import (
     Tournament, TournamentPlayer, TournamentRunner, TournamentTeam,
@@ -155,12 +156,14 @@ class TournamentSession:
         # at once when it comes back.
         self.sounds = deque(maxlen=3)
 
-        # Human seat: the live board while it is somebody's turn to move,
-        # and the square they have picked up. The runner is blocked the
-        # whole time this is set, so the board is not being mutated.
+        # Human seat: the live board while it is somebody's turn to move.
+        # The runner is blocked the whole time this is set, so the board is
+        # not being mutated. A pawn always becomes a queen: a tournament has
+        # nobody to ask, and anything else is a deliberate underpromotion.
         self.human_board = None
         self.human_player = None
-        self.human_selected = None
+        self.move_input = MoveInput(lambda: self.human_board,
+                                    self._submit_human_move)
 
         # Being deleted: nothing more is written for it (discard)
         self.discarded = False
@@ -171,80 +174,15 @@ class TournamentSession:
         with self.lock:
             self.human_board = board
             self.human_player = player
-            self.human_selected = None
+            self.move_input.clear()
             self.board_dirty = True
             if player is not None:
                 self.status_msg = f"Your move — {player.name}"
 
-    # ── Human input (UI thread) ───────────────────────────
-
-    def human_click(self, r, c):
-        """
-        Handle a click on the tournament board.
-
-        First click picks up one of your own pieces, second click plays a
-        legal destination. Clicking elsewhere puts the piece down again.
-        Returns True if the board needs redrawing.
-        """
-        with self.lock:
-            board, player = self.human_board, self.human_player
-            selected = self.human_selected
-        if board is None or player is None:
-            return False
-
-        moves = board.legal_moves()
-        if selected is not None:
-            for fr, fc, tr, tc, promo in moves:
-                if (fr, fc) == selected and (tr, tc) == (r, c):
-                    uci = (f"{chr(ord('a') + fc)}{8 - fr}"
-                           f"{chr(ord('a') + tc)}{8 - tr}")
-                    # Always queen: a tournament has nobody to ask, and
-                    # anything else is a deliberate underpromotion
-                    if promo:
-                        uci += "q"
-                    with self.lock:
-                        self.human_selected = None
-                    if self.runner:
-                        self.runner.submit_human_move(uci)
-                    return True
-
-        piece = board.get(r, c)
-        mine = piece and piece != "." and (
-            piece.isupper() == (board.turn == "w"))
-        with self.lock:
-            self.human_selected = (r, c) if mine else None
-        return True
-
-    def human_movable(self):
-        """Squares of the pieces the human seat can pick up and play."""
-        with self.lock:
-            board = self.human_board
-        if board is None:
-            return set()
-        return {(fr, fc) for fr, fc, _tr, _tc, _p in board.legal_moves()}
-
-    def human_pick(self, r, c):
-        """A piece on (r, c) is being dragged: pick it up if it can move."""
-        if (r, c) not in self.human_movable():
-            return False
-        with self.lock:
-            self.human_selected = (r, c)
-        return True
-
-    def human_drop(self, fr, fc, tr, tc):
-        """The piece dragged from (fr, fc) was let go on (tr, tc)."""
-        if not self.human_pick(fr, fc):
-            return False
-        return self.human_click(tr, tc)
-
-    def human_dests(self):
-        """Squares the picked-up piece may legally reach."""
-        with self.lock:
-            board, selected = self.human_board, self.human_selected
-        if board is None or selected is None:
-            return set()
-        return {(tr, tc) for fr, fc, tr, tc, _ in board.legal_moves()
-                if (fr, fc) == selected}
+    def _submit_human_move(self, uci):
+        """The human seat made *uci* on the board (move_input)."""
+        if self.runner:
+            self.runner.submit_human_move(uci)
 
     def _cb_game_start(self, game):
         with self.lock:
@@ -1695,16 +1633,18 @@ def show_tournament_window(session, tsess: TournamentSession):
                             "items-center gap-0 py-1 self-stretch"):
                         eval_bar = EvalBar()
                     with ui.element("div").classes("flex-grow min-w-0"):
+                        hand = tsess.move_input
+
                         async def _human_click(br, bc):
-                            if tsess.human_click(br, bc):
+                            if await hand.click(br, bc):
                                 board_view.refresh()
 
                         def _human_pick(br, bc):
-                            if tsess.human_pick(br, bc):
+                            if hand.pick(br, bc):
                                 board_view.refresh()
 
                         async def _human_drop(fr, fc, br, bc):
-                            if tsess.human_drop(fr, fc, br, bc):
+                            if await hand.drop(fr, fc, br, bc):
                                 board_view.refresh()
 
                         def _board_state():
@@ -1715,10 +1655,10 @@ def show_tournament_window(session, tsess: TournamentSession):
                             return {
                                 "board": live or tsess.board,
                                 "last_move": tsess.last_move,
-                                "selected": tsess.human_selected,
-                                "legal_dests": tsess.human_dests(),
+                                "selected": hand.selected,
+                                "legal_dests": hand.dests(),
                                 "check_sq": None,
-                                "movable": tsess.human_movable(),
+                                "movable": hand.movable(),
                             }
 
                         # A human seat moves by click-click or drag and drop

@@ -805,14 +805,15 @@ class GameAnalyst:
         self.record(uci)
         return self.grade(self.ply)
 
-    def truncated(self, ply):
+    def truncated(self, ply, analyse=None):
         """
-        A new analyst for this game's first *ply* moves — a takeback —
-        keeping every analysis and grade already made for them. A grade
-        still being worked out for a later move lands on this old analyst
-        and is lost with it.
+        A new analyst for this game's first *ply* moves — a takeback, or
+        the start of a side line — keeping every analysis and grade
+        already made for them. A grade still being worked out for a later
+        move lands on this old analyst and is lost with it. *analyse*
+        replaces the way missing positions are analysed.
         """
-        g = GameAnalyst(self.book, self._analyse)
+        g = GameAnalyst(self.book, analyse or self._analyse)
         for uci in self.moves[:ply]:
             g.record(uci)
         g.analyses[:ply + 1] = self.analyses[:ply + 1]

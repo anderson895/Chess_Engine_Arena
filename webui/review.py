@@ -10,22 +10,27 @@
 #  Moves are graded by core.review.GameAnalyst, the same code that grades
 #  the live game and tournament games, fed here by a dedicated review
 #  engine so a deeper look never holds up a game being played.
+#
+#  As on chess.com, any move can be tried on the board: it starts a side
+#  line from the position shown, graded like the game's own moves, and
+#  "Best" plays out the engine's line from there.
 # ═══════════════════════════════════════════════════════════
 
 import os
 from dataclasses import dataclass
 from html import escape
 
-from nicegui import run, ui
+from nicegui import background_tasks, run, ui
 
 from core.constants import QUALITY_COLORS
+from core.move_input import MoveInput
 from core.pgn import read_game
 from core.opening_book import opening_label
 from core.review import GameAnalyst, PHASES, TABLE_ORDER, move_number
 from data.reviews import ReviewCache
 from webui.board import BoardView, EvalBar
 from webui.quality import (MOVE_CLICK_JS, NO_BEST_HINT, QUALITY_TIPS,
-                           coach_html, icon_svg, move_list_html)
+                           coach_html, icon_svg, line_html, move_list_html)
 from webui.theme import piece_src
 from webui.widgets import PlayerBar
 
@@ -38,6 +43,7 @@ SPEEDS = {
 DEFAULT_SPEED = "balanced"
 BOOK_SHARE = 0.3        # a book position only feeds the graph: search it less
 BEST_ARROW = "#81B64C"
+BEST_LINE_PLIES = 8     # how much of the engine's line "Best" plays out
 GRAPH_MOMENTS = ("Brilliant", "Great", "Miss", "Mistake", "Blunder")
 GRAPH_EVERY = 6         # redraw the graph every this many positions analysed
 
@@ -99,6 +105,40 @@ class ReviewSource:
                    "Current game", session.export_pgn_text() or "")
 
 
+class Variation:
+    """
+    Moves tried from a position of the game: a side line. It is the game
+    up to *base* plus the moves tried, kept as a GameAnalyst so they are
+    analysed and graded just as the game's own moves are.
+    """
+
+    def __init__(self, game, base, analyse):
+        self.base = base                  # the game ply the line leaves from
+        self.analyst = game.truncated(base, analyse)
+        self.shown = 0                    # how many of its moves are on the board
+
+    @property
+    def length(self):
+        return self.analyst.ply - self.base
+
+    @property
+    def ply(self):
+        """The analyst's ply of the position shown."""
+        return self.base + self.shown
+
+    def next_move(self):
+        """The line's move after the one shown, or None."""
+        return (self.analyst.moves[self.ply]
+                if self.ply < self.analyst.ply else None)
+
+    def play(self, uci):
+        """Play *uci* after the move shown; whatever followed it goes."""
+        if self.ply < self.analyst.ply:
+            self.analyst = self.analyst.truncated(self.ply)
+        self.analyst.record(uci)
+        self.shown += 1
+
+
 class ReviewScreen:
     """One open Game Review dialog."""
 
@@ -114,6 +154,14 @@ class ReviewScreen:
         self._run_id = 0
         self._engine = None
         self.summary = None
+        self.var = None                   # the side line being tried, if any
+        self._grading = set()             # (analyst id, ply) being graded
+        self._tried_engine = None
+        self._no_engine = False
+        # Moves tried on the board, in the walkthrough only
+        self.hand = MoveInput(self._hand_board, self._try_move,
+                              can_move=lambda: self.mode == "review",
+                              promote=session.ask_promotion)
         self._new_analyst()
         self._build()
         self.dialog.open()
@@ -132,21 +180,30 @@ class ReviewScreen:
         self.moves = self.analyst.moves
         self.n = self.analyst.ply
 
-    def _review_at(self, ply):
-        return self.analyst.reviews[ply - 1] if ply > 0 else None
+    def _line(self):
+        """(analyst, ply) of the position shown: the game's, or the side line's."""
+        if self.var is not None:
+            return self.var.analyst, self.var.ply
+        return self.analyst, self.ply
+
+    def _hand_board(self):
+        analyst, ply = self._line()
+        return analyst.boards[ply]
 
     def _board_state(self):
-        board = self.analyst.boards[self.ply]
-        rv = self._review_at(self.ply)
+        analyst, ply = self._line()
+        board = analyst.boards[ply]
+        rv = analyst.reviews[ply - 1] if ply else None
         arrows = []
         if (rv and rv.best_uci and rv.best_uci != rv.uci
                 and rv.cls not in NO_BEST_HINT):
             arrows.append((rv.best_uci, BEST_ARROW))
         return {
             "board": board,
-            "last_move": self.moves[self.ply - 1] if self.ply else None,
-            "selected": None,
-            "legal_dests": set(),
+            "last_move": analyst.moves[ply - 1] if ply else None,
+            "selected": self.hand.selected,
+            "legal_dests": self.hand.dests(),
+            "movable": self.hand.movable(),
             "check_sq": board.find_king(board.turn) if board.in_check() else None,
             "move_class": rv.cls if rv else None,
             "arrows": arrows,
@@ -180,7 +237,11 @@ class ReviewScreen:
                     with ui.column().classes("gap-0 self-stretch"):
                         self.eval_bar = EvalBar()
                     with ui.element("div").classes("flex-grow min-w-0"):
-                        self.board = BoardView(self._board_state, overlay=True)
+                        # A move made here is tried as a side line
+                        self.board = BoardView(self._board_state, overlay=True,
+                                               on_click=self._board_click,
+                                               on_drag_start=self._board_pick,
+                                               on_drop=self._board_drop)
                 self.bottom_bar = PlayerBar()
 
     def _build_panel(self):
@@ -190,6 +251,14 @@ class ReviewScreen:
             with ui.element("div").classes("coach review-coach w-full"):
                 ui.element("img").props('src="/assets/logo.png"')
                 self.bubble = ui.html("", sanitize=False).classes("coach-bubble")
+            with ui.row().classes("review-actions w-full items-center "
+                                  "no-wrap gap-2") as self.actions:
+                ui.label("Move a piece to try your own idea") \
+                    .classes("var-head flex-grow")
+                self.best_btn = ui.button("Best", icon="star", color=None,
+                                          on_click=self._show_best) \
+                    .props("dense no-caps unelevated") \
+                    .tooltip("Play out the engine's best line from here")
             self.graph = ui.echart(self._graph_options(),
                                    on_point_click=lambda e: self.goto(e.data_index)) \
                 .classes("review-graph").style("height: 84px")
@@ -210,6 +279,19 @@ class ReviewScreen:
                 self.summary_box = ui.column().classes("w-full gap-0")
                 self.walk_box = ui.column().classes("w-full gap-1")
                 with self.walk_box.classes("review-walk"):
+                    with ui.column().classes("var-box w-full gap-1") \
+                            as self.var_box:
+                        with ui.row().classes("w-full items-center no-wrap gap-2"):
+                            self.var_head = ui.label("").classes("var-head flex-grow")
+                            ui.button("Back to game", icon="undo", color=None,
+                                      on_click=self._leave_variation) \
+                                .props("dense flat no-caps size=sm")
+                        self.var_list = ui.html("", sanitize=False) \
+                            .classes("var-line w-full")
+                        self.var_list.on("click",
+                                         lambda e: self._var_goto(int(e.args)),
+                                         js_handler=MOVE_CLICK_JS)
+                    self.var_box.set_visibility(False)
                     self.opening_lbl = ui.label("").classes("opening-line")
                     self.move_list = ui.html("", sanitize=False) \
                         .classes("move-grid w-full")
@@ -230,14 +312,22 @@ class ReviewScreen:
                         ui.button(icon=icon, color=None,
                                   on_click=lambda s=step: self.step(s)) \
                             .props("flat dense").classes("flex-grow").tooltip(tip)
+                    # Next carries on through the game itself, leaving any
+                    # side line tried from the move shown
                     ui.button("Next", color=None,
-                              on_click=lambda: self.step("forward")) \
+                              on_click=lambda: self.goto(self.ply + 1)) \
                         .props("no-caps unelevated") \
                         .classes("cta flex-grow").style("font-size: 1rem")
         self.set_mode("summary")
 
     def step(self, where):
-        """Move through the game: 'start', 'back', 'forward' or 'end'."""
+        """
+        Move through what is shown: 'start', 'back', 'forward' or 'end'.
+        Back and forward step along a side line while one is shown.
+        """
+        if self.var is not None and where in ("back", "forward"):
+            self._var_goto(self.var.shown + (1 if where == "forward" else -1))
+            return
         self.goto({"start": 0, "back": self.ply - 1,
                    "forward": self.ply + 1, "end": self.n}[where])
 
@@ -342,14 +432,33 @@ class ReviewScreen:
             self.analyst.sans, self.analyst.reviews, self.ply))
 
     def _bubble_for_move(self):
-        if self.ply == 0:
+        analyst, ply = self._line()
+        if ply == 0:
             return self._summary_text()
-        rv = self._review_at(self.ply)
+        rv = analyst.reviews[ply - 1]
+        if self.var is None:
+            waiting = " — analysing…" if self.summary is None else ""
+        else:
+            waiting = (" — load an analyzer on the main screen to grade it"
+                       if self._no_engine else " — analysing…")
         return coach_html(
-            rv, f"{move_number(self.ply)} {self.analyst.sans[self.ply - 1]}",
-            self.analyst.eval_after(self.ply),
-            self.analyst.best_line_san(self.ply) if rv else (),
-            waiting=" — analysing…" if self.summary is None else "")
+            rv, f"{move_number(ply)} {analyst.sans[ply - 1]}",
+            analyst.eval_after(ply),
+            analyst.best_line_san(ply) if rv else (), waiting)
+
+    def _render_variation(self):
+        """The side line under the coach: its moves, the one shown marked."""
+        self.var_box.set_visibility(self.var is not None)
+        if self.var is None:
+            return
+        var, game = self.var, self.analyst
+        # The line takes the place of the game's move after its base
+        self.var_head.set_text(
+            f"Instead of {move_number(var.base + 1)} {game.sans[var.base]}"
+            if var.base < self.n else "Played on from the final position")
+        self.var_list.set_content(line_html(
+            var.analyst.sans[var.base:], var.analyst.reviews[var.base:],
+            var.base + 1, var.shown))
 
     # ── Navigation ────────────────────────────────────────
 
@@ -360,23 +469,22 @@ class ReviewScreen:
         self.start_btn.set_visibility(summary)
         self.walk_box.set_visibility(not summary)
         self.nav_row.set_visibility(not summary)
+        self.actions.set_visibility(not summary)
         if not summary:
             self._render_move_list()
             if self.ply == 0 and self.n:
                 self.goto(1)
                 return
-        self._refresh_text()
+        # Redrawn either way: whether the pieces can be moved depends on it
+        self.var = None
+        self._show()
 
     def goto(self, ply, chart=True):
-        ply = max(0, min(self.n, int(ply)))
-        self.ply = ply
-        self.board.refresh()
-        board = self.analyst.boards[ply]
-        cp, mate = self.analyst.eval_after(ply)
-        if cp is not None or mate is not None:
-            self.eval_bar.set_eval(cp, mate)
-        self._refresh_bars(board)
-        self._refresh_text()
+        """Show the game after *ply* moves, leaving any side line."""
+        self.var = None
+        self.ply = max(0, min(self.n, int(ply)))
+        ply = self.ply
+        self._show()
         if chart:
             # Only the marker moves: re-sending the series on every step
             # would ship the whole graph again
@@ -406,32 +514,168 @@ class ReviewScreen:
             bar.show(side, name, f"({rating})" if rating else "", winner=won)
             bar.set_material(ahead)
 
+    def _show(self):
+        """Draw the position shown — the game's, or the side line's."""
+        analyst, ply = self._line()
+        self.hand.clear()
+        self.board.refresh()
+        cp, mate = analyst.eval_after(ply)
+        if cp is not None or mate is not None:
+            self.eval_bar.set_eval(cp, mate)
+        self._refresh_bars(analyst.boards[ply])
+        self._refresh_text()
+        self._render_variation()
+        if self.var is not None and ply and analyst.reviews[ply - 1] is None:
+            background_tasks.create(self._grade_tried(analyst, ply),
+                                    name="review-tried-move")
+
+    def _refresh_position(self):
+        """Redraw after new analysis, staying in a side line if one is shown."""
+        if self.var is None:
+            self.goto(self.ply)
+        else:
+            self._show()
+
     def _refresh_text(self):
         if self.mode == "summary":
             self.bubble.set_content(self._summary_text())
-        else:
-            self.bubble.set_content(self._bubble_for_move())
-            # The opening as it stood at this point — it can change later
-            # in the game when the moves transpose
-            self.opening_lbl.set_text(opening_label(*self.analyst.openings[self.ply]))
+            return
+        self.bubble.set_content(self._bubble_for_move())
+        analyst, ply = self._line()
+        # The opening as it stood at this point — it can change later in
+        # the game when the moves transpose
+        self.opening_lbl.set_text(opening_label(*analyst.openings[ply]))
+        line = self._best_line(analyst, ply)
+        self.best_btn.set_visibility(bool(line))
+        self.best_btn.set_text(
+            "Follow-up" if line and line[0] == analyst.moves[ply - 1] else "Best")
 
     def flip(self):
         self.flipped = not self.flipped
         self.board.flip()
         self.eval_bar.set_flipped(self.flipped)
-        self._refresh_bars(self.analyst.boards[self.ply])
+        analyst, ply = self._line()
+        self._refresh_bars(analyst.boards[ply])
 
     def _on_key(self, e):
         if not e.action.keydown:
             return
         if e.key.arrow_left:
-            self.goto(self.ply - 1)
+            self.step("back")
         elif e.key.arrow_right:
-            self.goto(self.ply + 1)
+            self.step("forward")
         elif e.key.name == "Home":
-            self.goto(0)
+            self.step("start")
         elif e.key.name == "End":
-            self.goto(self.n)
+            self.step("end")
+
+    # ── Trying moves: side lines ──────────────────────────
+
+    async def _board_click(self, r, c):
+        if await self.hand.click(r, c) == "select":
+            self.board.refresh()
+
+    def _board_pick(self, r, c):
+        if self.hand.pick(r, c):
+            self.board.refresh()
+
+    async def _board_drop(self, fr, fc, tr, tc):
+        if await self.hand.drop(fr, fc, tr, tc) == "select":
+            self.board.refresh()
+
+    def _try_move(self, uci):
+        """
+        A move made on the board. The game's own next move (or the side
+        line's) just steps on; anything else is tried from the position
+        shown, replacing whatever the side line had after it.
+        """
+        if self.var is None:
+            if self.ply < self.n and self.moves[self.ply] == uci:
+                self.goto(self.ply + 1)
+                return
+            self.var = Variation(self.analyst, self.ply, self._analyse_tried)
+        elif self.var.next_move() == uci:
+            self._var_goto(self.var.shown + 1)
+            return
+        self.var.play(uci)
+        self._show()
+
+    def _var_goto(self, shown):
+        """Show the side line after *shown* of its moves; 0 is back to the game."""
+        if self.var is None:
+            return
+        if shown < 1:
+            self._leave_variation()
+        elif shown <= self.var.length:
+            self.var.shown = shown
+            self._show()
+
+    def _leave_variation(self):
+        """Back to the game's move the side line was tried from."""
+        if self.var is not None:
+            self.goto(self.ply)
+
+    def _analyse_tried(self, moves_str):
+        """Analysis of a position off the game's path (worker thread)."""
+        engine = self._tried_engine
+        if engine is None or not engine.alive:
+            return None
+        return engine.analyse(moves_str, SPEEDS[self.speed][1], 2)
+
+    async def _grade_tried(self, analyst, ply):
+        """Grade the tried move that reached *ply*, then redraw if still shown."""
+        key = (id(analyst), ply)
+        if key in self._grading:
+            return
+        self._grading.add(key)
+        engine = await self.session.acquire_review_engine()
+        try:
+            self._no_engine = engine is None
+            if engine is None:
+                self._refresh_text()
+                return
+            self._tried_engine = engine
+            await run.io_bound(analyst.grade, ply)
+        finally:
+            self._grading.discard(key)
+            if engine is not None:
+                self.session.release_review_engine()
+        if not self.closed and self.var is not None and self.var.analyst is analyst:
+            self._show()
+
+    @staticmethod
+    def _best_line(analyst, ply):
+        """The engine's line (UCI) from the position before move *ply*, or []."""
+        if not ply:
+            return []
+        lines = (analyst.analyses[ply - 1] or {}).get("lines") or []
+        return list(lines[0].get("pv") or [])[:BEST_LINE_PLIES] if lines else []
+
+    def _show_best(self):
+        """
+        Play out the engine's best line in place of the move shown — or,
+        when that move was the best, the line that follows it — as a side
+        line to step through.
+        """
+        analyst, ply = self._line()
+        line = self._best_line(analyst, ply)
+        if not line:
+            return
+        start = ply - 1
+        if line[0] == analyst.moves[ply - 1]:
+            start, line = ply, line[1:]
+        if not line:
+            return
+        if self.var is None:
+            self.var = Variation(self.analyst, start, self._analyse_tried)
+        self.var.shown = start - self.var.base
+        first = self.var.shown + 1
+        for uci in line:
+            try:
+                self.var.play(uci)
+            except ValueError:
+                break
+        self._var_goto(first)
 
     # ── Graph ─────────────────────────────────────────────
 
@@ -555,7 +799,7 @@ class ReviewScreen:
                     if i % GRAPH_EVERY == 0:
                         self._redraw_graph()
                     if i == self.ply:
-                        self.goto(self.ply)
+                        self._refresh_position()
                 if self.analyst.summary().complete:
                     await run.io_bound(cache.put, self.moves, engine_id,
                                        movetime, list(self.analyst.analyses))
@@ -567,7 +811,7 @@ class ReviewScreen:
             self._render_summary()
             if self.mode == "review":
                 self._render_move_list()
-            self.goto(self.ply)
+            self._refresh_position()
         finally:
             if self._engine is engine and (self.closed or run_id == self._run_id):
                 self._engine = None

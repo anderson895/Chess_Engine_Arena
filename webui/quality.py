@@ -13,7 +13,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from core.constants import QUALITY_COLORS, QUALITY_SYMBOLS
-from core.review import format_eval
+from core.review import format_eval, move_number
 
 # Moves that need no "the best move was…" hint: they are best already,
 # or there was nothing to choose
@@ -130,6 +130,14 @@ def coach_html(review, label, evaluation=(None, None), best_line=(),
             f"<div>{escape(review.comment)}</div>{line}")
 
 
+def _move_cell(key, san, review, current):
+    """One clickable move (data-ply=*key*) with its grade badge."""
+    badge = (f"<i class='qi qi-{review.cls.lower()}'></i>"
+             if review and review.cls else "")
+    cur = " cur" if key == current else ""
+    return f"<span class='mv{cur}' data-ply='{key}'>{badge}{escape(san)}</span>"
+
+
 def move_list_html(sans, reviews, current=None, result=""):
     """
     A game's moves as cells for a .move-grid: number, White's move, Black's
@@ -144,14 +152,27 @@ def move_list_html(sans, reviews, current=None, result=""):
                 cells.append("<span></span>")
                 continue
             rv = reviews[ply - 1] if ply <= len(reviews) else None
-            badge = (f"<i class='qi qi-{rv.cls.lower()}'></i>"
-                     if rv and rv.cls else "")
-            cur = " cur" if ply == current else ""
-            cells.append(f"<span class='mv{cur}' data-ply='{ply}'>"
-                         f"{badge}{escape(sans[ply - 1])}</span>")
+            cells.append(_move_cell(ply, sans[ply - 1], rv, current))
     if result and result != "*":
         cells.append(f"<span class='result'>{escape(result)}</span>")
     return "".join(cells)
+
+
+def line_html(sans, reviews, first_ply, current=None):
+    """
+    A side line as one run of moves for a .var-line — '12... Nc6 13. Bb5'.
+    Each move carries its grade badge and is clickable, data-ply counting
+    the line's own moves from 1. *first_ply* is the game ply of the first
+    move; the move at *current* (counted the same way) is highlighted.
+    """
+    parts = []
+    for i, san in enumerate(sans, 1):
+        ply = first_ply + i - 1
+        if ply % 2 or i == 1:
+            parts.append(f"<span class='n'>{move_number(ply)}</span>")
+        rv = reviews[i - 1] if i <= len(reviews) else None
+        parts.append(_move_cell(i, san, rv, current))
+    return "".join(parts)
 
 
 class MoveVerdict:

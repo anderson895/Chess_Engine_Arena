@@ -312,8 +312,8 @@ body {{
     padding: 4px 0;
     font-size: 0.95rem;
 }}
-.move-grid .n {{ color: var(--text-3); padding-top: 1px; }}
-.move-grid .mv {{
+.move-grid .n, .var-line .n {{ color: var(--text-3); padding-top: 1px; }}
+.move-grid .mv, .var-line .mv {{
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -324,10 +324,27 @@ body {{
     justify-self: start;
     white-space: nowrap;
 }}
-.move-grid .mv:hover {{ background: var(--raised); }}
-.move-grid .mv.cur {{ background: var(--raised-hover); }}
+.move-grid .mv:hover, .var-line .mv:hover {{ background: var(--raised); }}
+.move-grid .mv.cur, .var-line .mv.cur {{ background: var(--raised-hover); }}
 .move-grid .result {{ grid-column: 1 / -1; color: var(--text-2); font-weight: 800; padding: 4px 0; }}
 .opening-line {{ color: var(--text-3); font-size: 0.8rem; }}
+
+/* A side line tried in the review: its moves in one wrapping run */
+.var-box {{
+    background: var(--log);
+    border-left: 3px solid var(--green);
+    border-radius: 6px;
+    padding: 6px 8px 8px;
+}}
+.var-head {{ color: var(--text-3); font-size: 0.8rem; }}
+.var-line {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 2px;
+    font-size: 0.95rem;
+}}
+.review-actions {{ padding: 2px 14px 6px; }}
 
 /* ── Board ────────────────────────────────────────────── */
 .board-grid {{

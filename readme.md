@@ -210,6 +210,20 @@ whenever the move played was not the best. Click a move, the graph, or use
 ← → Home End to jump around; the header has flip, copy/download PGN and
 previous/next game.
 
+### Best moves and what-ifs
+
+**Best**, under the coach, plays out the engine's best line in place of
+the move shown — or, when that move was the best, the line that follows
+it — so you can step through it move by move.
+
+Any move can also be tried on the board, by clicking or dragging a piece,
+to see what would have happened. It starts a side line from the position
+shown, analysed and graded like the game's own moves, with the best reply
+as a green arrow; keep playing moves for either side to go deeper. ← and →
+step along the line, and **Back to game**, a click on a move in the game's
+list or **Next** return to the game. Playing the game's own move simply
+steps on through the game.
+
 A dedicated Stockfish process analyses every position, apart from the
 analyzer that grades live games, so a review never holds up a game being
 played. It runs below normal priority, on one thread while a game or

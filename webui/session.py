@@ -16,6 +16,7 @@ from nicegui import run
 
 from core.board import Board
 from core.engine import UCIEngine, AnalyzerEngine
+from core.move_input import MoveInput
 from core.opening_book import OpeningBook
 from core.elo import (
     compute_elo_by_tc, tally_by_tc, tc_bucket, MIN_RATED_GAMES,
@@ -156,7 +157,10 @@ class GameSession:
         self.game_result    = ""
         self.game_date      = ""
         self.last_move      = None
-        self.selected_square = None
+        # Moves made by hand, by click or drag (a person's turn only)
+        self.move_input = MoveInput(lambda: self.board, self._play_human_move,
+                                    can_move=self.can_move_now,
+                                    promote=self._ask_promotion)
         self.current_opening_name = None
         self._engine_thinking = False
         self._game_task: asyncio.Task | None = None
@@ -233,14 +237,6 @@ class GameSession:
         if self.play_mode == self.MODE_HVE:
             return (self.player_color == "white") == (self.board.turn == "w")
         return False
-
-    def legal_destinations(self):
-        """Squares the selected piece can move to (a person's turn only)."""
-        if not self.human_to_move() or not self.selected_square:
-            return set()
-        sr, sc = self.selected_square
-        return {(m[2], m[3]) for m in self.board.legal_moves()
-                if m[0] == sr and m[1] == sc}
 
     def check_square(self):
         """The king square currently in check, or None."""
@@ -953,67 +949,43 @@ class GameSession:
         return (self.game_running and not self._engine_thinking
                 and not self.game_paused and self.human_to_move())
 
+    @property
+    def selected_square(self):
+        """The square of the piece the person has picked up, or None."""
+        return self.move_input.selected
+
+    @selected_square.setter
+    def selected_square(self, square):
+        self.move_input.selected = square
+
     def movable_squares(self):
         """Squares of the pieces the person to move can pick up and play."""
-        if not self.can_move_now():
-            return set()
-        return {(m[0], m[1]) for m in self.board.legal_moves()}
+        return self.move_input.movable()
+
+    def legal_destinations(self):
+        """Squares the piece picked up can move to."""
+        return self.move_input.dests()
 
     def pick_up(self, br, bc):
         """A piece on (br, bc) is being dragged: select it, if it may move."""
-        if (br, bc) in self.movable_squares() and self.selected_square != (br, bc):
-            self.selected_square = (br, bc)
+        if self.move_input.pick(br, bc):
             self._emit("board_changed")
 
     async def drop_piece(self, fr, fc, br, bc):
         """The piece dragged from (fr, fc) was let go on (br, bc)."""
-        self.pick_up(fr, fc)            # in case the drag start went unheard
-        if self.selected_square == (fr, fc):
-            await self.click_square(br, bc)
+        if await self.move_input.drop(fr, fc, br, bc) == "select":
+            self._emit("board_changed")
 
     async def click_square(self, br, bc):
         """Handle a click on board square (row, col) in board coordinates."""
-        if not self.can_move_now():
-            return
-        mover_white = (self.board.turn == "w")
-
-        piece = self.board.get(br, bc)
-        is_own = (piece and piece != "." and
-                  (piece.isupper() if mover_white else piece.islower()))
-
-        if self.selected_square is None:
-            if is_own:
-                self.selected_square = (br, bc)
-                self._emit("board_changed")
-            return
-
-        fr, fc = self.selected_square
-        if (br, bc) == (fr, fc):
-            self.selected_square = None
+        if await self.move_input.click(br, bc) == "select":
             self._emit("board_changed")
-            return
-        if is_own:
-            self.selected_square = (br, bc)
-            self._emit("board_changed")
-            return
 
-        matching = [m for m in self.board.legal_moves()
-                    if m[0] == fr and m[1] == fc and m[2] == br and m[3] == bc]
-        self.selected_square = None
-        if not matching:
-            self._emit("board_changed")
-            return
+    async def _ask_promotion(self, colour):
+        return await self.ask_promotion(colour) if self.ask_promotion else None
 
-        if any(m[4] for m in matching):
-            promo = "q"
-            if self.ask_promotion:
-                promo = (await self.ask_promotion(
-                    "w" if mover_white else "b")) or "q"
-            uci = (f"{chr(ord('a') + fc)}{8 - fr}"
-                   f"{chr(ord('a') + bc)}{8 - br}{promo}")
-        else:
-            uci = f"{chr(ord('a') + fc)}{8 - fr}{chr(ord('a') + bc)}{8 - br}"
-
+    async def _play_human_move(self, uci):
+        """A person made *uci* on the board (move_input): play it."""
         moves_before = self.board.uci_moves_str()
         was_white = (self.board.turn == "w")
         try:
