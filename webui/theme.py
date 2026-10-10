@@ -375,6 +375,10 @@ body {{
 .board-sq.lfrom, .board-sq.lto, .board-sq.sel {{
     box-shadow: inset 0 0 0 100vmax rgba(255, 255, 51, 0.5);
 }}
+/* A premove waiting for the engine's reply, red as on chess.com */
+.board-sq.pre {{
+    box-shadow: inset 0 0 0 100vmax rgba(235, 64, 52, 0.55);
+}}
 .board-sq.chk {{
     background-image: radial-gradient(ellipse at center, rgb(255, 0, 0) 0%,
         rgb(231, 0, 0) 25%, rgba(169, 0, 0, 0) 89%, rgba(158, 0, 0, 0) 100%);

@@ -14,7 +14,7 @@ from datetime import datetime
 
 from nicegui import run
 
-from core.board import Board
+from core.board import Board, parse_uci
 from core.engine import UCIEngine, AnalyzerEngine
 from core.move_input import MoveInput
 from core.opening_book import OpeningBook
@@ -34,6 +34,10 @@ LIVE_ANALYSIS_MS = 250
 
 # A review engine nobody has used for this long is shut down
 REVIEW_ENGINE_IDLE_S = 60
+
+# A premove is played this long after the engine's reply, so the reply is
+# seen and heard first. chess.com charges a premove the same tenth.
+PREMOVE_DELAY_S = 0.1
 
 
 # Re-exported for the UI modules that import it from here
@@ -167,10 +171,14 @@ class GameSession:
         self.game_result    = ""
         self.game_date      = ""
         self.last_move      = None
-        # Moves made by hand, by click or drag (a person's turn only)
+        # Moves made by hand, by click or drag — on a person's turn, or
+        # queued as a premove while the engine thinks (premove holds it)
+        self.premove = None
         self.move_input = MoveInput(lambda: self.board, self._play_human_move,
                                     can_move=self.can_move_now,
-                                    promote=self._ask_promotion)
+                                    promote=self._ask_promotion,
+                                    can_premove=self.can_premove_now,
+                                    on_premove=self._set_premove)
         self.current_opening_name = None
         self._engine_thinking = False
         self._game_task: asyncio.Task | None = None
@@ -181,7 +189,11 @@ class GameSession:
         # is the default preset.
         self.wtime_ms = (self.base_min or 0) * 60000
         self.btime_ms = (self.base_min or 0) * 60000
-        self._think_start = None   # time.time() when current search began
+        # time.time() when the clock of the side to move started running —
+        # an engine's search, or a person's turn — and a count that ends
+        # the flag watch of a person's turn once it is over
+        self._think_start = None
+        self._clock_token = 0
 
         # Takebacks: the clocks after every ply (index = plies played) and
         # how many moves came with the start (never taken back)
@@ -300,12 +312,18 @@ class GameSession:
 
     def clock_ms(self):
         """
-        Live (white, black) clock values in ms, counting the search in flight.
+        Live (white, black) clock values in ms, counting the turn in progress.
 
-        The stored values only move when a search returns, so between moves
-        the thinking side's clock is stale by however long it has been
-        thinking. Anything that reads a clock wants that subtracted.
+        The stored values only move when a move is made, so between moves
+        the clock of the side to move is stale by however long it has been
+        running. Anything that reads a clock wants that subtracted.
+
+        Before a game the clocks read the time it will start with.
         """
+        if self.board_is_preview:
+            base = TIME_CONTROLS.get(self.time_control,
+                                     TIME_CONTROLS["blitz"])[1] or 0
+            return base * 60000, base * 60000
         w, b = self.wtime_ms, self.btime_ms
         if self._think_start is not None and self.game_running:
             elapsed = (time.time() - self._think_start) * 1000
@@ -674,6 +692,7 @@ class GameSession:
         # Reset state
         self.game_result = "*"
         self._engine_thinking = False
+        self.premove = None
         self._elo_cache = None           # tournaments may have added games
         # Only a game from a set opening or position asks whether to record it
         self._ask_to_record = not start.is_standard
@@ -705,6 +724,7 @@ class GameSession:
         self._emit("banners")
         self._emit("board_changed")       # the player's pieces can move now
         self._emit("sound", "game_start")
+        self._run_clock()                 # a person to move: their time runs
 
         if self.play_mode == self.MODE_HVH:
             self._emit("status", self._turn_prompt())
@@ -752,17 +772,43 @@ class GameSession:
         return True
 
     def toggle_pause(self):
-        if not self.game_running:
+        self.set_paused(not self.game_paused)
+
+    def set_paused(self, paused):
+        """
+        Pause or resume the game. A person's clock stands still while it is
+        paused; an engine already thinking still finishes its move, and the
+        next one waits.
+        """
+        if not self.game_running or paused == self.game_paused:
             return
-        self.game_paused = not self.game_paused
-        self._emit("status", "PAUSED" if self.game_paused else "Resuming…")
+        people_turn = self.human_to_move() and not self._engine_thinking
+        if paused:
+            if people_turn:
+                self._halt_clock()
+            self.game_paused = True
+            self.move_input.clear()
+            self._emit("status", "PAUSED")
+        else:
+            self.game_paused = False
+            if not people_turn:
+                self._emit("status", "Resuming…")
+            elif self.play_mode == self.MODE_HVH:
+                self._run_clock()
+                self._emit("status", self._turn_prompt())
+            else:
+                # As when the engine replies: a premove made meanwhile goes
+                asyncio.create_task(self._your_turn())
+        self._emit("clock")
+        self._emit("board_changed")       # the pieces that can move changed
 
     async def stop_game(self, result, reason):
         """Finish a game that the user stopped manually."""
+        self._halt_clock()
         self.game_running = False
         self.game_paused = False
         self._engine_thinking = False
-        self._think_start = None
+        self.premove = None
         asyncio.create_task(self.kill_engines())
 
         if self.board.move_history or result != "*":
@@ -785,10 +831,11 @@ class GameSession:
         self._emit("banners")
 
     async def new_game(self):
+        self._halt_clock()
         self.game_running = False
         self.game_paused = False
         self._engine_thinking = False
-        self._think_start = None
+        self.premove = None
         asyncio.create_task(self.kill_engines())
         self.discard_pending(dropped=True)
         self.game_result = ""
@@ -804,6 +851,9 @@ class GameSession:
         """
         if self.game_running:
             return False
+        # The clocks go with the players: until the next game starts, each
+        # name keeps the time it finished with
+        self.wtime_ms, self.btime_ms = self.btime_ms, self.wtime_ms
         if self.play_mode == self.MODE_HVH:
             self.white_player, self.black_player = (self.black_player,
                                                     self.white_player)
@@ -878,6 +928,72 @@ class GameSession:
             self.game_date or datetime.now().strftime("%Y.%m.%d"),
             opening_name=self.current_opening_name,
             start_fen=self.game_start.fen)
+
+    # ═══════════════════════════════════════════════════════
+    #  Clocks
+    #
+    #  An engine's clock runs while it searches (_play_engine_move); a
+    #  person's runs from the start of their turn until they move, and a
+    #  watch ends the game if it runs out first.
+    # ═══════════════════════════════════════════════════════
+
+    def _run_clock(self):
+        """Start the clock of the person to move, in a game with clocks."""
+        if not (self.game_running and not self.game_paused
+                and self.uses_clock() and self.human_to_move()):
+            return
+        self._think_start = time.time()
+        self._clock_token += 1
+        asyncio.create_task(self._watch_flag(self._clock_token))
+        self._emit("clock")
+
+    def _halt_clock(self):
+        """
+        Stop the running clock, charging the side to move the time it has
+        taken. Returns what that side has left in ms, or None in a game
+        without clocks.
+        """
+        self._clock_token += 1            # the turn's flag watch ends
+        if self._think_start is not None and self.game_running:
+            self.wtime_ms, self.btime_ms = self.clock_ms()
+        self._think_start = None
+        if not (self.game_running and self.uses_clock()):
+            return None
+        return self.wtime_ms if self.board.turn == "w" else self.btime_ms
+
+    async def _watch_flag(self, token):
+        """Lose the game on time if the clock _run_clock started runs out."""
+        while token == self._clock_token and self.game_running:
+            w, b = self.clock_ms()
+            left = w if self.board.turn == "w" else b
+            if left <= 0:
+                is_black = self.board.turn == "b"
+                self._halt_clock()
+                await self._flag_fell(is_black)
+                return
+            await asyncio.sleep(min(0.25, left / 1000))
+
+    async def _flag_fell(self, is_black):
+        """
+        The side to move — Black if *is_black* — ran out of time. FIDE 6.9:
+        that loses only if the opponent could still mate. Against a bare
+        king — or a lone bishop or knight — the game is drawn instead.
+        """
+        if is_black:
+            self.btime_ms = 0
+        else:
+            self.wtime_ms = 0
+        self._emit("clock")
+        name = self.player_names()[1 if is_black else 0]
+        if self.board.can_mate("w" if is_black else "b"):
+            await self._finish("1-0" if is_black else "0-1",
+                               f"{name} lost on time",
+                               "white" if is_black else "black")
+        else:
+            # Phrased like the other draw reasons, which never name a
+            # player — the result column already says 1/2-1/2
+            await self._finish("1/2-1/2",
+                               "Draw by timeout vs insufficient material", None)
 
     # ═══════════════════════════════════════════════════════
     #  Game flow — engine vs engine
@@ -957,21 +1073,7 @@ class GameSession:
             remaining = (self.btime_ms if is_black else self.wtime_ms) \
                 - elapsed_ms
             if remaining <= 0:
-                self._emit("clock")
-                # FIDE 6.9: a flag fall is only a loss if the opponent
-                # could still mate. Against a bare king — or a lone
-                # bishop or knight — the game is drawn instead.
-                rival = "b" if not is_black else "w"
-                if self.board.can_mate(rival):
-                    await self._finish(forfeit_result,
-                                       f"{name} lost on time",
-                                       "black" if not is_black else "white")
-                else:
-                    # Phrased like the other draw reasons, which never name
-                    # an engine — the result column already says 1/2-1/2
-                    await self._finish(
-                        "1/2-1/2",
-                        "Draw by timeout vs insufficient material", None)
+                await self._flag_fell(is_black)
                 return False
             remaining += self.inc_s * 1000
             if is_black:
@@ -1012,6 +1114,12 @@ class GameSession:
         return (self.game_running and not self._engine_thinking
                 and not self.game_paused and self.human_to_move())
 
+    def can_premove_now(self):
+        """True while the person waits on the engine and may queue a move."""
+        return (self.game_running and not self.game_paused
+                and self.play_mode == self.MODE_HVE
+                and not self.human_to_move())
+
     @property
     def selected_square(self):
         """The square of the piece the person has picked up, or None."""
@@ -1022,11 +1130,11 @@ class GameSession:
         self.move_input.selected = square
 
     def movable_squares(self):
-        """Squares of the pieces the person to move can pick up and play."""
+        """Squares of the pieces the person can pick up — to play or premove."""
         return self.move_input.movable()
 
     def legal_destinations(self):
-        """Squares the piece picked up can move to."""
+        """Squares the piece picked up can move (or be premoved) to."""
         return self.move_input.dests()
 
     def pick_up(self, br, bc):
@@ -1036,28 +1144,81 @@ class GameSession:
 
     async def drop_piece(self, fr, fc, br, bc):
         """The piece dragged from (fr, fc) was let go on (br, bc)."""
-        if await self.move_input.drop(fr, fc, br, bc) == "select":
-            self._emit("board_changed")
+        self._input_done(await self.move_input.drop(fr, fc, br, bc))
 
     async def click_square(self, br, bc):
         """Handle a click on board square (row, col) in board coordinates."""
-        if await self.move_input.click(br, bc) == "select":
+        self._input_done(await self.move_input.click(br, bc))
+
+    def _input_done(self, outcome):
+        """Redraw after a click or drop that move_input did not play out."""
+        if outcome == "select":
             self._emit("board_changed")
+        elif outcome == "cancel":
+            self.cancel_premove()
+
+    def _set_premove(self, uci):
+        """move_input queued *uci* to be played on the person's turn."""
+        self.premove = uci
+        self._emit("board_changed")
+
+    def cancel_premove(self):
+        """Let go of the queued move, and of the piece in hand."""
+        self.premove = None
+        self.move_input.clear()
+        self._emit("board_changed")
+
+    async def _play_premove(self):
+        """
+        Play the move queued while the engine thought, now that it is the
+        person's turn — or let it go when the engine's reply made it
+        illegal, as chess.com and Lichess do. True if it was played.
+        """
+        if self.premove is None or not self.can_move_now():
+            return False
+        uci, self.premove = self.premove, None
+        self.move_input.clear()
+        try:
+            legal = parse_uci(uci) in self.board.legal_moves()
+        except ValueError:
+            legal = False
+        if not legal:
+            self._emit("board_changed")       # its highlight goes
+            return False
+        await self._play_human_move(uci)
+        return True
 
     async def _ask_promotion(self, colour):
         return await self.ask_promotion(colour) if self.ask_promotion else None
 
     async def _play_human_move(self, uci):
         """A person made *uci* on the board (move_input): play it."""
+        if not self.can_move_now():
+            # Their time ran out, say, while they chose a promotion piece
+            self._emit("board_changed")
+            return
+        self.premove = None
         moves_before = self.board.uci_moves_str()
         was_white = (self.board.turn == "w")
+        left = self._halt_clock()
+        if left is not None and left <= 0:
+            await self._flag_fell(not was_white)  # too late for the move
+            return
         try:
             san, _cap = self.board.apply_uci(uci)
         except ValueError as e:
+            self._run_clock()
             self._emit("board_changed")
             self._emit("sound", "illegal")
             self._emit("error", f"Invalid move: {e}")
             return
+        if left is not None:
+            # The increment, as an engine gets for its moves
+            if was_white:
+                self.wtime_ms += self.inc_s * 1000
+            else:
+                self.btime_ms += self.inc_s * 1000
+            self._emit("clock")
 
         self.last_move = uci
         self._after_move(moves_before, was_white, san)
@@ -1068,6 +1229,7 @@ class GameSession:
             return
         if self.play_mode == self.MODE_HVH:
             self._emit("status", self._turn_prompt())
+            self._run_clock()
         else:
             self._game_task = asyncio.create_task(self._engine_turn())
 
@@ -1120,6 +1282,8 @@ class GameSession:
         plies = self._undo_plies()
         if not plies:
             return False
+        self._halt_clock()                # restarted from where it stood
+        self.premove = None
         keep = len(self.board.move_history) - plies
         moves = self.board.uci_moves_list()[:keep]
         self.board.reset(self.game_start.fen)
@@ -1134,6 +1298,7 @@ class GameSession:
         self._show_opening()
 
         last = self.analyst.reviews[keep - 1] if keep else None
+        self._run_clock()
         self._emit("sound", "move")
         self._emit("board_changed")
         self._emit("move_review", last)
@@ -1151,26 +1316,40 @@ class GameSession:
         """The engine's reply in human-vs-engine mode."""
         self._engine_thinking = True
         try:
-            while self.game_paused and self.game_running:
-                await asyncio.sleep(0.1)
-            if not self.game_running:
-                return
             # Breathe between the player's move and the reply — a fast engine
             # would otherwise answer in the same UI batch, so both move sounds
             # overlap into one and the board flashes two moves at once.
             await asyncio.sleep(max(0.3, self.delay_s))
+            while self.game_paused and self.game_running:
+                await asyncio.sleep(0.1)
             if not self.game_running:
                 return
             is_black = (self.player_color == "white")
             if not await self._play_engine_move(self.engine2, self.e2_name, is_black):
                 return
-            self._emit("status", self._your_turn_prompt())
         except asyncio.CancelledError:
-            pass
+            return
         finally:
             self._engine_thinking = False
             if self.game_running:
                 self._emit("board_changed")   # the player's pieces can move now
+        await self._your_turn()
+
+    async def _your_turn(self):
+        """
+        The engine has replied: the person's clock starts, and a move they
+        queued while it thought is played straight away. In a paused game
+        both wait until set_paused resumes it and calls this again.
+        """
+        if self.game_paused:
+            return
+        self._run_clock()
+        if self.premove is not None:
+            await asyncio.sleep(PREMOVE_DELAY_S)
+            if await self._play_premove():
+                return
+        if self.can_move_now():
+            self._emit("status", self._your_turn_prompt())
 
     # ═══════════════════════════════════════════════════════
     #  Shared post-move / end-game plumbing
@@ -1215,10 +1394,11 @@ class GameSession:
 
     async def _finish(self, result, reason, winner_color):
         """Game ended on the board — persist and notify."""
+        self._halt_clock()
         self.game_running = False
         self.game_result = result
         self._engine_thinking = False
-        self._think_start = None
+        self.premove = None
         asyncio.create_task(self.kill_engines())
 
         white, black = self.player_names()

@@ -116,6 +116,8 @@ class BoardView:
         legal_dests — set of (r, c)
         check_sq    — (r, c) or None
         movable     — set of (r, c) whose piece may be dragged (optional)
+        premove     — UCI of a move queued for the player's turn, shown in
+                      red until it is played (optional)
       and, for a board built with overlay=True:
         move_class  — classification of last_move ('Brilliant', …) or None;
                       tints its squares and puts its badge on the target
@@ -129,10 +131,12 @@ class BoardView:
     on_drop : async callable(from_br, from_bc, to_br, to_bc) | None
         The dragged piece was let go on another square. Without it the
         pieces cannot be dragged, only clicked.
+    on_right_click : callable() | None
+        A right-click anywhere on the board, instead of the browser's menu.
     """
 
     def __init__(self, state_provider, on_click=None, overlay=False,
-                 on_drag_start=None, on_drop=None):
+                 on_drag_start=None, on_drop=None, on_right_click=None):
         self._state = state_provider
         self._on_click = on_click
         self._on_drag_start = on_drag_start
@@ -170,6 +174,8 @@ class BoardView:
         if on_drop:
             grid.classes(add="draggable")
             grid.on("pointerdown", self._drag_event, js_handler=_DRAG_JS)
+        if on_right_click:
+            grid.on("contextmenu.prevent", lambda _e: on_right_click(), [])
         self.refresh()
 
     # ── Interaction ───────────────────────────────────────
@@ -227,6 +233,7 @@ class BoardView:
         movable     = (state.get("movable") or set()) if self._on_drop else set()
         move_class  = state.get("move_class")
         lm_from, lm_to = uci_to_squares(state.get("last_move"))
+        premove     = set(uci_to_squares(state.get("premove"))) - {None}
         # A classified move is tinted in its class colour instead of the
         # usual last-move highlight
         lm_cls = (f"q-{move_class.lower()}", f"q-{move_class.lower()}") \
@@ -244,6 +251,8 @@ class BoardView:
                 classes = ["board-sq", "light" if cell["light"] else "dark"]
                 if selected and (br, bc) == selected:
                     classes.append("sel")
+                elif (br, bc) in premove:
+                    classes.append("pre")
                 elif lm_from and (br, bc) == lm_from:
                     classes.append(lm_cls[0])
                 elif lm_to and (br, bc) == lm_to:

@@ -42,6 +42,11 @@ To run from source instead, see [Getting Started](#getting-started).
   ([details](#starting-position))
 - **Drag and drop** — move a piece by dragging it to its square, or by
   clicking it and then the square; its legal moves show while it is held
+- **Premove** — against an engine, make your next move while it is still
+  thinking; it is played the moment the engine replies ([details](#premoves))
+- **Clocks** — Bullet (1+0) and Blitz (3+2) are played on the clock by
+  engines and people alike; run out of time and you lose
+  ([details](#clocks))
 - **Tournaments** — Swiss (no rematches, Buchholz tiebreaks), Round Robin
   (single/double), Knockout brackets and team events, with a live board,
   standings, schedule and per-game review; every game is saved to the
@@ -128,6 +133,26 @@ grades, and the clocks go back to where they stood. Moves that came with
 the starting position (a book opening, or moves played while setting it
 up) are never taken back, and Undo is unavailable while the engine is
 thinking. Games with takebacks are saved and rated as usual.
+
+### Clocks
+
+Bullet (1+0) and Blitz (3+2) games are played on the clock, by people as
+well as engines. Your clock runs from the start of your turn until you
+move, and every move adds the increment. If it runs out, you lose on
+time, unless your opponent has too little material left to mate: then
+the game is drawn (FIDE rule 6.9). **Pause** stops your clock, and so
+does the Stop dialog while it is open. Before a game, the clocks show
+the time it will start with. Classic has no clock.
+
+### Premoves
+
+Against an engine you can make your next move while it is still
+thinking: click or drag one of your pieces as usual. The move is shown in
+red, and it is played the moment the engine replies, if it is still legal
+then. If it is not, it is dropped and you move as usual. One move waits
+at a time, so making another replaces it. Right-click the board, or click
+an empty square, to cancel it. A pawn premoved to the last rank becomes a
+queen.
 
 ### Starting position
 

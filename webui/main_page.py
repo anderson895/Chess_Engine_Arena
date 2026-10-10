@@ -471,11 +471,13 @@ def main_page():
                     eval_bar = EvalBar()
                 with ui.element("div").classes("flex-grow min-w-0"):
                     # overlay: the grade badge of a move being previewed.
-                    # Pieces move by click-click or by drag and drop.
+                    # Pieces move by click-click or by drag and drop; a
+                    # right-click lets go of a premove.
                     board_view = BoardView(_board_state, on_click=_square_clicked,
                                            overlay=True,
                                            on_drag_start=_piece_picked,
-                                           on_drop=_piece_dropped)
+                                           on_drop=_piece_dropped,
+                                           on_right_click=session.cancel_premove)
             bottom_bar = widgets.PlayerBar()
 
         # ══ Side panel: Play / Game / Engine ══
@@ -663,9 +665,10 @@ def main_page():
                     on_change=lambda e: setattr(
                         session, "time_control", e.value)) \
                     .props("dense options-dense").classes("w-full") \
-                    .tooltip("Bullet/Blitz: engines manage their own clock "
-                             "and lose on time. Classic: no clock — fixed "
-                             "think time per move. Each is rated separately.")
+                    .tooltip("Bullet/Blitz: players and engines are on the "
+                             "clock and lose on time. Classic: no clock — "
+                             "engines get a fixed think time per move. Each "
+                             "is rated separately.")
                 ui.number(label="Move delay (s)", value=session.delay_s,
                           min=0.0, max=10.0, step=0.1,
                           on_change=lambda e: setattr(
@@ -1151,6 +1154,7 @@ class BoardPreview:
                 "legal_dests": session.legal_destinations(),
                 "check_sq": session.check_square(),
                 "movable": session.movable_squares(),
+                "premove": session.premove,
             }
         analyst = session.analyst
         board = analyst.boards[self.ply]
@@ -1223,12 +1227,13 @@ async def _stop_game():
     if not session.game_running:
         ui.notify("No game running.", type="info")
         return
+    # The game, and a person's clock, wait while the question is open
     was_paused = session.game_paused
-    session.game_paused = True
+    session.set_paused(True)
     white, black = session.player_names()
     result, reason = await dialogs.ask_stop_result(white, black)
     if result is None:
-        session.game_paused = was_paused
+        session.set_paused(was_paused)
         return
     await session.stop_game(result, reason)
 
