@@ -430,6 +430,10 @@ class TournamentPlayer:
         # out of an event under way (WITHDRAWN), or an engine whose file
         # was not found when a finished event was continued
         self.withdrawn     = ""
+        # Names it played under earlier in the event, oldest first — a
+        # newer version that took its place keeps its points
+        # (Tournament.rename_player)
+        self.former_names  = []
 
     def record(self, result, opponent_name, color):
         self.score += result
@@ -506,6 +510,17 @@ class TournamentGame:
         self.eval_history = []
         self.move_qualities = []  # Store move quality classifications
         self.id           = id(self)
+        # The names the two played under, set as the result is recorded: a
+        # player renamed later — a newer version taking its place — keeps
+        # its old name on the games it played (Tournament.rename_player)
+        self.white_as     = None
+        self.black_as     = None
+
+    @property
+    def played_as(self):
+        """(white, black): the names this game was played under."""
+        return (self.white_as or self.white.name,
+                self.black_as or self.black.name)
 
     @property
     def white_score(self):
@@ -1006,6 +1021,7 @@ class Tournament:
         game.eval_history = eval_history or []
         game.move_qualities = move_qualities or []
         game.status       = "done"
+        game.white_as, game.black_as = game.white.name, game.black.name
 
         pair_key = frozenset({game.white.name, game.black.name})
         self.played_pairs.add(pair_key)
@@ -1091,35 +1107,63 @@ class Tournament:
 
     def remove_player(self, name):
         """
-        Drop a player before the tournament starts.
+        Take a player off the roster altogether: before the tournament
+        starts, or — in a Swiss or round robin — at any time while it has
+        never played (never_played), such as a late entry made by mistake.
 
-        Only before the first round: once games exist, removing someone
-        would leave results and Buchholz scores referring to a player who
-        is no longer in the field. Any schedule derived from the roster is
-        rebuilt, so a round-robin re-pairs around the smaller field.
+        Anyone who has played stays: removing them would leave results and
+        Buchholz scores referring to a player who is no longer in the field
+        (withdraw is the way out for them). Any schedule derived from the
+        roster is rebuilt before the first round, so a round-robin re-pairs
+        around the smaller field.
 
         Returns (ok, message).
         """
-        if self.started:
-            return False, "The tournament has already started."
-
         with self._lock:
             player = self.players.get(normalize_engine_name(name))
             if player is None:
                 return False, f"{name} is not in this tournament."
+            if self.started and not self.droppable(player):
+                return False, "The tournament has already started."
             squad = self.team_of(player.name)
             if squad is not None and len(squad.players) <= 1:
                 return False, f"{squad.name} needs at least one engine."
             if squad is None and len(self.player_list) <= 2:
                 return False, "A tournament needs at least 2 players."
+            self._drop_entry(player)
+        return True, f"{player.name} removed."
 
-            del self.players[player.name]
-            self.player_list.remove(player)
-            if squad is not None:
-                squad.players.remove(player)
-            for i, p in enumerate(self.player_list):
-                p.seed = i
+    def never_played(self, player):
+        """
+        True for an entry with nothing in this event: no game played, under
+        way or scheduled, no bye and no points. Taking it out, or handing
+        its name to someone else, leaves no hole in anybody's record.
+        """
+        return (player.games_played == 0 and not player.opponents
+                and not player.score
+                and not any(player in (g.white, g.black)
+                            for g in self.all_games))
 
+    def droppable(self, player):
+        """
+        Whether *player* can leave the roster altogether once the event is
+        under way: an entry that never played, in a Swiss or round robin. A
+        bracket or a team line-up is fixed once it is drawn.
+        """
+        return (self.format in (self.FORMAT_SWISS, self.FORMAT_ROUNDROBIN)
+                and self.never_played(player))
+
+    def _drop_entry(self, player):
+        """Take *player* off the roster; what was built from it follows."""
+        squad = self.team_of(player.name)
+        del self.players[player.name]
+        self.player_list.remove(player)
+        if squad is not None:
+            squad.players.remove(player)
+        for i, p in enumerate(self.player_list):
+            p.seed = i
+
+        if not self.started:
             # Anything precomputed from the roster is now stale
             if self.format == self.FORMAT_ROUNDROBIN:
                 self._rr_schedule = RoundRobinPairing.generate_all_rounds(
@@ -1127,8 +1171,12 @@ class Tournament:
                 self.rounds = len(self._rr_schedule)
             elif self.format == self.FORMAT_KNOCKOUT:
                 self._ko_active_players = list(self.player_list)
-
-        return True, f"{player.name} removed."
+            return
+        # It never played, so only the lists that still name it change
+        if self._rr_schedule:
+            self._rr_schedule = [[pair for pair in rnd if player not in pair]
+                                 for rnd in self._rr_schedule]
+        self._unpaired = [n for n in self._unpaired if n != player.name]
 
     def set_rounds(self, count):
         """
@@ -1217,9 +1265,14 @@ class Tournament:
     def removable(self, player):
         """
         Whether *player* can still be taken out: off the roster before the
-        first round (remove_player), withdrawn after it (withdraw).
+        first round, or while it has never played (remove_player);
+        withdrawn after it (withdraw).
         """
-        if self.finished or player.withdrawn:
+        if self.finished:
+            return False
+        if self.started and self.droppable(player):
+            return True               # withdrawn or not: it simply leaves
+        if player.withdrawn:
             return False
         return not self.started or player not in self._ko_eliminated
 
@@ -1284,6 +1337,106 @@ class Tournament:
                        if p.name in self._unpaired]
             self._unpaired = []
             self._pair_swiss(waiting)
+
+    def playing_now(self, player):
+        """True while *player* is in the game being played."""
+        return any(g.status == "running" and player in (g.white, g.black)
+                   for g in self.round_games)
+
+    def rename_player(self, name, new_name, engine_path=None):
+        """
+        Let a player carry on under another name, with another engine file
+        — a newer version taking its place, say. It keeps everything it has
+        in this event: points, tiebreaks, the opponents it has met (so a
+        Swiss still avoids rematches) and its place in the schedule or the
+        bracket. Its games still to play are played as *new_name*, by
+        *engine_path* when one is given.
+
+        The games it already played keep the name they were played under
+        (TournamentGame.played_as), as they were saved and rated, and
+        former_names remembers it for the standings. An engine that sat out
+        because its file was missing plays again once given one.
+
+        The name may belong to an entry that never played — the new version
+        entered on its own by mistake, say. That entry has nothing to keep,
+        so it makes way (droppable). Two entries that have both played
+        cannot become one: they would have two games in the same round.
+
+        Not while it is playing: that game would be saved under a name
+        that did not play it.
+
+        Returns (ok, message).
+        """
+        new = normalize_engine_name(new_name)
+        with self._lock:
+            player = self.players.get(normalize_engine_name(name))
+            if player is None:
+                return False, f"{name} is not in this tournament."
+            if not new or new.upper() == "BYE":
+                return False, "That name cannot be used."
+            taken = self.players.get(new) if new != player.name else None
+            if taken is not None and not self.droppable(taken):
+                return False, (f"{new} has its own games in this tournament "
+                               f"— two records cannot be merged into one.")
+            if taken is not None and len(self.player_list) <= 2:
+                return False, "A tournament needs at least 2 players."
+            path = player.engine_path if engine_path is None else engine_path
+            if not player.is_human:
+                if not path or not os.path.isfile(path):
+                    return False, "That engine file no longer exists."
+                # One entry per engine file, as everywhere else
+                twin = next(
+                    (p for p in self.active_players()
+                     if p is not player and p is not taken and not p.is_human
+                     and os.path.normcase(p.engine_path)
+                     == os.path.normcase(path)), None)
+                if twin is not None:
+                    return False, f"That engine is already playing as {twin.name}."
+            same_file = (player.is_human or os.path.normcase(path)
+                         == os.path.normcase(player.engine_path or ""))
+            if new == player.name and same_file:
+                return False, "Nothing to change."
+            if self.playing_now(player):
+                return False, (f"{player.name} is playing right now — "
+                               f"rename it once this game is over.")
+
+            if taken is not None:
+                self._drop_entry(taken)
+            old = player.name
+            if new != old:
+                # The games played so far keep the names they were played
+                # under, including ones recorded before names were kept
+                for g in self.all_games:
+                    if g.status == "done":
+                        g.white_as, g.black_as = g.played_as
+                player.former_names.append(old)
+                player.name = new
+                del self.players[old]
+                self.players[new] = player
+                # Everything that remembers the player by name follows it
+                for p in self.player_list:
+                    p.opponents = [new if o == old else o for o in p.opponents]
+                self.played_pairs = {
+                    frozenset(new if n == old else n for n in pair)
+                    for pair in self.played_pairs}
+                self.bye_history = {new if n == old else n
+                                    for n in self.bye_history}
+                self._unpaired = [new if n == old else n
+                                  for n in self._unpaired]
+            back = False
+            if not player.is_human:
+                player.engine_path = path
+                if player.withdrawn == TournamentPlayer.ENGINE_MISSING:
+                    player.withdrawn = ""
+                    back = True
+
+        if new == old:
+            return True, f"{new} now plays with {os.path.basename(path)}."
+        points = f"{player.score:g} point" + ("" if player.score == 1 else "s")
+        return True, (f"{old} plays on as {new}, keeping its {points}"
+                      + (" — back in from the next round." if back else ".")
+                      + (f" The {new} entry, which had not played, made way."
+                         if taken is not None else ""))
 
     def add_cycle(self):
         """
@@ -1521,13 +1674,18 @@ class Tournament:
                 "losses": p.losses, "buchholz": p.buchholz,
                 "sonneborn": p.sonneborn, "seed": p.seed,
                 "withdrawn": p.withdrawn,
+                "former_names": list(p.former_names),
                 "color_history": list(p.color_history),
                 "opponents": list(p.opponents)}
 
     @staticmethod
     def _game_dict(g):
+        # white/black tie the game to the players as they are named now;
+        # *_as are the names it was played under (rename_player)
         return {"round_num": g.round_num, "white": g.white.name,
-                "black": g.black.name, "result": g.result,
+                "black": g.black.name,
+                "white_as": g.white_as, "black_as": g.black_as,
+                "result": g.result,
                 "reason": g.reason, "status": g.status,
                 "move_count": g.move_count, "duration": g.duration,
                 "opening": g.opening,
@@ -1618,6 +1776,7 @@ class Tournament:
             out = d.get("withdrawn") or ""
             # v1.18 kept only a flag, set for an engine that was not found
             p.withdrawn = TournamentPlayer.ENGINE_MISSING if out is True else str(out)
+            p.former_names = list(d.get("former_names", []))
             p.color_history = list(d.get("color_history", []))
             p.opponents = list(d.get("opponents", []))
             players.append(p)
@@ -1671,6 +1830,8 @@ class Tournament:
                 g.move_count = gd.get("move_count", 0)
                 g.duration = gd.get("duration", 0)
                 g.opening = gd.get("opening", "")
+                g.white_as = gd.get("white_as")
+                g.black_as = gd.get("black_as")
                 if gd.get("db_game_id") is not None:
                     g.db_game_id = gd["db_game_id"]
             if gd.get("home_team"):

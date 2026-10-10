@@ -87,13 +87,31 @@ _TRASH_SLOT = """
 </q-td>
 """
 
-_DROP_SLOT = """
-<q-td :props="props" class="text-center">
+# A standings row's actions: rename — another version playing on with the
+# points — and take the player out
+_ACTIONS_SLOT = """
+<q-td :props="props" class="text-center" style="white-space: nowrap">
+  <q-btn v-if="props.row.can_rename" dense flat round size="sm"
+         icon="edit" color="grey-5"
+         @click="$parent.$emit('rename', props.row)">
+    <q-tooltip>Rename, or play on with another engine file</q-tooltip>
+  </q-btn>
   <q-btn v-if="props.row.can_drop" dense flat round size="sm"
          icon="close" color="negative"
          @click="$parent.$emit('drop', props.row)">
     <q-tooltip>Remove from the tournament</q-tooltip>
   </q-btn>
+</q-td>
+"""
+
+# The player's name, and the names it played under before a rename
+_PLAYER_SLOT = """
+<q-td :props="props" class="text-left">
+  {{ props.row.player }}
+  <div v-if="props.row.formerly" class="text-xs"
+       style="color: var(--text-3); line-height: 1.1">
+    was {{ props.row.formerly }}
+  </div>
 </q-td>
 """
 
@@ -393,10 +411,13 @@ class TournamentSession:
 
     def remove_player(self, name):
         """
-        Take a player out: off the roster before the first round; after it,
-        withdrawn — never paired again, and its game in progress stopped.
+        Take a player out: off the roster before the first round, or while
+        it has never played; otherwise withdrawn — never paired again, and
+        its game in progress stopped.
         """
-        if not self.t.started:
+        player = self.t.players.get(normalize_engine_name(name))
+        if not self.t.started or (player is not None
+                                  and self.t.droppable(player)):
             ok, msg = self.t.remove_player(name)
         else:
             ok, msg, playing = self.t.withdraw(name)
@@ -411,6 +432,27 @@ class TournamentSession:
     def set_rounds(self, count):
         """Change the length of a Swiss event."""
         ok, msg = self.t.set_rounds(count)
+        if ok:
+            with self.lock:
+                self.tables_dirty = True
+            self.snapshot()
+        return ok, msg
+
+    def rename_player(self, name, new_name, path=None, bring_back=False):
+        """
+        Let *name* play on as *new_name* — with engine file *path*, when
+        given — keeping its points (Tournament.rename_player). With
+        *bring_back*, one that withdrew comes back into the event as well,
+        the way Add Player brings it back.
+        """
+        ok, msg = self.t.rename_player(name, new_name, path)
+        if ok and bring_back:
+            player = self.t.players.get(normalize_engine_name(new_name))
+            if player is not None and player.withdrawn:
+                _, back_msg = self.t.add_player(
+                    TournamentPlayer(player.name, player.engine_path,
+                                     is_human=player.is_human))
+                msg = f"{msg} {back_msg}"
         if ok:
             with self.lock:
                 self.tables_dirty = True
@@ -1707,7 +1749,11 @@ def show_tournament_window(session, tsess: TournamentSession):
                     with ui.tab_panel(tab_stand):
                         stand_table = _standings_table(t)
                         stand_table.on("drop", lambda e: _drop_player(e.args))
-                        widgets.hint("Double-click an engine to see its games")
+                        stand_table.on("rename",
+                                       lambda e: _open_rename(e.args))
+                        widgets.hint("Double-click an engine to see its "
+                                     "games · ✎ lets another version play on "
+                                     "with its points")
                     with ui.tab_panel(tab_sched):
                         sched_table = _schedule_table(is_team)
                     if tab_brack:
@@ -1867,9 +1913,12 @@ def show_tournament_window(session, tsess: TournamentSession):
                 else payload
             if not name:
                 return
-            remove_head.set_text("WITHDRAW FROM THE TOURNAMENT?" if t.started
+            player = t.players.get(name)
+            # An entry that never played leaves altogether, even mid-event
+            withdraws = t.started and not (player and t.droppable(player))
+            remove_head.set_text("WITHDRAW FROM THE TOURNAMENT?" if withdraws
                                  else "REMOVE FROM THE TOURNAMENT?")
-            remove_btn.set_text("Withdraw" if t.started else "Remove")
+            remove_btn.set_text("Withdraw" if withdraws else "Remove")
             remove_name.set_text(name)
             remove_note.set_text(_removal_note(t, name))
             remove_dlg.open()
@@ -1880,6 +1929,114 @@ def show_tournament_window(session, tsess: TournamentSession):
             ok, msg = tsess.remove_player(name)
             ui.notify(msg, type="positive" if ok else "warning")
             if ok:
+                _refresh_tables()
+
+        # Rename: a newer version — or just a better name — plays on in a
+        # player's place, with everything it has in the event
+        with ui.dialog() as rename_dlg, ui.card().classes(
+                "arena-panel gap-3 p-6 w-[480px]"):
+            ui.label("RENAME OR REPLACE ENGINE").classes("arena-heading")
+            rename_from = ui.label("").classes("text-sm font-bold")
+            ui.label("It keeps its points, tiebreaks and pairing history and "
+                     "plays its remaining games under the new name. The games "
+                     "it already played stay under the old name, in History "
+                     "and in the ratings — that version played them.") \
+                .classes("text-xs text-gray-500")
+            with ui.row().classes("w-full items-center gap-1 no-wrap") \
+                    as rename_engine_row:
+                rename_sel = ui.select(
+                    {}, label="Engine", with_input=True,
+                    on_change=lambda e: _rename_engine_picked(e.value)) \
+                    .props("dense options-dense").classes("flex-grow")
+
+                async def _browse_rename():
+                    p = await pick_file("Select the engine to play on with",
+                                        ("Executables (*.exe;*.bin)",
+                                         "All files (*.*)"))
+                    if p:
+                        options = dict(rename_sel.options)
+                        options.setdefault(p, os.path.splitext(
+                            os.path.basename(p))[0])
+                        rename_sel.set_options(options, value=p)
+                ui.button("…", on_click=_browse_rename) \
+                    .props("dense color=secondary") \
+                    .tooltip("Browse for an engine")
+            rename_in = ui.input(label="New name").props("dense") \
+                .classes("w-full")
+            # A withdrawn player renamed to a newer version usually means to
+            # play on — the same bring-back as Add Player
+            rename_back = ui.checkbox("Bring it back into the event — paired "
+                                      "again from the next round", value=True)
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("Cancel", on_click=rename_dlg.close) \
+                    .props("flat color=grey no-caps")
+                ui.button("Rename", on_click=lambda: _do_rename()) \
+                    .props("no-caps")
+        renaming = {"player": None}
+
+        def _open_rename(payload):
+            if isinstance(payload, list):
+                payload = next((a for a in payload if isinstance(a, dict)), {})
+            name = (payload or {}).get("player") if isinstance(payload, dict) \
+                else payload
+            player = t.players.get(name or "")
+            if player is None:
+                return
+            renaming["player"] = player
+            rename_from.set_text(
+                f"{player.name}  ·  {player.score:g} pts  ·  "
+                f"{player.wins}/{player.draws}/{player.losses}")
+            rename_engine_row.set_visibility(not player.is_human)
+            if not player.is_human:
+                # Its own file first, then entries here that never played —
+                # the new version entered on its own, say, whose place it
+                # takes — then every engine not already playing
+                spare = [p for p in t.player_list
+                         if p is not player and not p.is_human
+                         and t.droppable(p) and p.engine_path]
+                taken = {os.path.normcase(p.engine_path)
+                         for p in t.active_players()
+                         if p is not player and not p.is_human
+                         and p not in spare}
+                options = {player.engine_path:
+                           f"{os.path.splitext(os.path.basename(player.engine_path))[0]}"
+                           f"  (current)"}
+                options.update({p.engine_path: f"{p.name}  (entered here, "
+                                               f"never played)"
+                                for p in spare
+                                if p.engine_path not in options})
+                options.update({k: v for k, v in _discover_engines().items()
+                                if os.path.normcase(k) not in taken
+                                and k not in options})
+                rename_sel.set_options(options, value=player.engine_path)
+            rename_in.set_value(player.name)
+            rename_back.set_value(True)
+            rename_back.set_visibility(
+                player.withdrawn == TournamentPlayer.WITHDRAWN
+                and t.format == Tournament.FORMAT_SWISS and not t.finished)
+            rename_dlg.open()
+
+        def _rename_engine_picked(path):
+            """A newer version picked: its name, unless it is the same file."""
+            player = renaming["player"]
+            if player is None or not path:
+                return
+            rename_in.set_value(
+                player.name if path == player.engine_path else
+                normalize_engine_name(os.path.splitext(os.path.basename(path))[0]))
+
+        def _do_rename():
+            player = renaming["player"]
+            if player is None:
+                return
+            path = None if player.is_human else (rename_sel.value or None)
+            ok, msg = tsess.rename_player(
+                player.name, rename_in.value or "", path,
+                bring_back=rename_back.visible and rename_back.value)
+            ui.notify(msg, type="positive" if ok else "warning",
+                      multi_line=True)
+            if ok:
+                rename_dlg.close()
                 _refresh_tables()
 
         def _set_rounds(value):
@@ -2108,16 +2265,20 @@ def _show_player_card(session, t, name):
 
     rows = []
     for g in t.all_games:
-        if g.white.name == name:
-            side, opponent = "w", g.black.name
-        elif g.black.name == name:
-            side, opponent = "b", g.white.name
+        white_as, black_as = g.played_as
+        if g.white is player:
+            side, me, opponent = "w", white_as, black_as
+        elif g.black is player:
+            side, me, opponent = "b", black_as, white_as
         else:
             continue
         outcome, colour = _OUTCOME.get(
             (side, g.result or ""), ("—", COLOR_MUTED))
         rows.append({
-            "round": g.round_num, "colour": "White" if side == "w" else "Black",
+            "round": g.round_num,
+            # A game from before a rename says who played it
+            "colour": ("White" if side == "w" else "Black")
+                      + (f" as {me}" if me != name else ""),
             "opponent": opponent, "outcome": outcome, "outcome_color": colour,
             "result": g.result or "—", "reason": g.reason or "",
             "db_id": getattr(g, "db_game_id", None),
@@ -2140,6 +2301,11 @@ def _show_player_card(session, t, name):
         if name in t.bye_history:
             ui.label("Received a bye this tournament") \
                 .classes("text-xs").style(f"color: {COLOR_ORANGE}")
+        if player.former_names:
+            ui.label(f"Played earlier in this tournament as "
+                     f"{', '.join(player.former_names)} — its points carried "
+                     f"over") \
+                .classes("text-xs").style(f"color: {COLOR_BLUE}")
 
         if not rows:
             ui.label("No games yet — this engine has not been paired.") \
@@ -2246,14 +2412,15 @@ def _standings_table(t):
     if swiss:
         columns.append({"name": "buch", "label": "Buchholz", "field": "buch",
                         "align": "center"})
-    # Remove column: anyone still playing can be taken out
+    # Actions: rename (a newer version playing on), and take out
     columns.append({"name": "drop", "label": "", "field": "drop",
-                    "align": "center", "style": "width: 44px"})
+                    "align": "center", "style": "width: 76px"})
     table = ui.table(columns=columns, rows=[], row_key="player",
                      pagination=0).classes("w-full arena-log")
     table.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
+    table.add_slot("body-cell-player", _PLAYER_SLOT)
     table.add_slot("body-cell-elo", _ELO_SLOT)
-    table.add_slot("body-cell-drop", _DROP_SLOT)
+    table.add_slot("body-cell-drop", _ACTIONS_SLOT)
     return table
 
 
@@ -2261,6 +2428,10 @@ def _removal_note(t, name):
     """What taking *name* out of tournament *t* does, in a sentence or two."""
     if not t.started:
         return "It leaves the field before the first round is paired."
+    player = t.players.get(name)
+    if player is not None and t.droppable(player):
+        return ("It has not played in this tournament, so it leaves the "
+                "field altogether — nothing it did here is lost.")
     note = "It plays no more games here; the games it has played stand."
     if any(g.status == "running" and name in (g.white.name, g.black.name)
            for g in t.round_games):
@@ -2290,14 +2461,17 @@ def _fill_standings(table, t, session=None, query=""):
                                 if session else ("", COLOR_MUTED))
         rows.append({
             "rank": i, "player": p.name, "score": p.score,
+            "formerly": ", ".join(p.former_names),
             "elo": elo_txt, "elo_color": elo_col,
             "wdl": f"{p.wins}/{p.draws}/{p.losses}",
             "buch": f"{p.buchholz:.1f}",
             "can_drop": t.removable(p),
+            "can_rename": not t.playing_now(p),
         })
     # Filtering after ranking keeps the # column showing real positions
     table.rows = [r for r in rows
-                  if _match(r, query, ("rank", "player", "elo", "wdl"))]
+                  if _match(r, query, ("rank", "player", "formerly", "elo",
+                                       "wdl"))]
     table.update()
 
 
@@ -2339,7 +2513,8 @@ def _fill_schedule(table, t, query=""):
         {
             "gid": g.id, "badge": badge_map.get(g.status, "upcoming"),
             "round": g.round_num, "board": g.board or "—",
-            "white": g.white.name, "black": g.black.name,
+            # Under the names they were played as, like the saved games
+            "white": g.played_as[0], "black": g.played_as[1],
             "result": g.result or "—", "reason": g.reason or "",
             "db_id": getattr(g, "db_game_id", None),
         }
@@ -2358,8 +2533,9 @@ def _bracket_text(t):
         lines.append(f'<b style="color:{TEXT_1}">Round {rnd}</b>')
         for g in t._ko_round_games[rnd]:
             res = g.result or "…"
+            white, black = g.played_as
             lines.append(
-                f'&nbsp;&nbsp;{g.white.name} vs {g.black.name}'
+                f'&nbsp;&nbsp;{white} vs {black}'
                 f'  <span style="color:{COLOR_BLUE}">{res}</span>')
     if t.winner:
         lines.append(f'<b style="color:{COLOR_GOLD}">Winner: {t.winner.name}</b>')
@@ -2370,13 +2546,38 @@ def _bracket_text(t):
 #  Historical tournament view (from DB)
 # ═══════════════════════════════════════════════════════════
 
+def _renamed_players(session, tournament_id):
+    """
+    From a tournament's saved state: ({db game id: (white, black)} under
+    the names the players carry now, {name: [former names]}). A player
+    renamed during the event — a newer version taking its place — keeps
+    its points, and its games are saved under the names they were played
+    as. Empty when nothing was renamed or no state was saved.
+    """
+    row = session.db.get_tournament_state(tournament_id)
+    try:
+        state = json.loads(row["state"]) if row else {}
+    except (TypeError, ValueError):
+        state = {}
+    former = {p.get("name"): list(p.get("former_names") or [])
+              for p in state.get("players", []) if p.get("former_names")}
+    if not former:
+        return {}, {}
+    current = {g["db_game_id"]: (g.get("white"), g.get("black"))
+               for g in state.get("games", [])
+               if g.get("db_game_id") is not None}
+    return current, former
+
+
 def show_tournament_history(session, tournament_id, name):
     rows = session.db.get_tournament_games(tournament_id=tournament_id)
     if not rows:
         ui.notify("No games found for this tournament.", type="info")
         return
 
-    # Rebuild simple standings from results
+    # Rebuild simple standings from results — under the names the players
+    # carry now, so one renamed mid-event keeps the points from before
+    current, former = _renamed_players(session, tournament_id)
     scores: dict = {}
 
     def rec(player, pts):
@@ -2390,12 +2591,14 @@ def show_tournament_history(session, tournament_id, name):
             d["l"] += 1
 
     for r in rows:
+        white, black = current.get(r["game_id"],
+                                   (r["white_engine"], r["black_engine"]))
         if r["result"] == "1-0":
-            rec(r["white_engine"], 1.0); rec(r["black_engine"], 0.0)
+            rec(white, 1.0); rec(black, 0.0)
         elif r["result"] == "0-1":
-            rec(r["white_engine"], 0.0); rec(r["black_engine"], 1.0)
+            rec(white, 0.0); rec(black, 1.0)
         elif r["result"] == "1/2-1/2":
-            rec(r["white_engine"], 0.5); rec(r["black_engine"], 0.5)
+            rec(white, 0.5); rec(black, 0.5)
 
     standings = sorted(scores.items(), key=lambda x: -x[1]["score"])
     fmt = rows[0]["format"]
@@ -2428,11 +2631,13 @@ def show_tournament_history(session, tournament_id, name):
                 ]
                 st = ui.table(columns=stand_cols, rows=[
                     {"rank": i, "player": p, "score": d["score"],
+                     "formerly": ", ".join(former.get(p, [])),
                      "wdl": f"{d['w']}/{d['d']}/{d['l']}"}
                     for i, (p, d) in enumerate(standings, 1)
                 ], row_key="player", pagination=0) \
                     .classes("w-full flex-grow arena-log dlg-table")
                 st.add_slot("body-cell-rank", _RANK_MEDAL_SLOT)
+                st.add_slot("body-cell-player", _PLAYER_SLOT)
 
             with ui.column().classes("flex-grow min-w-0 min-h-0 overflow-auto"):
                 ui.label("GAMES — double-click to review") \

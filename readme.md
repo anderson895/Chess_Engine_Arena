@@ -45,7 +45,8 @@ To run from source instead, see [Getting Started](#getting-started).
 - **Tournaments** — Swiss (no rematches, Buchholz tiebreaks), Round Robin
   (single/double), Knockout brackets and team events, with a live board,
   standings, schedule and per-game review; every game is saved to the
-  database, and a finished event can be continued or extended
+  database, a finished event can be continued or extended, and a newer
+  version of an engine can take its place with its points
   ([details](#tournaments))
 - **Game Review** — a chess.com-style review of any game: accuracy for
   both players, how many Brilliant / Great / Book / Best / Excellent /
@@ -182,18 +183,47 @@ then as few as each round allows.
 
 The **✕** beside a player in the standings takes them out — for an engine
 entered by mistake, or one that keeps failing. Before the first round it
-simply leaves the field (in a team event, its squad). Once the event is
-under way the player withdraws: it is never paired again, the games it has
-played stand, and it stays in the standings marked "Withdrawn". A game it
-is playing at that moment is stopped and not counted. In a Swiss its
-opponent for the round is paired again (or gets the bye), in a knockout
-its opponent goes through, and in a round robin or team event its
-remaining games are not played.
+simply leaves the field (in a team event, its squad), and so does a player
+in a Swiss or round robin that has not played yet — a late entry made by
+mistake, withdrawn or not. Once a player has played, it withdraws instead:
+it is never paired again, the games it has played stand, and it stays in
+the standings marked "Withdrawn". A game it is playing at that moment is
+stopped and not counted. In a Swiss its opponent for the round is paired
+again (or gets the bye), in a knockout its opponent goes through, and in a
+round robin or team event its remaining games are not played.
 
 In a Swiss, **Add Player** brings a withdrawn engine back: pick it from the
 list (it is marked "withdrawn — bring back") or browse to the right file
 for it. It keeps the points it had and is paired again from the next
 round.
+
+### Renaming a player: a new version plays on
+
+The **✎** beside a player in the standings lets another version of the
+engine take its place — or simply gives it a better name. Pick the new
+engine file (or browse to it with **…**); the name follows the file, and
+you can type another. The player keeps everything it has in the event:
+points, W/D/L, tiebreaks, the opponents it has met (so a Swiss still
+avoids rematches) and its place in the schedule or the bracket. Its
+remaining games are played by the new engine, under the new name.
+
+The games it already played keep the name they were played under — in the
+schedule, in Game History and in the ratings, since the old version played
+them — and the standings show where the points came from ("was …"). An
+engine that sat out because its file was missing plays again once it is
+given one, and a withdrawn one in a Swiss can be brought back in the same
+step (**Bring it back into the event**). A player cannot be renamed during
+a game it is playing. To carry on a finished event with a newer version,
+**Continue** it, rename the player, then press **Resume**.
+
+If the new version was entered on its own already (with **Add Player**)
+and has not played, pick it in the list — it is marked "entered here,
+never played" — and its empty entry makes way for the player taking the
+name. Two entries that have both played cannot be merged: they would have
+games in the same rounds.
+
+The **Rename** in Rankings is different: it renames an engine across every
+saved game, for a name that was wrong all along.
 
 ### Continuing a finished tournament
 
@@ -280,6 +310,13 @@ step along the line, and **Back to game**, a click on a move in the game's
 list or **Next** return to the game. Playing the game's own move simply
 steps on through the game.
 
+**Continue from here** makes the position on the board — the game's, or
+a side line's — the [starting position](#starting-position) of the next
+game, and takes you back to the Play tab with it set. Only the position
+goes, as on Lichess: the moves that led to it were not played by the next
+game's players. Games that are not standard chess (Chess960 games in the
+Masters database) cannot be reviewed.
+
 A dedicated Stockfish process analyses every position, apart from the
 analyzer that grades live games, so a review never holds up a game being
 played. It runs below normal priority, on one thread while a game or
@@ -310,13 +347,6 @@ mean with a harmonic mean, so one blunder costs more than many small
 slips.
 
 The same rules grade regular games (under the board, as moves are
-**Continue from here** makes the position on the board — the game's, or
-a side line's — the [starting position](#starting-position) of the next
-game, and takes you back to the Play tab with it set. Only the position
-goes, as on Lichess: the moves that led to it were not played by the next
-game's players. Games that are not standard chess (Chess960 games in the
-Masters database) cannot be reviewed.
-
 played), tournaments (in the live tournament window) and the review. The
 review searches longer, so its verdicts are the surest of the three.
 
@@ -456,6 +486,7 @@ Chess_Engine_Arena/
 │   ├── opening_book.py        #   openings by position + disk cache
 │   ├── pgn.py                 #   reading PGN: tags, FEN starts, SAN → UCI
 │   ├── review.py              #   move classification, accuracy, GameAnalyst
+│   ├── start_position.py      #   where a game starts: a FEN and moves
 │   └── utils.py               #   shared utilities (paths, PGN building…)
 │
 ├── data/
@@ -471,6 +502,7 @@ Chess_Engine_Arena/
 │   ├── quality.py             #   move-class badges, coach line, move list
 │   ├── views.py               #   rankings, stats, history
 │   ├── dialogs.py             #   promotion, stop-game, opening picker…
+│   ├── position_setup.py      #   Set Up Position: board editor, FEN, PGN
 │   ├── tournament.py          #   tournament list/setup/live/history UI
 │   ├── widgets.py             #   player bars, panel tabs, sprite icons
 │   └── theme.py               #   chess.com-style palette + global CSS
@@ -486,7 +518,6 @@ Chess_Engine_Arena/
 └── readme.md
 ```
 
-│   ├── start_position.py      #   where a game starts: a FEN and moves
 ## Building a Standalone .exe
 
 NiceGUI ships its own PyInstaller wrapper that knows all the hidden
@@ -502,7 +533,6 @@ nicegui-pack --onefile --windowed --name "ChessEngineArena" ^
 ```
 
 (Or run plain `pyinstaller` with `ChessEngineArena.spec` as a starting
-│   ├── position_setup.py      #   Set Up Position: board editor, FEN, PGN
 point — but `nicegui-pack` is the supported path for NiceGUI apps.)
 
 ## Resources
