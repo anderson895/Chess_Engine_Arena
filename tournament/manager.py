@@ -2347,6 +2347,11 @@ class TournamentRunner:
     # pacing delay, so a tournament runs no slower than before.
     ANALYSIS_MS = 200
 
+    # Before a manual seat's turn the pause is only long enough for the
+    # engine's reply to show: a move queued meanwhile (a premove) follows
+    # it at once, as against an engine on the Play tab
+    MANUAL_TURN_PAUSE_S = 0.1
+
     # How many tournaments are being played right now — background analysis
     # (the review screen) holds back while any are
     active = 0
@@ -2734,9 +2739,16 @@ class TournamentRunner:
             self.on_board_update(game, board, last_move, cp_val, mate_val, opening_name)
             # The pacing delay exists so engine-vs-engine is watchable. A
             # move somebody just made by hand took as long as it took, and
-            # padding it only makes their own move feel slow to land.
-            time.sleep(0.02 if player.is_human
-                       else max(0.02, self.t.delay - grading_s))
+            # padding it only makes their own move feel slow to land; nor
+            # is a manual seat kept from its turn longer than it takes to
+            # see the reply.
+            if player.is_human:
+                pause = 0.02
+            elif (game.black if is_white_turn else game.white).is_human:
+                pause = self.MANUAL_TURN_PAUSE_S
+            else:
+                pause = max(0.02, self.t.delay - grading_s)
+            time.sleep(pause)
 
         # Stopped mid-game — a stop, a halt, or a player withdrawn (the last
         # two also kill the engines, which ends the loop as a forfeit):

@@ -146,13 +146,14 @@ the time it will start with. Classic has no clock.
 
 ### Premoves
 
-Against an engine you can make your next move while it is still
-thinking: click or drag one of your pieces as usual. The move is shown in
-red, and it is played the moment the engine replies, if it is still legal
-then. If it is not, it is dropped and you move as usual. One move waits
-at a time, so making another replaces it. Right-click the board, or click
-an empty square, to cancel it. A pawn premoved to the last rank becomes a
-queen.
+Against an engine, on the Play tab or at a tournament's manual seat
+([details](#playing-a-board-yourself)), you can make your next move while
+it is still thinking: click or drag one of your pieces as usual. The move
+is shown in red, and it is played the moment the engine replies, if it is
+still legal then. If it is not, it is dropped and you move as usual. One
+move waits at a time, so making another replaces it. Right-click the
+board, or click an empty square, to cancel it. A pawn premoved to the
+last rank becomes a queen.
 
 ### Starting position
 
@@ -203,6 +204,15 @@ highest-placed player they have not met, and so on down — and never
 repeats a pairing while some other way of pairing the round avoids it.
 Only an event with more rounds than the field can fill has rematches, and
 then as few as each round allows.
+
+### Playing a board yourself
+
+In a team event, **+ Manual** adds a seat whose moves you make on the
+tournament's board: your own, or those of an engine running elsewhere
+that you relay. A manual seat needs Classic, since the other time
+controls run a clock. When its turn comes the board is yours: click or
+drag a piece. While the engine opposite is thinking you can premove, as
+on the Play tab ([details](#premoves)).
 
 ### Removing a player
 

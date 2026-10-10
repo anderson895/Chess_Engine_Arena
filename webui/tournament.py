@@ -17,6 +17,7 @@ from datetime import datetime
 
 from nicegui import app, run, ui
 
+from core.board import Board
 from core.constants import TIME_CONTROLS
 from core.engine_finder import EngineFinder
 from core.move_input import MoveInput
@@ -117,10 +118,19 @@ _PLAYER_SLOT = """
 
 
 class SnapshotBoard:
-    """Immutable board snapshot usable by BoardView."""
+    """
+    Immutable board snapshot usable by BoardView — and by MoveInput for
+    the premoves of a manual seat, which need the castling rights too.
+    """
 
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, castling="-"):
         self.rows = rows or [["."] * 8 for _ in range(8)]
+        self.castling = castling
+
+    @classmethod
+    def of(cls, board):
+        """A snapshot of core.board.Board *board*."""
+        return cls([row[:] for row in board.board], board.castling)
 
     def get(self, r, c):
         if 0 <= r < 8 and 0 <= c < 8:
@@ -180,8 +190,15 @@ class TournamentSession:
         # nobody to ask, and anything else is a deliberate underpromotion.
         self.human_board = None
         self.human_player = None
-        self.move_input = MoveInput(lambda: self.human_board,
-                                    self._submit_human_move)
+        # While an engine plays the manual seat (human_side), the seat can
+        # queue its next move on the snapshot: the premove, played the
+        # moment its turn comes if it is legal then
+        self.human_side = None
+        self.premove = None
+        self.move_input = MoveInput(
+            lambda: self.human_board or self.board, self._submit_human_move,
+            can_move=lambda: self.human_board is not None,
+            premove_side=self._premove_side, on_premove=self._set_premove)
 
         # Being deleted: nothing more is written for it (discard)
         self.discarded = False
@@ -190,10 +207,18 @@ class TournamentSession:
 
     def _cb_human_turn(self, game, board, player):
         with self.lock:
-            self.human_board = board
-            self.human_player = player
             self.move_input.clear()
             self.board_dirty = True
+            premove = None
+            if player is not None:
+                premove, self.premove = self.premove, None
+            if premove and board.is_legal(premove):
+                # Queued while the engine thought: played straight away,
+                # and the board is never handed over
+                self.runner.submit_human_move(premove)
+                return
+            self.human_board = board
+            self.human_player = player
             if player is not None:
                 self.status_msg = f"Your move — {player.name}"
 
@@ -201,6 +226,30 @@ class TournamentSession:
         """The human seat made *uci* on the board (move_input)."""
         if self.runner:
             self.runner.submit_human_move(uci)
+
+    # ── Premoves (UI thread) ──────────────────────────────
+
+    def _premove_side(self):
+        """The manual seat's side while it waits on an engine, or None."""
+        if self.state != "running" or self.human_board is not None:
+            return None
+        return self.human_side
+
+    def _set_premove(self, uci):
+        """move_input queued *uci* for the manual seat's turn."""
+        with self.lock:
+            self.premove = uci
+
+    def cancel_premove(self):
+        """Let go of the queued move, and of the piece in hand."""
+        with self.lock:
+            self.premove = None
+        self.move_input.clear()
+
+    def _drop_premove(self):
+        """The game the premove was for is over (caller holds the lock)."""
+        self.premove = None
+        self.human_side = None
 
     def _cb_game_start(self, game):
         with self.lock:
@@ -214,7 +263,12 @@ class TournamentSession:
             self.wtime_ms = self.btime_ms = (base or 0) * 60000
             self.turn = "w"
             self.clock_at = time.time()
-            self.board = SnapshotBoard()
+            self.board = SnapshotBoard.of(Board())
+            # Premoves are for a manual seat facing an engine
+            self.premove = None
+            white, black = game.white.is_human, game.black.is_human
+            self.human_side = ("w" if white and not black else
+                               "b" if black and not white else None)
             self.last_move = None
             self.cp = None
             self.opening = ""
@@ -224,7 +278,12 @@ class TournamentSession:
 
     def _cb_board_update(self, game, board, last_move, cp, mate, opening):
         with self.lock:
-            self.board = SnapshotBoard([row[:] for row in board.board])
+            self.board = SnapshotBoard.of(board)
+            if ("w" if getattr(game, "last_was_white", True) else "b") \
+                    == self.human_side:
+                # The seat has moved: a move queued meanwhile was queued
+                # on the position before it
+                self.premove = None
             self.last_move = last_move
             self.cp = cp
             self.opening = opening or ""
@@ -266,6 +325,7 @@ class TournamentSession:
             )
             game.db_game_id = game_id
         with self.lock:
+            self._drop_premove()
             self.tables_dirty = True
             self.sounds.append("game_end")
         self.snapshot()
@@ -277,6 +337,7 @@ class TournamentSession:
 
     def _cb_tournament_end(self, t):
         with self.lock:
+            self._drop_premove()
             self.state = "finished"
             self.tables_dirty = True
             self.board_dirty = True
@@ -347,6 +408,8 @@ class TournamentSession:
         End the tournament. The runner finalises once the game in flight
         lets go; without one there is nobody to do it, so finish here.
         """
+        with self.lock:
+            self._drop_premove()
         if self.runner:
             self.runner.stop()
             if self.state != "finished":
@@ -423,6 +486,8 @@ class TournamentSession:
             ok, msg, playing = self.t.withdraw(name)
             if ok and playing is not None and self.runner:
                 self.runner.drop_game(playing)
+                with self.lock:
+                    self._drop_premove()
         if ok:
             with self.lock:
                 self.tables_dirty = True
@@ -1686,17 +1751,25 @@ def show_tournament_window(session, tsess: TournamentSession):
                     with ui.element("div").classes("flex-grow min-w-0"):
                         hand = tsess.move_input
 
-                        async def _human_click(br, bc):
-                            if await hand.click(br, bc):
+                        def _handled(outcome):
+                            if outcome == "cancel":
+                                tsess.cancel_premove()
+                            if outcome:
                                 board_view.refresh()
+
+                        async def _human_click(br, bc):
+                            _handled(await hand.click(br, bc))
 
                         def _human_pick(br, bc):
                             if hand.pick(br, bc):
                                 board_view.refresh()
 
                         async def _human_drop(fr, fc, br, bc):
-                            if await hand.drop(fr, fc, br, bc):
-                                board_view.refresh()
+                            _handled(await hand.drop(fr, fc, br, bc))
+
+                        def _cancel_premove():
+                            tsess.cancel_premove()
+                            board_view.refresh()
 
                         def _board_state():
                             # While it is a human's turn the runner is
@@ -1710,13 +1783,17 @@ def show_tournament_window(session, tsess: TournamentSession):
                                 "legal_dests": hand.dests(),
                                 "check_sq": None,
                                 "movable": hand.movable(),
+                                "premove": tsess.premove,
                             }
 
-                        # A human seat moves by click-click or drag and drop
+                        # A human seat moves by click-click or drag and
+                        # drop, and premoves the same way while an engine
+                        # thinks; a right-click lets go of a premove
                         board_view = BoardView(_board_state,
                                                on_click=_human_click,
                                                on_drag_start=_human_pick,
-                                               on_drop=_human_drop)
+                                               on_drop=_human_drop,
+                                               on_right_click=_cancel_premove)
 
                 white_bar = widgets.PlayerBar()
 

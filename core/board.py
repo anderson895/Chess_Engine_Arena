@@ -580,6 +580,13 @@ class Board:
                         result.append(mv)
         return result
 
+    def is_legal(self, uci):
+        """True if the UCI move *uci* (a promotion naming its piece) is legal here."""
+        try:
+            return parse_uci(uci) in self.legal_moves()
+        except ValueError:
+            return False
+
     # ── Raw (no-history) move application ─────────────────
 
     def _apply_raw(self, fr, fc, tr, tc, promo):

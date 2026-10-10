@@ -14,7 +14,7 @@ from datetime import datetime
 
 from nicegui import run
 
-from core.board import Board, parse_uci
+from core.board import Board
 from core.engine import UCIEngine, AnalyzerEngine
 from core.move_input import MoveInput
 from core.opening_book import OpeningBook
@@ -177,7 +177,7 @@ class GameSession:
         self.move_input = MoveInput(lambda: self.board, self._play_human_move,
                                     can_move=self.can_move_now,
                                     promote=self._ask_promotion,
-                                    can_premove=self.can_premove_now,
+                                    premove_side=self.premove_side,
                                     on_premove=self._set_premove)
         self.current_opening_name = None
         self._engine_thinking = False
@@ -1114,11 +1114,16 @@ class GameSession:
         return (self.game_running and not self._engine_thinking
                 and not self.game_paused and self.human_to_move())
 
-    def can_premove_now(self):
-        """True while the person waits on the engine and may queue a move."""
-        return (self.game_running and not self.game_paused
+    def premove_side(self):
+        """
+        The person's side ('w' or 'b') while they wait on the engine and
+        may queue a move for their turn; None otherwise.
+        """
+        if (self.game_running and not self.game_paused
                 and self.play_mode == self.MODE_HVE
-                and not self.human_to_move())
+                and not self.human_to_move()):
+            return "w" if self.player_color == "white" else "b"
+        return None
 
     @property
     def selected_square(self):
@@ -1178,11 +1183,7 @@ class GameSession:
             return False
         uci, self.premove = self.premove, None
         self.move_input.clear()
-        try:
-            legal = parse_uci(uci) in self.board.legal_moves()
-        except ValueError:
-            legal = False
-        if not legal:
+        if not self.board.is_legal(uci):
             self._emit("board_changed")       # its highlight goes
             return False
         await self._play_human_move(uci)

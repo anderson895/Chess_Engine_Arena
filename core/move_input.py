@@ -18,6 +18,11 @@ def square_name(r, c):
     return f"{chr(ord('a') + c)}{8 - r}"
 
 
+def _owned(piece, white):
+    """True when *piece* (a board letter, '.' or None) is White's if *white*."""
+    return bool(piece and piece != "." and piece.isupper() == white)
+
+
 def premove_targets(board, r, c):
     """
     Squares the piece on (r, c) might move to once its side is to move:
@@ -26,6 +31,8 @@ def premove_targets(board, r, c):
     premove onto a square held by one's own piece is the recapture waiting
     for the opponent to take it (Lichess's chessground does the same).
     Whether the move is legal is settled when it is played.
+
+    *board* needs only get(r, c) and castling (FEN letters, or '-').
     """
     piece = board.get(r, c)
     if not piece or piece == '.':
@@ -72,27 +79,28 @@ class MoveInput:
     """
     The piece picked up on a board, and the legal moves from it.
 
-    board       : callable → the Board to move on, or None while no move
-                  can be made there
-    on_move     : callable(uci), may be async — a legal move was made
-    can_move    : callable → whether moves are taken right now
-    promote     : callable(colour 'w'|'b') → 'q', 'r', 'b' or 'n', may be
-                  async; without one a pawn always becomes a queen
-    can_premove : callable → whether, while no move is taken, the side not
-                  to move may queue one for its turn (a person waiting on
-                  an engine)
-    on_premove  : callable(uci) — such a move was queued. It is not checked
-                  here: whoever plays it checks it is legal by then. A
-                  pawn queued to the last rank becomes a queen.
+    board        : callable → the Board to move on, or None while there is
+                   none. While moves can only be queued, a stand-in with
+                   get(r, c) and castling will do (see premove_targets).
+    on_move      : callable(uci), may be async — a legal move was made
+    can_move     : callable → whether moves are taken right now
+    promote      : callable(colour 'w'|'b') → 'q', 'r', 'b' or 'n', may be
+                   async; without one a pawn always becomes a queen
+    premove_side : callable → 'w' or 'b' while that side, waiting for its
+                   turn, may queue a move for it (a person waiting on an
+                   engine); None otherwise
+    on_premove   : callable(uci) — such a move was queued. It is not
+                   checked here: whoever plays it checks it is legal by
+                   then. A pawn queued to the last rank becomes a queen.
     """
 
     def __init__(self, board, on_move, can_move=None, promote=None,
-                 can_premove=None, on_premove=None):
+                 premove_side=None, on_premove=None):
         self._board_of = board
         self._on_move = on_move
         self._can_move = can_move or (lambda: True)
         self._promote = promote
-        self._can_premove = can_premove or (lambda: False)
+        self._premove_side = premove_side or (lambda: None)
         self._on_premove = on_premove
         self.selected = None              # (row, col) of the piece in hand
 
@@ -101,29 +109,26 @@ class MoveInput:
         return board if board is not None and self._can_move() else None
 
     def _premove_board(self):
-        """The board to queue a move on, while that is what a click does."""
+        """
+        (board, white) to queue a move on, *white* being the side that
+        queues it — while that is what a click does; (None, None) otherwise.
+        """
         if self._on_premove is None or self._board() is not None:
-            return None
-        board = self._board_of()
-        return board if board is not None and self._can_premove() else None
-
-    @staticmethod
-    def _waiting_white(board):
-        """True when the side queueing a move — the one not to move — is White."""
-        return board.turn == "b"
+            return None, None
+        side = self._premove_side()
+        board = self._board_of() if side else None
+        return (board, side == "w") if board is not None else (None, None)
 
     def movable(self):
         """Squares of the pieces that may move now — or be premoved."""
         board = self._board()
         if board is not None:
             return {(m[0], m[1]) for m in board.legal_moves()}
-        board = self._premove_board()
+        board, white = self._premove_board()
         if board is None:
             return set()
-        white = self._waiting_white(board)
         return {(r, c) for r in range(8) for c in range(8)
-                if board.board[r][c] != '.'
-                and board.board[r][c].isupper() == white}
+                if _owned(board.get(r, c), white)}
 
     def dests(self):
         """Squares the piece in hand can go to (or be premoved to)."""
@@ -133,8 +138,10 @@ class MoveInput:
         if board is not None:
             return {(m[2], m[3]) for m in board.legal_moves()
                     if (m[0], m[1]) == self.selected}
-        board = self._premove_board()
-        return premove_targets(board, *self.selected) if board else set()
+        board, white = self._premove_board()
+        if board is None or not _owned(board.get(*self.selected), white):
+            return set()
+        return premove_targets(board, *self.selected)
 
     def pick(self, r, c):
         """Pick up the piece on (r, c) if it may move. True if that changed anything."""
@@ -158,8 +165,7 @@ class MoveInput:
         if board is None:
             return self._premove_click(r, c)
         white = board.turn == "w"
-        piece = board.get(r, c)
-        own = bool(piece and piece != "." and piece.isupper() == white)
+        own = _owned(board.get(r, c), white)
         if self.selected is None:
             if not own:
                 return None
@@ -188,12 +194,12 @@ class MoveInput:
 
     def _premove_click(self, r, c):
         """click() while moves can only be queued for the coming turn."""
-        board = self._premove_board()
+        board, white = self._premove_board()
         if board is None:
             return None
-        piece = board.get(r, c)
-        own = bool(piece and piece != "."
-                   and piece.isupper() == self._waiting_white(board))
+        if self.selected and not _owned(board.get(*self.selected), white):
+            self.selected = None          # the piece in hand was taken
+        own = _owned(board.get(r, c), white)
         if self.selected is None:
             if own:
                 self.selected = (r, c)
