@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from core.board import Board, SEE_VALUES, parse_uci
 from core.constants import QUALITY_SYMBOLS
 from core.opening_book import opening_label
+from core.utils import custom_start, start_ply
 
 # Classes in review-table order. "Forced" is graded but not tabled.
 TABLE_ORDER = ["Brilliant", "Great", "Book", "Best", "Excellent", "Good",
@@ -86,15 +87,17 @@ def _second(analysis):
     return lines[1] if len(lines) > 1 else None
 
 
-def white_pov(analysis, ply):
+def white_pov(analysis, turn):
     """
     (cp, mate) of a position's top line from White's side, or (None, None).
-    Checkmate on the board is mate 0, with cp ±1 saying who delivered it.
+    *turn* is the side to move there ('w' or 'b') — the side the engine
+    scores from. Checkmate on the board is mate 0, with cp ±1 saying who
+    delivered it.
     """
     top = _top(analysis)
     if top is None:
         return None, None
-    sign = 1 if ply % 2 == 0 else -1          # White moves on even plies
+    sign = 1 if turn == 'w' else -1
     cp, mate = top.get("cp"), top.get("mate")
     if mate is not None:
         if mate == 0:
@@ -103,10 +106,10 @@ def white_pov(analysis, ply):
     return (sign * cp if cp is not None else None), None
 
 
-def white_win_pct(analysis, ply):
+def white_win_pct(analysis, turn):
     """
-    White's win% (0..100) in the position after *ply* plies, or None —
-    capped at ±10 pawns, mates included, for accuracy and the graph.
+    White's win% (0..100) in an analysed position with *turn* to move, or
+    None — capped at ±10 pawns, mates included, for accuracy and the graph.
     """
     top = _top(analysis)
     if top is None:
@@ -116,11 +119,15 @@ def white_win_pct(analysis, ply):
         cp = ACC_CAP if mate > 0 else -ACC_CAP
     cp = max(-ACC_CAP, min(ACC_CAP, cp or 0))
     ep = expected_points(cp)
-    return 100.0 * (ep if ply % 2 == 0 else 1.0 - ep)
+    return 100.0 * (ep if turn == 'w' else 1.0 - ep)
 
 
 def move_number(ply):
-    """'5.' before White's 5th move (ply 9), '5...' before Black's (ply 10)."""
+    """
+    '5.' before White's 5th move (ply 9), '5...' before Black's (ply 10).
+    *ply* counts from the standard start; a game set up from a position
+    adds the plies before it (GameAnalyst.number does).
+    """
     return f"{(ply + 1) // 2}{'.' if ply % 2 else '...'}"
 
 
@@ -474,7 +481,7 @@ def _stdev(xs):
     return math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs))
 
 
-def game_accuracy(white_wins, accuracies):
+def game_accuracy(white_wins, accuracies, first='w'):
     """
     Per-side accuracy, Lichess style: the mean of a volatility-weighted
     mean and a harmonic mean of the side's move accuracies. Calm stretches
@@ -483,6 +490,8 @@ def game_accuracy(white_wins, accuracies):
 
     white_wins : White's win% for every position, start included.
     accuracies : accuracy of each move (None where unknown).
+    first      : the side that made the first move ('b' for a game set up
+                 with Black to move).
     Returns {'w': float | None, 'b': float | None}.
     """
     n = len(accuracies)
@@ -496,10 +505,11 @@ def game_accuracy(white_wins, accuracies):
     weights = [max(0.5, min(12.0, _stdev(w))) for w in windows]
 
     out = {}
+    shift = 0 if first == 'w' else 1
     for side, parity in (('w', 0), ('b', 1)):
         pairs = [(accuracies[i], weights[i] if i < len(weights) else 0.5)
                  for i in range(n)
-                 if i % 2 == parity and accuracies[i] is not None]
+                 if (i + shift) % 2 == parity and accuracies[i] is not None]
         if not pairs:
             out[side] = None
             continue
@@ -519,16 +529,19 @@ def _backrank_sparse(board):
     return white < 4 or black < 4
 
 
-def phase_starts(boards):
+def phase_starts(boards, ply0=0):
     """
     (middlegame_ply, endgame_ply) after Lichess's game divider, simplified:
     the middlegame starts once ten or fewer pieces remain, a back rank has
     emptied out, or move 15 is reached; the endgame once six or fewer
     pieces remain. Each is len(boards) when the game never got there.
+    *ply0* is how many plies were played before boards[0] (a game set up
+    from a position), so "move 15" means the same in every game.
     """
     n = len(boards)
     mid = next((i for i, b in enumerate(boards)
-                if _majors_minors(b) <= 10 or _backrank_sparse(b) or i >= 30), n)
+                if _majors_minors(b) <= 10 or _backrank_sparse(b)
+                or ply0 + i >= 30), n)
     end = next((i for i, b in enumerate(boards)
                 if i >= mid and _majors_minors(b) <= 6), n)
     return mid, end
@@ -564,7 +577,7 @@ def _phase_grade(moves):
 
 @dataclass
 class MoveReview:
-    ply: int                        # 1 = White's first move
+    ply: int                        # 1 = the game's first move
     uci: str
     san: str
     color: str                      # 'w' or 'b'
@@ -580,6 +593,8 @@ class MoveReview:
     missed_mate: bool = False
     allows_mate: bool = False
     comment: str = ""
+    ply0: int = 0                   # plies played before the game's start
+                                    # position (0 from the standard start)
 
     @property
     def symbol(self):
@@ -589,7 +604,7 @@ class MoveReview:
     @property
     def number(self):
         """The move number as written before it: '5.' for White, '5...' for Black."""
-        return move_number(self.ply)
+        return move_number(self.ply0 + self.ply)
 
     @property
     def numbered_san(self):
@@ -679,26 +694,37 @@ class GameAnalyst:
     judged the same way wherever it was played.
 
     Positions are analysed either on demand through *analyse* — a
-    callable taking the UCI history up to a position and returning
+    callable taking the UCI history up to a position and the game's start
+    FEN (None for the standard start), and returning
     AnalyzerEngine.analyse() output — or handed in with set_analysis()
     by a caller that runs the engine itself. Without either the analyst
     still tracks the opening, so naming works with no engine at all.
+
+    A game set up from a position passes its FEN as *start_fen*: the
+    moves are played from there, and their numbers count on from it.
     """
 
-    def __init__(self, book=None, analyse=None):
+    def __init__(self, book=None, analyse=None, start_fen=None):
         self.book = book if book is not None and book.loaded else None
         self._analyse = analyse
+        self.start_fen = custom_start(start_fen)    # None: the standard start
+        self.ply0 = start_ply(self.start_fen)       # plies before that position
         self.reset()
 
     def reset(self):
+        start = Board.from_fen(self.start_fen) if self.start_fen else Board()
         self.moves = []                  # UCI, one per ply
         self.sans = []
-        self.boards = [Board()]          # position after each ply; [0] = start
+        self.boards = [start]            # position after each ply; [0] = start
         self.analyses = [None]           # engine analysis of each position
         self.reviews = []                # MoveReview per ply, None until graded
-        self.openings = [(None, None)]   # (eco, name) as it stands after each ply
-        self.in_book = [True]            # whether each position is theory
-        self._tracker = self.book.tracker() if self.book else None
+        self._tracker = (self.book.tracker(start if self.start_fen else None)
+                         if self.book else None)
+        tracker = self._tracker
+        # (eco, name) as it stands after each ply, and whether each
+        # position is theory — the standard start always is
+        self.openings = [(tracker.eco, tracker.name) if tracker else (None, None)]
+        self.in_book = [tracker.in_book if tracker else True]
 
     # ── Following the game ────────────────────────────────
 
@@ -738,6 +764,10 @@ class GameAnalyst:
         """'C60 · Ruy Lopez', or '' before the game reached a named position."""
         return opening_label(*self.opening)
 
+    def number(self, ply):
+        """'5.' or '5...': the move number written before the move that reached *ply*."""
+        return move_number(self.ply0 + ply)
+
     # ── Engine analysis ───────────────────────────────────
 
     def set_analysis(self, i, analysis):
@@ -747,7 +777,8 @@ class GameAnalyst:
     def analysis(self, i):
         """Analysis of the position after *i* plies, run now if missing."""
         if self.analyses[i] is None and self._analyse is not None:
-            self.analyses[i] = self._analyse(" ".join(self.moves[:i]))
+            self.analyses[i] = self._analyse(" ".join(self.moves[:i]),
+                                             self.start_fen)
         return self.analyses[i]
 
     def eval_after(self, i):
@@ -758,7 +789,7 @@ class GameAnalyst:
         board = self.boards[i]
         if board.in_check(board.turn) and not board.legal_moves():
             return (-1 if board.turn == 'w' else 1), 0
-        return white_pov(self.analyses[i], i)
+        return white_pov(self.analyses[i], board.turn)
 
     # ── Grading ───────────────────────────────────────────
 
@@ -777,16 +808,16 @@ class GameAnalyst:
                           earlier=self.boards[i - 2] if i >= 2 else None)
 
         m = MoveReview(ply=i, uci=uci, san=self.sans[i - 1],
-                       color='w' if i % 2 == 1 else 'b',
+                       color=before.turn,
                        cls=v.cls, loss=v.loss, ep_after=v.ep_after,
                        best_uci=v.best_uci,
                        sacrificed=v.sacrificed, missed_mate=v.missed_mate,
-                       allows_mate=v.allows_mate)
+                       allows_mate=v.allows_mate, ply0=self.ply0)
         m.eval_cp, m.eval_mate = self.eval_after(i)
 
         # Accuracy from consecutive position evaluations
-        wb = white_win_pct(a_before, i - 1)
-        wa = white_win_pct(a_after, i) if a_after else None
+        wb = white_win_pct(a_before, before.turn)
+        wa = white_win_pct(a_after, after.turn) if a_after else None
         if m.cls in ("Book", "Forced"):
             m.accuracy = 100.0
         elif wb is not None and wa is not None:
@@ -813,7 +844,7 @@ class GameAnalyst:
         move lands on this old analyst and is lost with it. *analyse*
         replaces the way missing positions are analysed.
         """
-        g = GameAnalyst(self.book, analyse or self._analyse)
+        g = GameAnalyst(self.book, analyse or self._analyse, self.start_fen)
         for uci in self.moves[:ply]:
             g.record(uci)
         g.analyses[:ply + 1] = self.analyses[:ply + 1]
@@ -840,18 +871,20 @@ class GameAnalyst:
         n = self.ply
         rv.moves = list(self.reviews)
         rv.fens = [b.to_fen() for b in self.boards]
-        rv.white_wins = [white_win_pct(self.analyses[i], i) for i in range(n + 1)]
+        rv.white_wins = [white_win_pct(self.analyses[i], self.boards[i].turn)
+                         for i in range(n + 1)]
         rv.openings = list(self.openings)
         rv.complete = all(a is not None for a in self.analyses)
 
         accuracies = [m.accuracy if m else None for m in self.reviews]
-        rv.accuracy = game_accuracy(rv.white_wins, accuracies)
+        rv.accuracy = game_accuracy(rv.white_wins, accuracies,
+                                    self.boards[0].turn)
         rv.counts = {side: {cls: 0 for cls in TABLE_ORDER} for side in ('w', 'b')}
         for m in self.reviews:
             if m and m.cls in rv.counts[m.color]:
                 rv.counts[m.color][m.cls] += 1
 
-        rv.middlegame_ply, rv.endgame_ply = phase_starts(self.boards)
+        rv.middlegame_ply, rv.endgame_ply = phase_starts(self.boards, self.ply0)
         for side in ('w', 'b'):
             mine = [m for m in self.reviews if m and m.color == side]
             rv.phases[side] = {
@@ -865,17 +898,18 @@ class GameAnalyst:
         return rv
 
 
-def review_game(uci_moves, analyses, book=None):
+def review_game(uci_moves, analyses, book=None, start_fen=None):
     """
     Review a finished game from the analysis of each of its positions.
 
-    uci_moves : the game's moves from the standard start position.
+    uci_moves : the game's moves from its start position.
     analyses  : AnalyzerEngine.analyse() results, one per position —
                 index i is the position after i plies. Missing ones may
                 be None; the moves around them are left ungraded.
     book      : OpeningBook for naming the opening and spotting theory.
+    start_fen : the start position, when not the standard one.
     """
-    g = GameAnalyst(book)
+    g = GameAnalyst(book, start_fen=start_fen)
     for uci in uci_moves:
         try:
             g.record(uci)

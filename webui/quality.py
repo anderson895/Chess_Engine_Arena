@@ -138,16 +138,23 @@ def _move_cell(key, san, review, current):
     return f"<span class='mv{cur}' data-ply='{key}'>{badge}{escape(san)}</span>"
 
 
-def move_list_html(sans, reviews, current=None, result=""):
+def move_list_html(sans, reviews, current=None, result="", ply0=0):
     """
     A game's moves as cells for a .move-grid: number, White's move, Black's
     move, each with its grade badge and clickable (data-ply). The move at
     ply *current* is highlighted, and *result* ('1-0'…) closes the list.
+    *ply0* is GameAnalyst.ply0 — the plies before a game set up from a
+    position — so the numbers count on from there, and a game that starts
+    with Black's move leaves White's first cell empty.
     """
     cells = []
-    for i in range(0, len(sans), 2):
-        cells.append(f"<span class='n'>{i // 2 + 1}.</span>")
+    lead = ply0 % 2 if sans else 0          # 1: Black makes the first move
+    for i in range(-lead, len(sans), 2):
+        cells.append(f"<span class='n'>{(ply0 + i) // 2 + 1}.</span>")
         for ply in (i + 1, i + 2):
+            if ply < 1:
+                cells.append("<span class='n'>…</span>")   # White's move, before the start
+                continue
             if ply > len(sans):
                 cells.append("<span></span>")
                 continue
@@ -162,8 +169,10 @@ def line_html(sans, reviews, first_ply, current=None):
     """
     A side line as one run of moves for a .var-line — '12... Nc6 13. Bb5'.
     Each move carries its grade badge and is clickable, data-ply counting
-    the line's own moves from 1. *first_ply* is the game ply of the first
-    move; the move at *current* (counted the same way) is highlighted.
+    the line's own moves from 1. *first_ply* is the ply of the first move
+    counted from the standard start (add GameAnalyst.ply0 for a game set
+    up from a position); the move at *current* (counted the same way as
+    data-ply) is highlighted.
     """
     parts = []
     for i, san in enumerate(sans, 1):

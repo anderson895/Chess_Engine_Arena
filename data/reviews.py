@@ -12,7 +12,7 @@ import json
 import sqlite3
 from datetime import datetime
 
-from core.utils import get_reviews_db_path
+from core.utils import custom_start, get_reviews_db_path
 
 FORMAT = 1          # bump when the stored analysis changes shape
 KEEP = 500          # most recent games kept
@@ -41,10 +41,20 @@ class ReviewCache:
         return sqlite3.connect(self.db_path, timeout=5)
 
     @staticmethod
-    def key_for(moves):
-        return hashlib.sha1(" ".join(moves).encode("ascii")).hexdigest()
+    def key_for(moves, start_fen=None):
+        """
+        A game's key: its moves — and, for a game set up from a position,
+        that position too, so the same moves from two different starts
+        never share an analysis. Games from the standard start keep the
+        keys they always had.
+        """
+        text = " ".join(moves)
+        start_fen = custom_start(start_fen)
+        if start_fen:
+            text = f"{start_fen}|{text}"
+        return hashlib.sha1(text.encode("ascii")).hexdigest()
 
-    def get(self, moves, engine, movetime):
+    def get(self, moves, engine, movetime, start_fen=None):
         """
         The cached analyses of a game (one per position), from a search at
         least *movetime* ms long by the same engine — or None.
@@ -55,14 +65,14 @@ class ReviewCache:
                     "SELECT data FROM analyses WHERE moves_key = ? AND engine = ? "
                     "AND movetime >= ? AND format = ? "
                     "ORDER BY movetime DESC LIMIT 1",
-                    (self.key_for(moves), engine, int(movetime), FORMAT)
+                    (self.key_for(moves, start_fen), engine, int(movetime), FORMAT)
                 ).fetchone()
             return json.loads(row[0]) if row else None
         except Exception as e:
             print(f"[ReviewCache] get error: {e}")
             return None
 
-    def put(self, moves, engine, movetime, analyses):
+    def put(self, moves, engine, movetime, analyses, start_fen=None):
         """Store a fully analysed game, dropping the oldest beyond KEEP."""
         slim = [self._slim(a) for a in analyses]
         try:
@@ -71,7 +81,7 @@ class ReviewCache:
                     "INSERT OR REPLACE INTO analyses "
                     "(moves_key, engine, movetime, format, created, data) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (self.key_for(moves), engine, int(movetime), FORMAT,
+                    (self.key_for(moves, start_fen), engine, int(movetime), FORMAT,
                      datetime.now().isoformat(timespec="seconds"),
                      json.dumps(slim, separators=(",", ":"))))
                 conn.execute(

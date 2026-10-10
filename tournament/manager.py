@@ -2266,11 +2266,12 @@ class TournamentRunner:
             with TournamentRunner._active_lock:
                 TournamentRunner.active -= 1
 
-    def _analyse_position(self, moves_str):
+    def _analyse_position(self, moves_str, start_fen=None):
         """Analysis of one position for grading moves (runner thread)."""
         if not self._analyzer or not self._analyzer.alive:
             return None
-        return self._analyzer.analyse(moves_str, self.ANALYSIS_MS, 2)
+        return self._analyzer.analyse(moves_str, self.ANALYSIS_MS, 2,
+                                      start_fen)
 
     def _run_events(self):
         analyzer_ref = self.t.analyzer_path

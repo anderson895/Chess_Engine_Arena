@@ -3,16 +3,18 @@
 # ═══════════════════════════════════════════════════════════
 
 import os
+from html import escape
 
 from nicegui import app, ui, run
 
-from core.review import move_number
+from core.start_position import StartPosition
 from core.utils import (
     get_base_path, get_db_path, get_resource_path, fmt_clock,
     low_time_warning,
 )
 from data.database import retag_openings_once
-from webui import dialogs, masters, review, tournament, views, widgets
+from webui import (dialogs, masters, position_setup, review, tournament,
+                   views, widgets)
 from webui.board import BoardView, EvalBar
 from webui.quality import MOVE_CLICK_JS, coach_html, move_list_html
 from webui.session import GameSession, parse_opening_book, TIME_CONTROLS
@@ -672,16 +674,24 @@ def main_page():
 
                 ui.separator()
                 ui.label("STARTING POSITION").classes("arena-heading")
-                preset_lbl = ui.label("Normal start").classes("text-sm") \
-                    .style(f"color: {COLOR_MUTED}")
+                start_lbl = ui.label("").classes("text-sm ellipsis w-full")
+                with start_lbl:
+                    start_tip = ui.tooltip("")
                 with ui.row().classes("w-full no-wrap gap-2"):
-                    pick_btn = ui.button(
-                        "Pick Opening", on_click=lambda: _pick_opening(pick_btn)) \
+                    ui.button("Set Up Position", on_click=_set_up_position) \
+                        .props("dense no-caps color=secondary") \
+                        .classes("flex-grow") \
+                        .tooltip("Place pieces, paste a FEN or PGN, or play "
+                                 "moves — the game goes on from there")
+                    ui.button("Pick Opening", on_click=_pick_opening) \
                         .props("dense no-caps color=secondary") \
                         .classes("flex-grow") \
                         .tooltip("Start the game from a book opening")
-                    ui.button(icon="close", on_click=lambda: _clear_preset(pick_btn)) \
+                    ui.button(icon="close", on_click=_clear_start) \
                         .props("dense flat color=grey").tooltip("Normal start")
+                with ui.element("div") as start_hint:
+                    widgets.hint("A game from a set position asks whether "
+                                 "to record its result.")
 
             with tabs.page("play"), ui.column().classes("panel-foot w-full"):
                 # color=None: the green comes from .cta
@@ -701,6 +711,19 @@ def main_page():
                         .props("dense no-caps unelevated color=secondary") \
                         .tooltip("Show the position as it stands in the game")
                     preview_bar.set_visibility(False)
+                # A finished game from a set position, until the person says
+                # whether to record it (the game-over dialog asks too)
+                with ui.row().classes("record-bar items-center no-wrap gap-2") \
+                        as record_bar:
+                    ui.label("This game isn't recorded yet") \
+                        .classes("text-sm flex-grow")
+                    ui.button("Record", on_click=lambda: _record_from_bar(True)) \
+                        .props("dense no-caps unelevated") \
+                        .tooltip("Add it to History and the ratings")
+                    ui.button("Don't record",
+                              on_click=lambda: _record_from_bar(False)) \
+                        .props("dense flat no-caps color=grey-5")
+                record_bar.set_visibility(session.pending_record is not None)
                 moves_area = ui.scroll_area().classes(
                     "w-full flex-grow min-h-0 px-[14px]")
                 with moves_area:
@@ -789,7 +812,7 @@ def main_page():
         analyst = session.analyst
         moves_html.set_content(move_list_html(
             analyst.sans, analyst.reviews, preview.shown_ply,
-            session.game_result))
+            session.game_result, ply0=analyst.ply0))
         if not preview.active:
             moves_area.scroll_to(percent=1.0)
 
@@ -809,16 +832,20 @@ def main_page():
         if ply:
             rv = preview.review()
             if ply <= session.preset_plies:
-                waiting = " — from the chosen opening"     # never graded live
+                waiting = " — part of the starting position"   # never graded live
             else:
                 waiting = " — grading…" if session.analyzer else ""
             coach.set_content(coach_html(
-                rv, f"{move_number(ply)} {analyst.sans[ply - 1]}", evaluation,
+                rv, f"{analyst.number(ply)} {analyst.sans[ply - 1]}", evaluation,
                 analyst.best_line_san(ply) if rv else (), waiting))
-        else:
+        elif session.game_start.is_standard:
             coach.set_content(
                 "<div class='title'>Start position</div>"
                 "<div>Every move is graded here as it is played.</div>")
+        else:
+            coach.set_content(
+                "<div class='title'>Starting position</div>"
+                f"<div>{escape(session.game_start.label)}</div>")
 
     def on_preview_change():
         board_view.refresh()
@@ -967,11 +994,54 @@ def main_page():
                 on_new_game=lambda: ui.timer(0.05, _new_game, once=True),
                 on_rankings=lambda: views.show_rankings(session),
                 on_export=_export_pgn,
-                on_review=_open_review)
+                on_review=_open_review,
+                on_record=_record_choice)
 
     def _on_error(msg):
         with client:
             ui.notify(msg, type="negative", multi_line=True)
+
+    # ── Starting position and whether to record ───────────
+
+    def render_start():
+        """The STARTING POSITION section, from the start set for the next game."""
+        start = session.preset
+        custom = not start.is_standard
+        start_lbl.set_text(start.label)
+        start_lbl.style(f"color: {COLOR_BLUE if custom else COLOR_MUTED}")
+        start_tip.set_text(start.label)
+        start_hint.set_visibility(custom)
+
+    def _on_preset():
+        render_start()
+        if not session.game_running:
+            tabs.select("play")         # set from the review: show where it went
+
+    async def _record_choice(keep):
+        """
+        The answer to "Record this game?" for a finished game from a set
+        position: True once recorded, False when left out, None when the
+        database would not take it (the question stays open).
+        """
+        if not keep:
+            session.discard_pending()
+            return False
+        if await session.record_pending():
+            return True
+        ui.notify("The game could not be recorded", type="negative")
+        return None
+
+    async def _record_from_bar(keep):
+        outcome = await _record_choice(keep)
+        if outcome is not None:
+            ui.notify("Game recorded" if outcome else "Game not recorded",
+                      type="positive" if outcome else "info")
+
+    def _on_record_state(state):
+        record_bar.set_visibility(state == "pending")
+        if state == "dropped":
+            with client:
+                ui.notify("The last game was not recorded", type="info")
 
     session.on("board_changed", on_board_changed)
     session.on("status", status_lbl.set_text)
@@ -996,6 +1066,9 @@ def main_page():
     session.on("eval", lambda side, ev, dp: eng_log.push(
         f"[{side.upper()}] eval {ev}  depth {dp}"))
     session.on("game_over", _on_game_over)
+    session.on("preset", _on_preset)
+    session.on("record", _on_record_state)
+    render_start()
 
     # Startup: banner + assets. On first launch a persistent overlay blocks
     # the UI until the opening book and analyzer are ready — interacting
@@ -1023,9 +1096,6 @@ def main_page():
         ui.timer(0.1, _boot, once=True)
     else:
         refresh_asset_labels(book_lbl, analyzer_lbl, opening_lbl)
-
-    # keep references used by the module-level handlers below
-    main_page._preset_lbl = preset_lbl
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1119,7 +1189,13 @@ async def _piece_dropped(fr, fc, br, bc):
         await session.drop_piece(fr, fc, br, bc)
 
 
-async def _pick_opening(pick_btn):
+async def _set_up_position():
+    start = await position_setup.ask_start_position(session, session.preset)
+    if start is not None:
+        _use_start(start)
+
+
+async def _pick_opening():
     if not session.opening_book.loaded:
         ui.notify("Opening book not loaded — load an openings CSV first.",
                   type="warning")
@@ -1127,27 +1203,20 @@ async def _pick_opening(pick_btn):
     moves, name = await dialogs.ask_opening_choice(session.opening_book)
     if moves is None:
         return
-    session.preset_moves = moves
-    session.preset_name = name
-    lbl = getattr(main_page, "_preset_lbl", None)
-    if moves:
-        short = (name[:30] + "…") if name and len(name) > 30 else (name or "")
-        pick_btn.set_text(short)
-        if lbl:
-            lbl.set_text(short)
-            lbl.style(f"color: {COLOR_BLUE}")
-    else:
-        _clear_preset(pick_btn)
+    _use_start(StartPosition(moves=moves, label=name) if moves
+               else StartPosition())
 
 
-def _clear_preset(pick_btn):
-    session.preset_moves = []
-    session.preset_name = None
-    pick_btn.set_text("Pick Opening")
-    lbl = getattr(main_page, "_preset_lbl", None)
-    if lbl:
-        lbl.set_text("Normal start")
-        lbl.style(f"color: {COLOR_MUTED}")
+def _clear_start():
+    _use_start(StartPosition())
+
+
+def _use_start(start):
+    """Start the next game from *start* — or say why no game can."""
+    problem = session.set_preset(start)
+    if problem:
+        ui.notify(f"No game can start from that position: {problem}",
+                  type="warning")
 
 
 async def _stop_game():

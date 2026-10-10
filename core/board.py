@@ -62,9 +62,11 @@ class Board:
 
     # ── Initialisation ────────────────────────────────────
 
-    def reset(self):
-        """Restore the starting position."""
+    def reset(self, fen=None):
+        """Restore the starting position — the standard one, or *fen*."""
         self.__init__()
+        if fen:
+            self._load_fen(fen)
 
     def _load_fen(self, fen):
         parts = fen.split()
@@ -145,6 +147,130 @@ class Board:
         b = cls()
         b._load_fen(fen)
         return b
+
+    @classmethod
+    def parse_fen(cls, text):
+        """
+        A board set up from FEN text a person typed or pasted. Unlike
+        from_fen, which trusts its input, this checks it and raises
+        ValueError saying what is wrong. Missing move counters default to
+        0 and 1. Castling rights the pieces no longer allow, and an
+        en-passant square no pawn has just made, are dropped — as chess.com
+        and Lichess do. Whether the position can start a game is
+        position_problem()'s question.
+        """
+        fields = (text or "").split()
+        if not fields:
+            raise ValueError("The FEN is empty")
+        if len(fields) > 6:
+            raise ValueError("A FEN has at most six fields")
+        ranks = fields[0].split('/')
+        if len(ranks) != 8:
+            raise ValueError("The board needs 8 ranks separated by '/'")
+        for i, rank in enumerate(ranks):
+            width = 0
+            for ch in rank:
+                if ch in '12345678':
+                    width += int(ch)
+                elif ch in 'KQRBNPkqrbnp':
+                    width += 1
+                else:
+                    raise ValueError(f"'{ch}' is not a piece (rank {8 - i})")
+            if width != 8:
+                raise ValueError(f"Rank {8 - i} has {width} squares, not 8")
+        turn = fields[1] if len(fields) > 1 else 'w'
+        if turn not in ('w', 'b'):
+            raise ValueError("The side to move must be w or b")
+        castling = fields[2] if len(fields) > 2 else '-'
+        if castling != '-' and (any(ch not in 'KQkq' for ch in castling)
+                                or len(set(castling)) != len(castling)):
+            raise ValueError("Castling rights must be - or letters from KQkq")
+        ep = fields[3] if len(fields) > 3 else '-'
+        if ep != '-' and not (len(ep) == 2 and ep[0] in 'abcdefgh'
+                              and ep[1] in '36'):
+            raise ValueError(f"{ep} is not an en-passant square")
+        try:
+            halfmove = int(fields[4]) if len(fields) > 4 else 0
+            fullmove = int(fields[5]) if len(fields) > 5 else 1
+        except ValueError:
+            raise ValueError("The move counters must be numbers") from None
+        if halfmove < 0 or fullmove < 1:
+            raise ValueError("The move counters are out of range")
+
+        b = cls.from_fen(f"{fields[0]} {turn} {castling} {ep} "
+                         f"{halfmove} {fullmove}")
+        allowed = b.castling_possible()
+        b.castling = ''.join(f for f in b.castling if f in allowed) or '-'
+        if not b._ep_plausible():
+            b.ep = '-'
+        return b
+
+    def castling_possible(self):
+        """
+        The castling rights the placement allows ('KQkq' at most): each
+        needs its king and that rook still on their starting squares.
+        """
+        out = ''
+        for flag, row, rook_col, king, rook in (('K', 7, 7, 'K', 'R'),
+                                                ('Q', 7, 0, 'K', 'R'),
+                                                ('k', 0, 7, 'k', 'r'),
+                                                ('q', 0, 0, 'k', 'r')):
+            if self.board[row][4] == king and self.board[row][rook_col] == rook:
+                out += flag
+        return out
+
+    def _ep_plausible(self):
+        """
+        True unless the en-passant square could not come from the pawn
+        move just made: that pawn must stand right past it, with the
+        square and the one it came from empty.
+        """
+        if self.ep == '-':
+            return True
+        c = ord(self.ep[0]) - ord('a')
+        r = 8 - int(self.ep[1])
+        if self.turn == 'w':         # Black just played a pawn two squares
+            return (r == 2 and self.board[3][c] == 'p'
+                    and self.board[2][c] == '.' and self.board[1][c] == '.')
+        return (r == 5 and self.board[4][c] == 'P'
+                and self.board[5][c] == '.' and self.board[6][c] == '.')
+
+    def position_problem(self):
+        """
+        Why a game cannot start from this position, or None if it can.
+        Each side needs exactly one king; pawns cannot stand on the first
+        or last rank; a side has at most 16 pieces and 8 pawns; the side
+        that just moved cannot be in check, nor give it with more than two
+        pieces; and the game must not already be over.
+        """
+        count = {}
+        for row in self.board:
+            for p in row:
+                if p != '.':
+                    count[p] = count.get(p, 0) + 1
+        for king, side in (('K', "White"), ('k', "Black")):
+            if not count.get(king):
+                return f"{side} has no king"
+            if count[king] > 1:
+                return f"{side} has more than one king"
+        if any(p in ('P', 'p') for p in self.board[0] + self.board[7]):
+            return "Pawns cannot stand on the first or last rank"
+        for white, side in ((True, "White"), (False, "Black")):
+            if count.get('P' if white else 'p', 0) > 8:
+                return f"{side} has more than 8 pawns"
+            if sum(n for p, n in count.items() if p.isupper() == white) > 16:
+                return f"{side} has more than 16 pieces"
+        waiting = 'b' if self.turn == 'w' else 'w'
+        if self.in_check(waiting):
+            side = "Black" if waiting == 'b' else "White"
+            return f"{side} is in check, so it would have to be {side}'s move"
+        kr, kc = self.find_king(self.turn)
+        if len(self.attackers(kr, kc, waiting)) > 2:
+            return "No move can give check with more than two pieces"
+        over, _result, reason, _winner = self.game_result()
+        if over:
+            return f"The game is already over: {reason[0].lower()}{reason[1:]}"
+        return None
 
     def copy(self):
         """A copy of the position without move history."""

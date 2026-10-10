@@ -36,6 +36,10 @@ To run from source instead, see [Getting Started](#getting-started).
   played, and finished games are saved and rated under the players' names
 - **Undo** — take back a move in a game you play: against an engine, your
   move and its reply; with two players, the last move ([details](#undo))
+- **Any starting position** — set a position up on a board editor, paste a
+  FEN or PGN, pick a book opening or play the moves, and the engines play
+  on from there; afterwards you choose whether the result is recorded
+  ([details](#starting-position))
 - **Drag and drop** — move a piece by dragging it to its square, or by
   clicking it and then the square; its legal moves show while it is held
 - **Tournaments** — Swiss (no rematches, Buchholz tiebreaks), Round Robin
@@ -54,8 +58,7 @@ To run from source instead, see [Getting Started](#getting-started).
 - **Eval Bar** — real-time evaluation display
 - **Opening Book** — ECO openings named by position, so a game that
   transposes into another opening is named after the one it reaches;
-  auto-detected and disk-cached; pick any opening as a forced starting
-  position
+  auto-detected and disk-cached; pick any opening as a starting position
 - **Elo Ratings** — automatic rating tracking with interactive history charts
 - **Rankings / Statistics / Game History** — searchable tables with
   medals for the top 3 and per-engine opening statistics
@@ -106,8 +109,8 @@ middle, and one panel with tabs on the right.
   Bullet and Blitz, the clock (lit for the side to move, red under ten
   seconds). **Flip** turns the board and swaps the bars.
 - **Play** tab — Engine vs Engine, Play vs Engine or 2 Players; the engines
-  or player names, the time control and an optional starting opening; then
-  **Start Game**.
+  or player names, the time control and the starting position (normal, a
+  book opening, or one you set up); then **Start Game**.
 - **Game** tab — the coach's line about the latest move, the opening, the
   move list with each move's grade (click a move to look at that position;
   **Back to game** returns), step buttons, **Undo**, Pause, Stop, Flip,
@@ -120,9 +123,45 @@ middle, and one panel with tabs on the right.
 **Undo** takes back moves in a game you play. Against an engine it takes
 back your last move and the engine's reply, so it is your move again; with
 two players it takes back the last move. Moves already graded keep their
-grades, and the clocks go back to where they stood. The moves of a chosen
-starting opening are never taken back, and Undo is unavailable while the
-engine is thinking. Games with takebacks are saved and rated as usual.
+grades, and the clocks go back to where they stood. Moves that came with
+the starting position (a book opening, or moves played while setting it
+up) are never taken back, and Undo is unavailable while the engine is
+thinking. Games with takebacks are saved and rated as usual.
+
+### Starting position
+
+A game starts from the normal position unless you choose another under
+**Starting position** on the Play tab:
+
+- **Pick Opening** — any line from the opening book (or **Random**).
+- **Set Up Position** — a board editor, as on chess.com and Lichess.
+  **Place pieces**: pick a piece below or above the board and click
+  squares to put it down (the same piece again takes it off; the bin
+  removes pieces), or drag pieces around. Set the side to move and the
+  castling rights, or type a **FEN** and press Load. **Play moves**: play
+  legal moves for both sides from the position, with Undo. **Pick
+  Opening** and **Paste PGN** fill the board too — a PGN's FEN tag sets
+  where its moves start, and a FEN on its own works as well.
+  **Use this position** is available once the position can be played:
+  one king a side, no pawns on the first or last rank, the side that just
+  moved not in check, and the game not already over.
+- **Continue from here** in [Game Review](#best-moves-and-what-ifs) — the
+  position on the review's board, from any game.
+
+The board shows the position as soon as it is set, and the engines play on
+from there. **✕** goes back to the normal start.
+
+A game that started from a chosen opening or position is not recorded on
+its own: when it ends, the game-over window asks **Record this game?**
+**Record result** saves it to History and counts it toward the ratings;
+**Don't record** leaves it out. Until you answer, the Game tab keeps the
+same two buttons; Game Review and Export PGN work either way. Starting the
+next game (or **New Game**) without answering leaves it unrecorded. Games
+from the normal start are saved and rated as always.
+
+Saved games keep their start in the PGN (`[SetUp "1"]` and `[FEN "…"]`),
+so History, the review and exported PGN replay them from the right
+position, numbered from the right move.
 
 ## Tournaments
 
@@ -271,6 +310,13 @@ mean with a harmonic mean, so one blunder costs more than many small
 slips.
 
 The same rules grade regular games (under the board, as moves are
+**Continue from here** makes the position on the board — the game's, or
+a side line's — the [starting position](#starting-position) of the next
+game, and takes you back to the Play tab with it set. Only the position
+goes, as on Lichess: the moves that led to it were not played by the next
+game's players. Games that are not standard chess (Chess960 games in the
+Masters database) cannot be reviewed.
+
 played), tournaments (in the live tournament window) and the review. The
 review searches longer, so its verdicts are the surest of the three.
 
@@ -408,7 +454,7 @@ Chess_Engine_Arena/
 │   ├── engine.py              #   UCI engine wrapper & analyzer (MultiPV)
 │   ├── engine_finder.py       #   finding engine files again by name
 │   ├── opening_book.py        #   openings by position + disk cache
-│   ├── pgn.py                 #   reading PGN: tags, movetext, SAN → UCI
+│   ├── pgn.py                 #   reading PGN: tags, FEN starts, SAN → UCI
 │   ├── review.py              #   move classification, accuracy, GameAnalyst
 │   └── utils.py               #   shared utilities (paths, PGN building…)
 │
@@ -440,6 +486,7 @@ Chess_Engine_Arena/
 └── readme.md
 ```
 
+│   ├── start_position.py      #   where a game starts: a FEN and moves
 ## Building a Standalone .exe
 
 NiceGUI ships its own PyInstaller wrapper that knows all the hidden
@@ -455,6 +502,7 @@ nicegui-pack --onefile --windowed --name "ChessEngineArena" ^
 ```
 
 (Or run plain `pyinstaller` with `ChessEngineArena.spec` as a starting
+│   ├── position_setup.py      #   Set Up Position: board editor, FEN, PGN
 point — but `nicegui-pack` is the supported path for NiceGUI apps.)
 
 ## Resources

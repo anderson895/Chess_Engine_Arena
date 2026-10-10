@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════
 #  webui/dialogs.py — Modal dialogs (promotion, stop, openings,
-#  game over)
+#  game over and whether to record it)
 # ═══════════════════════════════════════════════════════════
 
 import random
@@ -11,7 +11,7 @@ from core.review import TABLE_ORDER
 from core.utils import normalize_engine_name, get_tier
 from webui import widgets
 from webui.quality import icon_svg
-from webui.theme import COLOR_BLUE, piece_src
+from webui.theme import COLOR_BLUE, COLOR_GREEN, COLOR_MUTED, piece_src
 
 
 # ═══════════════════════════════════════════════════════════
@@ -270,10 +270,53 @@ def _class_counts_row(summary):
                     .classes("text-xs mono")
 
 
+def _record_choice(on_record, after_record=None):
+    """
+    "Record this game?" for a game started from a set opening or position:
+    two buttons, then the answer in their place. *after_record* runs once
+    the game is in the database (the winner's rating has moved).
+    """
+    box = ui.column().classes("w-full items-center gap-1")
+
+    async def choose(keep):
+        outcome = await on_record(keep)
+        if outcome is None:
+            return                      # it could not be saved: still open
+        box.clear()
+        with box:
+            if outcome:
+                ui.label("Recorded — it is in History and the ratings") \
+                    .classes("text-sm").style(f"color: {COLOR_GREEN}")
+            else:
+                ui.label("Not recorded").classes("text-sm") \
+                    .style(f"color: {COLOR_MUTED}")
+        if outcome and after_record:
+            after_record()
+
+    with box:
+        ui.separator()
+        ui.label("RECORD THIS GAME?").classes("arena-heading mt-1")
+        ui.label("It started from a chosen opening or position. Recorded "
+                 "games appear in History and count toward the ratings.") \
+            .classes("text-xs text-gray-500 text-center")
+        with ui.row().classes("w-full justify-center gap-2 no-wrap"):
+            ui.button("Record result", on_click=lambda: choose(True)) \
+                .props("no-caps unelevated")
+            ui.button("Don't record", on_click=lambda: choose(False)) \
+                .props("no-caps color=secondary")
+
+
 def show_game_over(session, result, reason, winner_name,
                    on_new_game=None, on_rankings=None, on_export=None,
-                   on_review=None):
-    """Non-blocking game-over dialog with summary and quick actions."""
+                   on_review=None, on_record=None):
+    """
+    Non-blocking game-over dialog with summary and quick actions.
+
+    For a game started from a set opening or position, which waits for the
+    person to say whether to record it (session.pending_record), it asks
+    — through *on_record(keep)*, an async callable returning True once
+    recorded, False when left out, or None when it could not be saved.
+    """
     is_draw = result == "1/2-1/2"
     if not winner_name or is_draw:
         badge, title = "/assets/ui/badge_swords.png", "DRAW"
@@ -287,18 +330,25 @@ def show_game_over(session, result, reason, winner_name,
             .style("height: 72px; width: auto;")
         ui.label(title).classes("text-3xl font-bold arena-title")
 
+        show_elo = None
         if winner_name:
             clean = normalize_engine_name(winner_name)
             # The control this game was played at, not the live selection:
             # the game is over, so game_running no longer holds it open
             tc = getattr(session, "_game_tc_label", "") or None
-            ratings, _, _ = session.elo_data(tc)
-            elo = ratings.get(clean)
             ui.label(clean).classes("text-xl font-bold")
-            if elo:
-                tier_lbl, tier_col = get_tier(elo)
-                ui.label(f"Elo: {elo}  ·  {tier_lbl}") \
-                    .style(f"color: {tier_col}")
+            elo_lbl = ui.label("")
+
+            def show_elo():
+                """The winner's rating — again once a held game is recorded."""
+                ratings, _, _ = session.elo_data(tc)
+                elo = ratings.get(clean)
+                elo_lbl.set_visibility(bool(elo))
+                if elo:
+                    tier_lbl, tier_col = get_tier(elo)
+                    elo_lbl.set_text(f"Elo: {elo}  ·  {tier_lbl}")
+                    elo_lbl.style(f"color: {tier_col}")
+            show_elo()
 
         ui.separator()
         ui.label(f"Result: {result}").classes("text-sm text-gray-400")
@@ -309,6 +359,9 @@ def show_game_over(session, result, reason, winner_name,
 
         # The moves graded while the game ran (Book … Good left out)
         _class_counts_row(session.game_summary())
+
+        if on_record and session.pending_record:
+            _record_choice(on_record, show_elo)
 
         ui.label("⇄ Colors swapped for the next game") \
             .classes("text-xs italic").style(f"color: {COLOR_BLUE}")

@@ -159,6 +159,13 @@ def icon(name, size=16, cls=""):
         .classes(f"pointer-events-none {cls}".strip())
 
 
+def close_dialogs():
+    """Close every open dialog on the page — back to the main screen."""
+    for element in list(ui.context.client.elements.values()):
+        if isinstance(element, ui.dialog) and element.value:
+            element.close()
+
+
 def piece(code, size=18):
     """Inline chess-piece sprite in the active design, e.g. piece('wK')."""
     from webui.theme import piece_src

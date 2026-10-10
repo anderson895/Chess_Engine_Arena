@@ -65,19 +65,24 @@ class OpeningBook:
         """True if the position occurs in some book line."""
         return epd in self._book
 
-    def tracker(self):
-        """A fresh OpeningTracker following one game against this book."""
-        return OpeningTracker(self)
-
-    def scan(self, uci_moves):
+    def tracker(self, start=None):
         """
-        Follow a game from the start position.
+        A fresh OpeningTracker following one game against this book — from
+        *start*, the Board of a game set up from some other position than
+        the standard one.
+        """
+        return OpeningTracker(self, start)
+
+    def scan(self, uci_moves, start_fen=None):
+        """
+        Follow a game from its start position — the standard one, or
+        *start_fen* for a game set up from a position.
 
         Returns one (in_book, eco, name) per ply: whether the position
         reached is theory, and the opening name as it stands after it.
         """
-        tracker = self.tracker()
-        board = Board()
+        board = Board.from_fen(start_fen) if start_fen else Board()
+        tracker = self.tracker(board if start_fen else None)
         out = []
         for uci in uci_moves:
             board = board.play_raw(uci)
@@ -85,25 +90,29 @@ class OpeningBook:
             out.append((tracker.in_book, tracker.eco, tracker.name))
         return out
 
-    def lookup(self, uci_moves):
+    def lookup(self, uci_moves, start_fen=None):
         """
         Name the opening of a game: the last named position it reached
         (transpositions included). Returns (eco, name) or (None, None).
         """
         moves = list(uci_moves)[:self.scan_limit]
         if not moves:
-            return None, None
-        _, eco, name = self.scan(moves)[-1]
+            # A game set up from a position is named by that position
+            hit = (self.named(Board.from_fen(start_fen).epd())
+                   if start_fen else None)
+            return hit or (None, None)
+        _, eco, name = self.scan(moves, start_fen)[-1]
         return eco, name
 
-    def in_book(self, uci_moves):
+    def in_book(self, uci_moves, start_fen=None):
         """True while the position after *uci_moves* is opening theory."""
         moves = list(uci_moves)
         if not moves:
-            return True
+            return (not start_fen
+                    or self.is_book_position(Board.from_fen(start_fen).epd()))
         if len(moves) > self.scan_limit:
             return False
-        return self.scan(moves)[-1][0]
+        return self.scan(moves, start_fen)[-1][0]
 
     # ── Loading ───────────────────────────────────────────
 
@@ -206,15 +215,26 @@ class OpeningTracker:
     passed through.
     """
 
-    def __init__(self, book):
+    def __init__(self, book, start=None):
         self.book = book
-        self.reset()
+        self.reset(start)
 
-    def reset(self):
+    def reset(self, start=None):
+        """
+        Back to the start of a game: the standard position, which is
+        theory, or *start* — the Board of a game set up from a position,
+        named and judged like any position reached in play.
+        """
         self.eco = None
         self.name = None
-        self.in_book = True       # the start position is theory
+        self.in_book = True       # the standard start position is theory
         self.plies = 0
+        if start is not None and self.book is not None:
+            epd = start.epd()
+            self.in_book = self.book.is_book_position(epd)
+            hit = self.book.named(epd)
+            if hit:
+                self.eco, self.name = hit
 
     def update(self, board):
         """Note the position after a move. Returns True if the name changed."""

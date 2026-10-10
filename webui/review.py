@@ -13,7 +13,8 @@
 #
 #  As on chess.com, any move can be tried on the board: it starts a side
 #  line from the position shown, graded like the game's own moves, and
-#  "Best" plays out the engine's line from there.
+#  "Best" plays out the engine's line from there. "Continue from here"
+#  makes the position shown the start of the next game on the main board.
 # ═══════════════════════════════════════════════════════════
 
 import os
@@ -24,15 +25,17 @@ from nicegui import background_tasks, run, ui
 
 from core.constants import QUALITY_COLORS
 from core.move_input import MoveInput
-from core.pgn import read_game
+from core.pgn import read_game, start_fen_of, start_problem
 from core.opening_book import opening_label
-from core.review import GameAnalyst, PHASES, TABLE_ORDER, move_number
+from core.review import GameAnalyst, PHASES, TABLE_ORDER
+from core.start_position import StartPosition
+from core.utils import normalize_engine_name
 from data.reviews import ReviewCache
 from webui.board import BoardView, EvalBar
 from webui.quality import (MOVE_CLICK_JS, NO_BEST_HINT, QUALITY_TIPS,
                            coach_html, icon_svg, line_html, move_list_html)
 from webui.theme import piece_src
-from webui.widgets import PlayerBar
+from webui.widgets import PlayerBar, close_dialogs
 
 # Search per position: label, milliseconds
 SPEEDS = {
@@ -64,7 +67,10 @@ def engine_rating(session, name, tc=None):
 
 @dataclass
 class ReviewSource:
-    """A game to review: its moves and what the player bars show."""
+    """
+    A game to review: its moves and what the player bars show. The moves
+    are played from *start_fen* — None for the standard start.
+    """
     moves: list
     white: str
     black: str
@@ -73,6 +79,8 @@ class ReviewSource:
     black_rating: str = ""
     title: str = ""
     pgn: str = ""
+    start_fen: str | None = None
+    problem: str = ""                 # why the game cannot be shown, if so
 
     @classmethod
     def from_pgn(cls, pgn, title="", ratings=None):
@@ -81,28 +89,36 @@ class ReviewSource:
         white_r, black_r = ratings or (tags.get("WhiteElo"), tags.get("BlackElo"))
         return cls(moves, tags.get("White") or "White", tags.get("Black") or "Black",
                    tags.get("Result") or "*", _rating_text(white_r),
-                   _rating_text(black_r), title, pgn)
+                   _rating_text(black_r), title, pgn, start_fen_of(tags),
+                   start_problem(tags) or "")
 
     @classmethod
     def from_session(cls, session):
         """The game on the main board, or the one that just ended; None if neither."""
         moves = session.board.uci_moves_list()
+        # A board that only shows where the next game will start has
+        # nothing of its own to review: the game before it is the one
+        preview = session.board_is_preview
         last = session.last_game
-        if last and (not moves or last["moves"] == moves):
+        if last and (preview or not moves or (
+                last["moves"] == moves
+                and last.get("start_fen") == session.game_start.fen)):
             # Finished: take the names from before the colours were swapped
             white, black = last["white"], last["black"]
             return cls(last["moves"], white, black, last["result"],
                        engine_rating(session, white, last["tc"]),
                        engine_rating(session, black, last["tc"]),
-                       "Last game", last.get("pgn") or "")
-        if not moves:
+                       "Last game", last.get("pgn") or "",
+                       last.get("start_fen"))
+        if not moves or preview:
             return None
         white, black = session.player_names()
         tc = session.rating_tc()
         return cls(moves, white, black, session.game_result or "*",
                    engine_rating(session, white, tc),
                    engine_rating(session, black, tc),
-                   "Current game", session.export_pgn_text() or "")
+                   "Current game", session.export_pgn_text() or "",
+                   session.game_start.fen)
 
 
 class Variation:
@@ -171,7 +187,8 @@ class ReviewScreen:
     # ── State ─────────────────────────────────────────────
 
     def _new_analyst(self):
-        self.analyst = GameAnalyst(self.session.opening_book)
+        self.analyst = GameAnalyst(self.session.opening_book,
+                                   start_fen=self.src.start_fen)
         for uci in self.src.moves:
             try:
                 self.analyst.record(uci)
@@ -303,6 +320,11 @@ class ReviewScreen:
                 self.start_btn = ui.button("Start Review", color=None,
                                            on_click=lambda: self.set_mode("review")) \
                     .props("no-caps unelevated").classes("cta w-full")
+                self.continue_btn = ui.button(
+                    "Continue from here", icon="play_arrow", color=None,
+                    on_click=self._continue_from_here) \
+                    .props("no-caps unelevated").classes("continue-btn w-full") \
+                    .tooltip("Start the next game from the position on the board")
                 with ui.row().classes("nav-row w-full no-wrap gap-2") \
                         as self.nav_row:
                     for icon, step, tip in (("first_page", "start", "Start"),
@@ -429,7 +451,8 @@ class ReviewScreen:
 
     def _render_move_list(self):
         self.move_list.set_content(move_list_html(
-            self.analyst.sans, self.analyst.reviews, self.ply))
+            self.analyst.sans, self.analyst.reviews, self.ply,
+            ply0=self.analyst.ply0))
 
     def _bubble_for_move(self):
         analyst, ply = self._line()
@@ -442,7 +465,7 @@ class ReviewScreen:
             waiting = (" — load an analyzer on the main screen to grade it"
                        if self._no_engine else " — analysing…")
         return coach_html(
-            rv, f"{move_number(ply)} {analyst.sans[ply - 1]}",
+            rv, f"{analyst.number(ply)} {analyst.sans[ply - 1]}",
             analyst.eval_after(ply),
             analyst.best_line_san(ply) if rv else (), waiting)
 
@@ -454,11 +477,11 @@ class ReviewScreen:
         var, game = self.var, self.analyst
         # The line takes the place of the game's move after its base
         self.var_head.set_text(
-            f"Instead of {move_number(var.base + 1)} {game.sans[var.base]}"
+            f"Instead of {game.number(var.base + 1)} {game.sans[var.base]}"
             if var.base < self.n else "Played on from the final position")
         self.var_list.set_content(line_html(
             var.analyst.sans[var.base:], var.analyst.reviews[var.base:],
-            var.base + 1, var.shown))
+            game.ply0 + var.base + 1, var.shown))
 
     # ── Navigation ────────────────────────────────────────
 
@@ -469,6 +492,7 @@ class ReviewScreen:
         self.start_btn.set_visibility(summary)
         self.walk_box.set_visibility(not summary)
         self.nav_row.set_visibility(not summary)
+        self.continue_btn.set_visibility(not summary)
         self.actions.set_visibility(not summary)
         if not summary:
             self._render_move_list()
@@ -615,12 +639,43 @@ class ReviewScreen:
         if self.var is not None:
             self.goto(self.ply)
 
-    def _analyse_tried(self, moves_str):
+    # ── Continue from here ────────────────────────────────
+
+    def _continue_from_here(self):
+        """
+        Make the position on the board — the game's, or a side line's —
+        the start of the next game on the main board, as Lichess's
+        "Continue from here" does. Only the position goes: the moves that
+        led to it were not played by the next game's players.
+        """
+        analyst, ply = self._line()
+        players = (f"{normalize_engine_name(self.src.white)} – "
+                   f"{normalize_engine_name(self.src.black)}")
+        where = (f"After {analyst.number(ply)} {analyst.sans[ply - 1]}"
+                 if ply else "Start")
+        start = StartPosition(fen=analyst.boards[ply].to_fen(),
+                              label=f"{where} · {players}")
+        if start.is_standard:
+            start = StartPosition()
+        problem = self.session.set_preset(start)
+        if problem:
+            ui.notify(f"No game can start from this position: {problem}",
+                      type="warning")
+            return
+        ui.notify("Starting position set for the next game"
+                  if self.session.game_running else
+                  "Starting position set — press Start Game",
+                  type="positive")
+        # Back to the main screen, where the game will be played — past
+        # whatever the review was opened from (History, Masters …)
+        close_dialogs()
+
+    def _analyse_tried(self, moves_str, start_fen=None):
         """Analysis of a position off the game's path (worker thread)."""
         engine = self._tried_engine
         if engine is None or not engine.alive:
             return None
-        return engine.analyse(moves_str, SPEEDS[self.speed][1], 2)
+        return engine.analyse(moves_str, SPEEDS[self.speed][1], 2, start_fen)
 
     async def _grade_tried(self, analyst, ply):
         """Grade the tried move that reached *ply*, then redraw if still shown."""
@@ -766,11 +821,13 @@ class ReviewScreen:
             self.progress.set_value(0)
             return
         self._engine = engine
+        start = self.analyst.start_fen
         try:
             movetime = SPEEDS[self.speed][1]
             engine_id = engine.id_name or os.path.basename(engine.path)
             cache = ReviewCache()
-            cached = await run.io_bound(cache.get, self.moves, engine_id, movetime)
+            cached = await run.io_bound(cache.get, self.moves, engine_id,
+                                        movetime, start)
             if stale():
                 return
             if cached and len(cached) == self.n + 1:
@@ -784,7 +841,7 @@ class ReviewScreen:
                     book = i > 0 and self.analyst.in_book[i]
                     ms = max(50, int(movetime * (BOOK_SHARE if book else 1)))
                     analysis = await run.io_bound(
-                        engine.analyse, " ".join(self.moves[:i]), ms, 2)
+                        engine.analyse, " ".join(self.moves[:i]), ms, 2, start)
                     if stale():
                         return
                     if analysis is None:
@@ -802,7 +859,8 @@ class ReviewScreen:
                         self._refresh_position()
                 if self.analyst.summary().complete:
                     await run.io_bound(cache.put, self.moves, engine_id,
-                                       movetime, list(self.analyst.analyses))
+                                       movetime, list(self.analyst.analyses),
+                                       start)
             if stale():
                 return
             self.summary = self.analyst.summary()
@@ -856,6 +914,8 @@ def show_game_review(session, source, nav=None):
     each opener is a callable that shows the neighbouring game.
     """
     if not source.moves:
-        ui.notify("This game has no moves to review.", type="info")
+        ui.notify(f"This game can't be reviewed: {source.problem}"
+                  if source.problem else "This game has no moves to review.",
+                  type="info")
         return None
     return ReviewScreen(session, source, nav)

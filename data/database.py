@@ -185,7 +185,7 @@ class Database:
 
         Returns {'checked', 'changed', 'renames': {(old, new): count}}.
         """
-        from core.pgn import read_game, set_tag
+        from core.pgn import read_game, set_tag, start_fen_of
 
         report = {'checked': 0, 'changed': 0, 'renames': {}}
         conn = sqlite3.connect(self.db_path)
@@ -197,8 +197,8 @@ class Database:
                 ).fetchall()
                 updates = []
                 for i, (gid, old, pgn) in enumerate(rows):
-                    _, moves = read_game(pgn, limit=book.scan_limit)
-                    _, name = book.lookup(moves)
+                    tags, moves = read_game(pgn, limit=book.scan_limit)
+                    _, name = book.lookup(moves, start_fen_of(tags))
                     report['checked'] += 1
                     if name and name != old:
                         updates.append((name, set_tag(pgn, "Opening", name), gid))
@@ -239,15 +239,12 @@ class Database:
 
     # ── Write ─────────────────────────────────────────────
 
-    def save_game(self, white_name, black_name, result, reason,
-                  pgn, move_count, duration_sec, source='regular',
-                  time_control='', opening=''):
-        """Save a game to the games table. Returns the new row id, or None on
-        error.
-
-        Two kinds of game are rejected outright, because recording them
-        would pollute the rankings with results that say nothing about
-        playing strength:
+    @staticmethod
+    def refusal_reason(white_name, black_name, reason):
+        """
+        Why a game cannot be recorded, or None if it can. Two kinds of game
+        are rejected outright, because recording them would pollute the
+        rankings with results that say nothing about playing strength:
 
         - Self-play (same engine on both sides) — unrated, and storing it
           desyncs the history count from the ranking count.
@@ -255,12 +252,20 @@ class Database:
           (crash or hang) or playing an illegal move. Neither is a game.
         """
         if normalize_engine_name(white_name) == normalize_engine_name(black_name):
-            print(f"[Database] refusing to save self-play game: "
-                  f"{normalize_engine_name(white_name)}")
-            return None
+            return f"self-play game: {normalize_engine_name(white_name)}"
         r = reason or ''
         if 'returned no move' in r or 'Illegal move by' in r:
-            print(f"[Database] refusing to save malfunction game: {reason}")
+            return f"malfunction game: {reason}"
+        return None
+
+    def save_game(self, white_name, black_name, result, reason,
+                  pgn, move_count, duration_sec, source='regular',
+                  time_control='', opening=''):
+        """Save a game to the games table. Returns the new row id, or None on
+        error — or for a game refusal_reason() turns away."""
+        refused = self.refusal_reason(white_name, black_name, reason)
+        if refused:
+            print(f"[Database] refusing to save {refused}")
             return None
         try:
             conn   = sqlite3.connect(self.db_path)

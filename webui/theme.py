@@ -651,6 +651,41 @@ img.btn-ic {{
 .review-walk {{ padding: 0 14px; }}
 .review-foot {{ padding: 10px 14px 14px; background: var(--panel); }}
 .nav-row .q-btn:not(.cta) {{ background: var(--raised); color: var(--text); }}
+.review-foot .continue-btn {{ background: var(--raised); color: var(--text); }}
+
+/* ── Set Up Position dialog ───────────────────────────── */
+/* The board takes its size from this box: inside a card that sizes to
+   its content, a width:100% grid would otherwise have nothing to fill */
+.setup-board {{ width: min(448px, calc(92vh - 250px)); }}
+.setup-board .board-grid {{ max-width: 100%; }}
+.setup-palette {{ min-height: 52px; }}
+.setup-palette.off {{ opacity: 0.35; pointer-events: none; }}
+.setup-tool.q-btn {{
+    width: 52px;
+    height: 52px;
+    min-width: 0;
+    padding: 2px;
+    border-radius: 6px;
+}}
+.setup-tool.sel {{
+    background: var(--raised-hover);
+    box-shadow: inset 0 0 0 2px var(--green);
+}}
+.cta.setup-use {{
+    font-size: 1rem !important;
+    padding: 6px 24px !important;
+}}
+.setup-moves {{ background: var(--log); border-radius: 6px; }}
+
+/* A finished game from a set position, waiting to be recorded or not */
+.record-bar {{
+    width: calc(100% - 28px);
+    margin: 4px 14px;
+    padding: 6px 10px;
+    background: var(--log);
+    border-left: 3px solid var(--green);
+    border-radius: 6px;
+}}
 """
 
 

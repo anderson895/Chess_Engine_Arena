@@ -9,6 +9,18 @@ import sys
 import threading
 import time
 
+from core.utils import custom_start
+
+
+def position_command(moves_str, start_fen=None):
+    """
+    The UCI "position" command for *moves_str* (space-separated UCI moves)
+    played from *start_fen* — the standard start when None.
+    """
+    start_fen = custom_start(start_fen)
+    base = f"position fen {start_fen}" if start_fen else "position startpos"
+    return f"{base} moves {moves_str}" if moves_str else base
+
 
 class UCIEngine:
     """
@@ -190,7 +202,7 @@ class UCIEngine:
     # ── Move / eval requests ──────────────────────────────
 
     def get_best_move(self, moves_str, movetime_ms=1000, on_info=None,
-                      clock=None):
+                      clock=None, start_fen=None):
         """
         Ask the engine for its best move.
 
@@ -206,6 +218,9 @@ class UCIEngine:
             Real-clock mode: ``{"wtime", "btime", "winc", "binc"}`` in ms.
             When given, the engine manages its own time (``go wtime …``)
             and *movetime_ms* is ignored.
+        start_fen : str | None
+            The position the moves are played from, when the game did not
+            start from the standard one.
 
         Returns
         -------
@@ -216,9 +231,7 @@ class UCIEngine:
         self._drain()
         self.last_info = {}
 
-        cmd = (f"position startpos moves {moves_str}"
-               if moves_str else "position startpos")
-        self._send(cmd)
+        self._send(position_command(moves_str, start_fen))
         if clock:
             self._send(f"go wtime {clock['wtime']} btime {clock['btime']} "
                        f"winc {clock['winc']} binc {clock['binc']}")
@@ -265,9 +278,7 @@ class UCIEngine:
             return None, 'cp'
         self._drain()
 
-        cmd = (f"position startpos moves {moves_str}"
-               if moves_str else "position startpos")
-        self._send(cmd)
+        self._send(position_command(moves_str))
         self._send(f"go movetime {movetime_ms}")
 
         end = time.time() + movetime_ms / 1000 + 5
@@ -425,7 +436,7 @@ class AnalyzerEngine(UCIEngine):
             ok &= self.set_option("Hash", int(hash_mb))
         return ok
 
-    def analyse(self, moves_str, movetime_ms=500, multipv=2):
+    def analyse(self, moves_str, movetime_ms=500, multipv=2, start_fen=None):
         """
         Search a position and return its best lines, not just a score.
 
@@ -442,6 +453,8 @@ class AnalyzerEngine(UCIEngine):
             Search time in milliseconds.
         multipv : int
             How many lines to return, best first.
+        start_fen : str | None
+            The game's start position, when it was not the standard one.
 
         Returns
         -------
@@ -457,9 +470,9 @@ class AnalyzerEngine(UCIEngine):
         if not self.ready or not self.alive:
             return None
         with self._talk:
-            return self._analyse(moves_str, movetime_ms, multipv)
+            return self._analyse(moves_str, movetime_ms, multipv, start_fen)
 
-    def _analyse(self, moves_str, movetime_ms, multipv):
+    def _analyse(self, moves_str, movetime_ms, multipv, start_fen=None):
         if not self.set_option("MultiPV", int(multipv)):
             return None
         # Sync first: anything still in flight from an earlier search that
@@ -469,9 +482,7 @@ class AnalyzerEngine(UCIEngine):
         if not self._wait("readyok", 10):
             return None
 
-        cmd = (f"position startpos moves {moves_str}"
-               if moves_str else "position startpos")
-        self._send(cmd)
+        self._send(position_command(moves_str, start_fen))
         self._send(f"go movetime {movetime_ms}")
 
         lines = {}

@@ -22,6 +22,7 @@ from core.elo import (
     compute_elo_by_tc, tally_by_tc, tc_bucket, MIN_RATED_GAMES,
 )
 from core.review import GameAnalyst
+from core.start_position import StartPosition
 from core.utils import (
     normalize_engine_name, get_tier, build_pgn,
 )
@@ -101,6 +102,14 @@ class GameSession:
                                              graded move, or None to clear
       opening(text)                        — opening display line
       game_over(result, reason, winner)    — game finished
+      preset()                             — the start set for the next
+                                             game (session.preset) changed
+      record(state)                        — a game from a set position is
+                                             'pending' the choice of whether
+                                             to record it; 'recorded' or
+                                             'discarded' as chosen, or
+                                             'dropped' when the next game
+                                             began without a choice
       clock()                              — clock values changed (clock mode)
       banners()                            — names/ranks may have changed
       error(msg)                           — user-facing error
@@ -147,9 +156,10 @@ class GameSession:
         self.inc_s        = TIME_CONTROLS["classic"][2]
         self.sound_muted  = False
 
-        # Preset opening
-        self.preset_moves: list[str] = []
-        self.preset_name: str | None = None
+        # Where games start: the preset is what the Play tab has set for the
+        # next game, game_start where the game on the board began
+        self.preset = StartPosition()
+        self.game_start = StartPosition()
 
         # Game state
         self.game_running   = False
@@ -173,12 +183,17 @@ class GameSession:
         self.btime_ms = (self.base_min or 0) * 60000
         self._think_start = None   # time.time() when current search began
 
-        # Takebacks: the clocks after every ply (index = plies played), the
-        # preset opening moves (never taken back) and the opening name the
-        # game started under
+        # Takebacks: the clocks after every ply (index = plies played) and
+        # how many moves came with the start (never taken back)
         self._clock_log: list[tuple[float, float]] = []
         self._preset_plies = 0
-        self._start_opening_name = None
+
+        # A finished game from a set opening or position waits here until
+        # the person says whether to record it (record_pending or
+        # discard_pending). Whether this game's result waits like that is
+        # fixed when it starts.
+        self.pending_record = None
+        self._ask_to_record = False
 
         # Analysis state. The analyst follows the game being played: it
         # names the opening as positions arrive and grades each move.
@@ -227,8 +242,13 @@ class GameSession:
 
     @property
     def preset_plies(self):
-        """How many of the game's first moves came from the chosen opening."""
+        """How many of the game's first moves came with its starting position."""
         return self._preset_plies
+
+    @property
+    def board_is_preview(self):
+        """True while the board only shows where the next game will start."""
+        return not self.game_running and self.game_result == ""
 
     def human_to_move(self):
         """True when a person, not an engine, plays the side to move."""
@@ -445,15 +465,16 @@ class GameSession:
 
     def _restart_analyst(self):
         """A fresh analyst for the game on the board, its moves replayed."""
-        self.analyst = GameAnalyst(self.opening_book, self._analyse_live)
+        self.analyst = GameAnalyst(self.opening_book, self._analyse_live,
+                                   self.game_start.fen)
         for uci in self.board.uci_moves_list():
             self.analyst.record(uci)
 
-    def _analyse_live(self, moves_str):
+    def _analyse_live(self, moves_str, start_fen=None):
         """Analysis of one position for live grading (worker thread)."""
         if not self.analyzer or not self.analyzer.alive:
             return None
-        return self.analyzer.analyse(moves_str, LIVE_ANALYSIS_MS, 2)
+        return self.analyzer.analyse(moves_str, LIVE_ANALYSIS_MS, 2, start_fen)
 
     async def load_analyzer(self, path):
         if self.analyzer:
@@ -553,16 +574,62 @@ class GameSession:
 
     def _show_opening(self):
         """
-        The opening line for a game just started or taken back: the named
-        position it stands in, else the opening it was started from, else
+        The opening line for a game set up, started or taken back: the
+        named position it stands in, else what it was started from, else
         the book's readiness.
         """
+        self.current_opening_name = None
         if self.analyst.opening[1]:
             self._refresh_opening_display()
-        elif self.current_opening_name:
-            self._emit("opening", self.current_opening_name)
+        elif not self.game_start.is_standard:
+            # Shown, but not kept as the game's opening: only a position
+            # the book names is saved as one
+            self._emit("opening", self.game_start.label)
         else:
             self._refresh_opening_display(reset=True)
+
+    # ═══════════════════════════════════════════════════════
+    #  Starting position
+    # ═══════════════════════════════════════════════════════
+
+    def set_preset(self, start):
+        """
+        Start the next game from *start* (a StartPosition; None for the
+        normal start). Between games the board shows it straight away.
+        Returns why the position cannot start a game, or None once set.
+        """
+        start = start or StartPosition()
+        problem = start.problem()
+        if problem:
+            return problem
+        self.preset = start
+        self._emit("preset")
+        if not self.game_running:
+            self.game_result = ""
+            self._setup_board(start)
+            self._emit("status", f"{start.label} — press Start Game")
+        return None
+
+    def _setup_board(self, start):
+        """
+        Put *start* on the board — its position and the moves played from
+        it — with the analyst following them. The start must be playable
+        (StartPosition.problem).
+        """
+        self.board.reset(start.fen)
+        for uci in start.moves:
+            self.board.apply_uci(uci)
+        self.game_start = start
+        self.last_move = (self.board.move_history[-1][0]
+                          if self.board.move_history else None)
+        self.selected_square = None
+        self.eval_bar_cp = 0
+        self._restart_analyst()           # the start's moves included
+        self._preset_plies = len(self.board.move_history)
+        self._show_opening()
+        self._emit("eval_bar", 0)
+        self._emit("move_review", None)
+        self._emit("board_changed")
 
     # ═══════════════════════════════════════════════════════
     #  Game control
@@ -596,16 +663,20 @@ class GameSession:
             if not os.path.isfile(path):
                 self._emit("error", f"Engine {n} not found:\n{path}")
                 return
+        start = self.preset
+        problem = start.problem()
+        if problem:
+            # A book line that ends in mate, say: nobody would get a move
+            self._emit("error", f"The starting position can't be played:\n"
+                                f"{problem}")
+            return
 
         # Reset state
-        self.board.reset()
-        self.last_move = None
-        self.selected_square = None
         self.game_result = "*"
-        self.eval_bar_cp = 0
         self._engine_thinking = False
         self._elo_cache = None           # tournaments may have added games
-        self.current_opening_name = None
+        # Only a game from a set opening or position asks whether to record it
+        self._ask_to_record = not start.is_standard
 
         # Reset clocks from the selected time-control preset
         self._think_start = None
@@ -614,28 +685,8 @@ class GameSession:
         self.wtime_ms = self.btime_ms = (self.base_min or 0) * 60000
         self._emit("clock")
 
-        # Apply preset opening
-        if self.preset_moves:
-            self.current_opening_name = self.preset_name
-            for uci in self.preset_moves:
-                try:
-                    self.board.apply_uci(uci)
-                except Exception as e:
-                    print(f"[Preset] failed to apply {uci}: {e}")
-                    self.board.reset()
-                    self.current_opening_name = None
-                    break
-            if self.board.move_history:
-                self.last_move = self.board.move_history[-1][0]
-        self._restart_analyst()           # preset moves included
-        self._preset_plies = len(self.board.move_history)
-        self._start_opening_name = self.current_opening_name
+        self._setup_board(start)
         self._clock_log = [(self.wtime_ms, self.btime_ms)] * (self._preset_plies + 1)
-        self._show_opening()
-
-        self._emit("eval_bar", 0)
-        self._emit("move_review", None)
-        self._emit("board_changed")
         self.game_date = datetime.now().strftime("%Y.%m.%d")
         self._start_time = time.time()
         self._emit("status", "Loading engine(s)…")
@@ -647,6 +698,10 @@ class GameSession:
 
         self.game_running = True
         self.game_paused = False
+        # A game left waiting for "Record this game?" is let go only now:
+        # a start that failed to load its engines would have cost it for
+        # nothing
+        self.discard_pending(dropped=True)
         self._emit("banners")
         self._emit("board_changed")       # the player's pieces can move now
         self._emit("sound", "game_start")
@@ -711,7 +766,7 @@ class GameSession:
         asyncio.create_task(self.kill_engines())
 
         if self.board.move_history or result != "*":
-            await self._save_game(result, reason)
+            await self._conclude(result, reason)
 
         if result == "*":
             self._emit("status", "Game aborted — no result recorded")
@@ -735,19 +790,11 @@ class GameSession:
         self._engine_thinking = False
         self._think_start = None
         asyncio.create_task(self.kill_engines())
-        self.board.reset()
-        self.last_move = None
-        self.selected_square = None
+        self.discard_pending(dropped=True)
         self.game_result = ""
-        self.eval_bar_cp = 0
         self._clock_log = []
-        self._preset_plies = 0
-        self._start_opening_name = None
-        self._restart_analyst()
-        self._refresh_opening_display(reset=True)
-        self._emit("eval_bar", 0)
-        self._emit("move_review", None)
-        self._emit("board_changed")
+        # The board shows where the next game will start
+        self._setup_board(self.preset)
         self._emit("status", "New game — set it up and press Start Game")
 
     def swap_colors(self):
@@ -807,14 +854,30 @@ class GameSession:
                 setattr(self, attr, None)
 
     def export_pgn_text(self):
-        """Current game as PGN, or None when no moves exist."""
-        if not self.board.move_history:
+        """
+        PGN of the game on the board, or None when it has no moves. Between
+        games that is the game that just ended, as written when it ended:
+        the colours have since been swapped for the rematch, and writing it
+        again now would put the names the wrong way round.
+        """
+        last = self.last_game
+        if (not self.game_running and last
+                and (self.board_is_preview
+                     or (last["moves"] == self.board.uci_moves_list()
+                         and last.get("start_fen") == self.game_start.fen))):
+            return last["pgn"]
+        if not self.board.move_history or self.board_is_preview:
             return None
+        return self._pgn(self.game_result or "*")
+
+    def _pgn(self, result):
+        """The game on the board as PGN, under the names as they stand."""
         white, black = self.player_names()
         return build_pgn(
-            white, black, self.board.move_history, self.game_result or "*",
+            white, black, self.board.move_history, result,
             self.game_date or datetime.now().strftime("%Y.%m.%d"),
-            opening_name=self.current_opening_name)
+            opening_name=self.current_opening_name,
+            start_fen=self.game_start.fen)
 
     # ═══════════════════════════════════════════════════════
     #  Game flow — engine vs engine
@@ -875,7 +938,7 @@ class GameSession:
         try:
             uci = await run.io_bound(
                 engine.get_best_move, moves_before, self.movetime_ms,
-                None, clock)
+                None, clock, self.game_start.fen)
         except Exception as e:
             self._emit("engine_log", f"[ERR] {e}", tag)
             uci = None
@@ -1059,7 +1122,7 @@ class GameSession:
             return False
         keep = len(self.board.move_history) - plies
         moves = self.board.uci_moves_list()[:keep]
-        self.board.reset()
+        self.board.reset(self.game_start.fen)
         for uci in moves:
             self.board.apply_uci(uci)
         self.last_move = moves[-1] if moves else None
@@ -1068,7 +1131,6 @@ class GameSession:
             self.wtime_ms, self.btime_ms = self._clock_log[keep]
             del self._clock_log[keep + 1:]
         self.analyst = self.analyst.truncated(keep)
-        self.current_opening_name = self._start_opening_name
         self._show_opening()
 
         last = self.analyst.reviews[keep - 1] if keep else None
@@ -1163,7 +1225,7 @@ class GameSession:
         winner = (white if winner_color == "white"
                   else (black if winner_color == "black" else None))
 
-        await self._save_game(result, reason)
+        await self._conclude(result, reason)
         self._remember_game(result)
 
         msg = (f"{normalize_engine_name(winner)} wins by {reason}"
@@ -1174,21 +1236,72 @@ class GameSession:
         self._emit("sound", "game_end")
         self._emit("game_over", result, reason, winner)
 
-    async def _save_game(self, result, reason):
+    # ── Recording the result ──────────────────────────────
+
+    async def _conclude(self, result, reason):
+        """
+        A game has ended: record it — or, for a game started from a set
+        opening or position, hold it until the person says whether to
+        (record_pending / discard_pending). Taken before the colours are
+        swapped for the rematch, which would put the names on the wrong
+        sides.
+        """
+        record = self._game_record(result, reason)
+        if not self._ask_to_record:
+            await self._save_record(record)
+            return
+        # An aborted game, or one the database would turn away (self-play,
+        # an engine that failed), has nothing to ask about
+        if result == "*" or self.db.refusal_reason(
+                record["white_name"], record["black_name"], reason):
+            return
+        self.pending_record = record
+        self._emit("record", "pending")
+
+    def _game_record(self, result, reason):
+        """Everything Database.save_game needs about the game on the board."""
         # Every mode is recorded under its players' names — in 2-player mode
         # both are people, who get a rating like any engine
         duration = int(time.time() - self._start_time) if self._start_time else 0
         white, black = self.player_names()
-        pgn = build_pgn(
-            white, black, self.board.move_history, result,
-            self.game_date or datetime.now().strftime("%Y.%m.%d"),
-            opening_name=self.current_opening_name)
-        await run.io_bound(
-            self.db.save_game, white, black, result, reason, pgn,
-            len(self.board.move_history), duration, 'regular',
-            getattr(self, "_game_tc_label", ""),
-            self.current_opening_name or '')
+        return {
+            "white_name": white, "black_name": black,
+            "result": result, "reason": reason, "pgn": self._pgn(result),
+            "move_count": len(self.board.move_history),
+            "duration_sec": duration, "source": "regular",
+            "time_control": getattr(self, "_game_tc_label", ""),
+            "opening": self.current_opening_name or "",
+        }
+
+    async def _save_record(self, record):
+        """Save a game record. Returns its row id, or None if it was not saved."""
+        game_id = await run.io_bound(self.db.save_game, **record)
         self.invalidate_stats_caches()
+        return game_id
+
+    async def record_pending(self):
+        """Record the game waiting for a decision. True once it is saved."""
+        record, self.pending_record = self.pending_record, None
+        if record is None:
+            return False
+        if await self._save_record(record) is None:
+            self.pending_record = record          # still undecided
+            return False
+        self._emit("record", "recorded")
+        self._emit("banners")                   # ratings and head-to-head moved
+        return True
+
+    def discard_pending(self, dropped=False):
+        """
+        Leave the game waiting for a decision unrecorded — at the person's
+        word, or *dropped* because the next game is under way without one.
+        """
+        if self.pending_record is None:
+            return
+        self.pending_record = None
+        if dropped:
+            self._emit("engine_log", "The last game was not recorded", "E")
+        self._emit("record", "dropped" if dropped else "discarded")
 
     def _remember_game(self, result):
         """
@@ -1199,9 +1312,10 @@ class GameSession:
         white, black = self.player_names()
         self.last_game = {
             "moves": self.board.uci_moves_list(),
+            "start_fen": self.game_start.fen,
             "white": white, "black": black, "result": result,
             "tc": getattr(self, "_game_tc_label", ""),
-            "pgn": self.export_pgn_text(),
+            "pgn": self._pgn(result),
         }
 
     # ═══════════════════════════════════════════════════════
