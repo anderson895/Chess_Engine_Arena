@@ -600,6 +600,8 @@ def _reconcile_with_db(t, db):
         _restate(game, game.result, truth[0])
         game.result, game.reason = truth[0], truth[1]
         fixed += 1
+    if fixed or removed:
+        t._update_buchholz()              # the scores they stand on moved
     return fixed, removed
 
 
@@ -2333,13 +2335,17 @@ _OUTCOME_SLOT = """
 </q-td>
 """
 
+# Why a player scored a point without a game (TournamentPlayer.byes);
+# None for a bye from before the reason was kept
+_BYE_REASON = {
+    None: "Bye — a point without a game",
+    "bye": "Bye — the odd one out of the round",
+    "withdrawn": "Opponent withdrew — a point without a game",
+}
 
-def _show_player_card(session, t, name):
-    """Every game this engine has played in this tournament."""
-    player = t.players.get(name)
-    if player is None:
-        return
 
+def _player_card_rows(t, player):
+    """The rows of a player's card: its games and its byes, by round."""
     rows = []
     for g in t.all_games:
         white_as, black_as = g.played_as
@@ -2355,12 +2361,34 @@ def _show_player_card(session, t, name):
             "round": g.round_num,
             # A game from before a rename says who played it
             "colour": ("White" if side == "w" else "Black")
-                      + (f" as {me}" if me != name else ""),
+                      + (f" as {me}" if me != player.name else ""),
             "opponent": opponent, "outcome": outcome, "outcome_color": colour,
             "result": g.result or "—", "reason": g.reason or "",
             "db_id": getattr(g, "db_game_id", None),
         })
-    rows.sort(key=lambda r: r["round"])
+    # A bye counts as a win, so it has a row like one: the W/D/L above the
+    # table then adds up to what the table shows
+    for rnd, why in player.byes:
+        rows.append({
+            "round": rnd if rnd is not None else "—", "colour": "—",
+            "opponent": "Bye", "outcome": "Win", "outcome_color": COLOR_GOLD,
+            "result": "1", "reason": _BYE_REASON.get(why, _BYE_REASON[None]),
+            "db_id": None, "bye": True,
+        })
+    rows.sort(key=lambda r: (not isinstance(r["round"], int),
+                             r["round"] if isinstance(r["round"], int) else 0))
+    for i, row in enumerate(rows):
+        row["key"] = i
+    return rows
+
+
+def _show_player_card(session, t, name):
+    """Every game this engine has played in this tournament, and its byes."""
+    player = t.players.get(name)
+    if player is None:
+        return
+
+    rows = _player_card_rows(t, player)
 
     rank_txt, rank_col = session.rank_line(name, t.time_control)
     with ui.dialog() as dlg, ui.card().classes(
@@ -2375,9 +2403,6 @@ def _show_player_card(session, t, name):
             ui.label(f"{player.score:g} pts  ·  "
                      f"{player.wins}W / {player.draws}D / {player.losses}L") \
                 .classes("text-sm")
-        if name in t.bye_history:
-            ui.label("Received a bye this tournament") \
-                .classes("text-xs").style(f"color: {COLOR_ORANGE}")
         if player.former_names:
             ui.label(f"Played earlier in this tournament as "
                      f"{', '.join(player.former_names)} — its points carried "
@@ -2402,11 +2427,16 @@ def _show_player_card(session, t, name):
                 {"name": "reason", "label": "Reason", "field": "reason",
                  "align": "left"},
             ]
-            tbl = ui.table(columns=columns, rows=rows, row_key="round",
+            tbl = ui.table(columns=columns, rows=rows, row_key="key",
                            pagination=0).classes("w-full arena-log")
             tbl.add_slot("body-cell-outcome", _OUTCOME_SLOT)
-            tbl.on("rowDblclick",
-                   lambda e: _open_game_pgn(session, e.args[1], rows))
+
+            async def _open(e):
+                if e.args[1].get("bye"):
+                    ui.notify("A bye has no game to review.", type="info")
+                else:
+                    await _open_game_pgn(session, e.args[1], rows)
+            tbl.on("rowDblclick", _open)
             widgets.hint("Double-click a game to review it")
 
         with ui.row().classes("w-full justify-end dlg-foot"):

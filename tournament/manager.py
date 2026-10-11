@@ -434,6 +434,12 @@ class TournamentPlayer:
         # newer version that took its place keeps its points
         # (Tournament.rename_player)
         self.former_names  = []
+        # The points it scored without a game, as (round, why): 'bye' for
+        # the odd one out of a round, 'withdrawn' when its opponent left the
+        # event before their game, None where that was never kept (see
+        # Tournament._place_byes). Each counts as a win, and stands among
+        # the opponents as 'BYE'.
+        self.byes          = []
 
     def record(self, result, opponent_name, color):
         self.score += result
@@ -443,9 +449,20 @@ class TournamentPlayer:
         self.color_history.append(color)
         self.opponents.append(opponent_name)
 
+    def record_bye(self, round_num, why="bye"):
+        """A point without a game in *round_num* (see byes)."""
+        self.record(1.0, 'BYE', '-')
+        self.byes.append((round_num, why))
+
     @property
     def games_played(self):
         return self.wins + self.draws + self.losses
+
+    @property
+    def colors_played(self):
+        """The colours of the games it has played. A bye has none."""
+        return [c for c, opp in zip(self.color_history, self.opponents)
+                if opp != 'BYE']
 
     def __repr__(self):
         return f"<TPlayer {self.name} {self.score}>"
@@ -686,13 +703,16 @@ class SwissPairing:
 
     @staticmethod
     def _assign_colors(p1, p2):
-        b1 = p1.color_history.count('b') - p1.color_history.count('w')
-        b2 = p2.color_history.count('b') - p2.color_history.count('w')
+        # Only games played count: a bye has no colour, and taking it for
+        # White would hand its player Black again next round
+        h1, h2 = p1.colors_played, p2.colors_played
+        b1 = h1.count('b') - h1.count('w')
+        b2 = h2.count('b') - h2.count('w')
         if b1 > b2:   return p1, p2
         elif b2 > b1: return p2, p1
         else:
-            if p1.color_history and p1.color_history[-1] == 'b': return p1, p2
-            if p2.color_history and p2.color_history[-1] == 'b': return p2, p1
+            if h1 and h1[-1] == 'b': return p1, p2
+            if h2 and h2[-1] == 'b': return p2, p1
             return (p1, p2) if random.random() < 0.5 else (p2, p1)
 
 
@@ -978,10 +998,13 @@ class Tournament:
                 self._ko_pending_winners += [p for p in prev_winners
                                              if p.name not in paired]
 
-    def _pair_swiss(self, players):
+    def _pair_swiss(self, players, freed=()):
         """
         Pair *players* into games of the current round. An odd one out
-        takes the bye, a full point, recorded as it is handed out.
+        takes the bye, a full point, recorded as it is handed out — or, if
+        it is among *freed*, the players whose opponents just withdrew, the
+        point it would have had from an opponent who never turned up
+        (TournamentPlayer.byes).
         """
         pairs, bye = SwissPairing.pair(players, self.current_round,
                                        self.played_pairs)
@@ -990,8 +1013,10 @@ class Tournament:
             self.round_games.append(g)
             self.all_games.append(g)
         if bye:
-            bye.record(1.0, 'BYE', 'w')
+            bye.record_bye(self.current_round,
+                           "withdrawn" if bye.name in freed else "bye")
             self.bye_history.add(bye.name)
+            self._update_buchholz()
 
     def active_players(self):
         """The players still being paired — everyone not sitting out."""
@@ -1031,6 +1056,9 @@ class Tournament:
         if ws is not None:
             game.white.record(ws, game.black.name, 'w')
             game.black.record(bs, game.white.name, 'b')
+            # The tiebreaks follow every result, as the scores do: the
+            # standings sort on them while a round is still being played
+            self._update_buchholz()
 
         if self.format == self.FORMAT_KNOCKOUT and ws is not None:
             if ws > bs:
@@ -1314,12 +1342,14 @@ class Tournament:
         without that game. A round left with players waiting — cut short,
         or emptied this way — is then paired out among them.
         """
+        freed = []
         for g in [g for g in self.round_games if g.status != "done"
                   and (g.white.withdrawn or g.black.withdrawn)]:
             self.round_games.remove(g)
             self.all_games.remove(g)
             staying = [p for p in (g.white, g.black) if not p.withdrawn]
             if self.format == self.FORMAT_SWISS:
+                freed += [p.name for p in staying]
                 self._unpaired += [p.name for p in staying]
             elif self.format == self.FORMAT_KNOCKOUT:
                 self._ko_pending_winners += staying
@@ -1336,7 +1366,7 @@ class Tournament:
             waiting = [p for p in self.active_players()
                        if p.name in self._unpaired]
             self._unpaired = []
-            self._pair_swiss(waiting)
+            self._pair_swiss(waiting, freed)
 
     def playing_now(self, player):
         """True while *player* is in the game being played."""
@@ -1551,19 +1581,25 @@ class Tournament:
             f"Tournament complete! Winner: {self.winner.name if self.winner else '?'}")
 
     def _update_buchholz(self):
+        """
+        Buchholz (the opponents' scores added up) and Sonneborn-Berger (the
+        scores of the opponents beaten, and half of those drawn with), from
+        the scores as they stand. A bye has no opponent, so adds nothing.
+        """
         if self.format != self.FORMAT_SWISS:
             return
         score_map = {p.name: p.score for p in self.player_list}
+        sonneborn = {id(p): 0.0 for p in self.player_list}
+        for g in self.all_games:
+            if g.status != 'done' or g.white_score is None:
+                continue
+            for me, opponent, points in ((g.white, g.black, g.white_score),
+                                         (g.black, g.white, g.black_score)):
+                if id(me) in sonneborn:
+                    sonneborn[id(me)] += points * score_map.get(opponent.name, 0)
         for p in self.player_list:
             p.buchholz  = sum(score_map.get(opp, 0) for opp in p.opponents if opp != 'BYE')
-            p.sonneborn = 0.0
-            for g in self.all_games:
-                if g.status != 'done':
-                    continue
-                if g.white is p and g.white_score is not None:
-                    p.sonneborn += g.white_score * score_map.get(g.black.name, 0)
-                elif g.black is p and g.black_score is not None:
-                    p.sonneborn += g.black_score * score_map.get(g.white.name, 0)
+            p.sonneborn = sonneborn[id(p)]
 
     def team_of(self, player_name):
         """The team a player belongs to, or None outside a team event."""
@@ -1676,7 +1712,8 @@ class Tournament:
                 "withdrawn": p.withdrawn,
                 "former_names": list(p.former_names),
                 "color_history": list(p.color_history),
-                "opponents": list(p.opponents)}
+                "opponents": list(p.opponents),
+                "byes": [list(b) for b in p.byes]}
 
     @staticmethod
     def _game_dict(g):
@@ -1779,6 +1816,7 @@ class Tournament:
             p.former_names = list(d.get("former_names", []))
             p.color_history = list(d.get("color_history", []))
             p.opponents = list(d.get("opponents", []))
+            p.byes = [tuple(b) for b in d.get("byes", [])]
             players.append(p)
 
         t = cls(data.get("name", "Tournament"),
@@ -1879,7 +1917,46 @@ class Tournament:
         t._team_bracket = {int(r): [tuple(p) for p in pairs] for r, pairs
                            in (data.get("team_bracket") or {}).items()}
         t._team_bye = by_team.get(data.get("team_bye") or "")
+        t._place_byes()
+        # A snapshot written mid-round carries the tiebreaks as they stood
+        # at the end of the round before (older versions kept them no fresher)
+        t._update_buchholz()
         return t
+
+    def _place_byes(self):
+        """
+        The rounds of the byes in a snapshot from before they were kept
+        (TournamentPlayer.byes), read off the games. A player's results
+        are in the order they came, so a bye lies between the games either
+        side of it, in a round the player had no game in; where that still
+        leaves a choice — rounds sat out, or a late entry — it is the
+        latest one. Why it was given was never kept.
+        """
+        for p in self.player_list:
+            byes_owed = p.opponents.count('BYE') - len(p.byes)
+            if byes_owed <= 0:
+                continue
+            played = sorted(g.round_num for g in self.all_games
+                            if g.status == 'done' and g.white_score is not None
+                            and p in (g.white, g.black))
+            seated = {g.round_num for g in self.all_games
+                      if p in (g.white, g.black)}
+            after_games, between = 0, {}
+            for opp in p.opponents:
+                if opp == 'BYE':
+                    between[after_games] = between.get(after_games, 0) + 1
+                else:
+                    after_games += 1
+            placed = []
+            for n_before, count in sorted(between.items()):
+                low = played[n_before - 1] if 0 < n_before <= len(played) else 0
+                high = (played[n_before] if n_before < len(played)
+                        else self.current_round + 1)
+                free = [r for r in range(low + 1, high) if r not in seated]
+                rounds = free[-count:] if free else []
+                placed += [(r, None) for r in rounds]
+                placed += [(None, None)] * (count - len(rounds))
+            p.byes = placed
 
     @classmethod
     def from_db_rows(cls, rows, engine_path=None, **settings):
@@ -1940,7 +2017,7 @@ class Tournament:
                 absent = [p for n, p in players.items()
                           if entered[n] <= rnd and n not in seated]
                 if len(absent) == 1:
-                    absent[0].record(1.0, 'BYE', 'w')
+                    absent[0].record_bye(rnd, None)    # why was not saved
                     t.bye_history.add(absent[0].name)
                 elif absent and rnd == last:
                     t._unpaired = [p.name for p in absent]

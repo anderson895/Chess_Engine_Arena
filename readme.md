@@ -205,6 +205,15 @@ repeats a pairing while some other way of pairing the round avoids it.
 Only an event with more rounds than the field can fill has rematches, and
 then as few as each round allows.
 
+In an odd field the lowest-placed player who has not had one takes the
+bye: a point without a game. A player whose opponent is withdrawn after
+the round is paired, and who is left with nobody to play, scores the
+point the same way. A bye counts as a win in W/D/L and has its own row,
+with the reason, among the player's games (double-click the player in the
+standings). It has no colour: White and Black are balanced over the games
+actually played. Buchholz and Sonneborn-Berger are worked out again after
+every result, so the standings are in order while a round is played.
+
 ### Playing a board yourself
 
 In a team event, **+ Manual** adds a seat whose moves you make on the
